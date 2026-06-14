@@ -1,6 +1,6 @@
 # ---- Library ----
 
-add_library(kalshi_lib STATIC auth.cpp http_transport.cpp rest_client.cpp)
+add_library(kalshi_lib STATIC auth.cpp http_transport.cpp rest_client.cpp orderbook.cpp)
 
 target_include_directories(
     kalshi_lib
