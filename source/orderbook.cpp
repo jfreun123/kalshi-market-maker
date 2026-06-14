@@ -13,13 +13,13 @@ auto find_level(std::vector<Level> &levels,
                 int price_cents) -> std::vector<Level>::iterator {
   // lower_bound with descending comparator finds first element where
   // price_cents >= element, i.e. the position of price_cents.
-  auto it =
+  auto level_pos =
       std::lower_bound(levels.begin(), levels.end(), Level{price_cents, 0},
                        [](const Level &level, const Level &target) {
                          return level.price_cents > target.price_cents;
                        });
-  if (it != levels.end() && it->price_cents == price_cents) {
-    return it;
+  if (level_pos != levels.end() && level_pos->price_cents == price_cents) {
+    return level_pos;
   }
   return levels.end();
 }
@@ -78,9 +78,10 @@ double LocalOrderbook::mid_price_cents() const {
   if (!bid || !ask) {
     return 0.0;
   }
+  constexpr double kTwoSides = 2.0;
   return (static_cast<double>(bid->price_cents) +
           static_cast<double>(ask->price_cents)) /
-         2.0;
+         kTwoSides;
 }
 
 int LocalOrderbook::spread_cents() const {
