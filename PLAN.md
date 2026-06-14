@@ -372,7 +372,7 @@ graph TD
     style RC fill:#555,color:#fff
     style OB fill:#555,color:#fff
     style WSC fill:#555,color:#fff
-    style OM fill:#2a6,color:#fff
+    style OM fill:#555,color:#fff
 ```
 
 **Files:**
@@ -699,7 +699,7 @@ int main() {
 - [x] Phase 3 — REST Client
 - [x] Phase 4 — Local Orderbook
 - [x] Phase 5 — WebSocket Client
-- [ ] Phase 6 — Order Manager
+- [x] Phase 6 — Order Manager
 - [ ] Phase 7 — Risk Manager
 - [ ] Phase 8 — Fair Value Engine
 - [ ] Phase 9 — Quoter
