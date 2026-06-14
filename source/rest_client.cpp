@@ -180,8 +180,8 @@ Orderbook RestClient::get_orderbook(std::string_view ticker) {
   return result;
 }
 
-// NOLINTNEXTLINE(bugprone-easily-swappable-parameters) — price_cents and
-// quantity are semantically distinct
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters) - price and quantity are
+// distinct
 Order RestClient::place_order(std::string_view ticker, Side side,
                               int price_cents, int quantity, OrderType type) {
   std::string path = path_prefix_ + "/portfolio/orders";
