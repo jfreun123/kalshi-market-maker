@@ -172,7 +172,7 @@ graph TD
     T["types.hpp"]
     AUTH["auth.hpp"]
     IHTTP["IHttpTransport\n(interface)"]
-    CURL["CurlTransport\n(libcurl impl)"]
+    CURL["HttpTransport\n(cpp-httplib impl)"]
     FAKE["FakeTransport\n(test double)"]
     RC["RestClient\nGET /markets\nGET /orderbook\nPOST /orders\nDELETE /orders"]
 
@@ -684,7 +684,7 @@ int main() {
 | Library | Purpose | How to add |
 |---|---|---|
 | OpenSSL | RSA-SHA256 auth signing | `find_package(OpenSSL REQUIRED)` |
-| libcurl | HTTP REST client | `find_package(CURL REQUIRED)` |
+| cpp-httplib | HTTP REST client (HTTPS via OpenSSL) | FetchContent `yhirose/cpp-httplib` |
 | Boost.Beast | WebSocket client | `find_package(Boost REQUIRED COMPONENTS system)` |
 | nlohmann/json | JSON parsing | FetchContent or `find_package` |
 | spdlog | Structured logging | FetchContent |
@@ -696,7 +696,7 @@ int main() {
 
 - [x] Phase 1 — Types & Domain Model
 - [x] Phase 2 — Authentication
-- [ ] Phase 3 — REST Client
+- [x] Phase 3 — REST Client
 - [ ] Phase 4 — Local Orderbook
 - [ ] Phase 5 — WebSocket Client
 - [ ] Phase 6 — Order Manager

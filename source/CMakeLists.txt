@@ -1,6 +1,6 @@
 # ---- Library ----
 
-add_library(kalshi_lib STATIC auth.cpp)
+add_library(kalshi_lib STATIC auth.cpp http_transport.cpp rest_client.cpp)
 
 target_include_directories(
     kalshi_lib
@@ -10,4 +10,11 @@ target_include_directories(
 
 target_compile_features(kalshi_lib PUBLIC cxx_std_23)
 
-target_link_libraries(kalshi_lib PUBLIC OpenSSL::Crypto)
+target_link_libraries(
+    kalshi_lib
+    PUBLIC
+    OpenSSL::Crypto
+    OpenSSL::SSL
+    httplib::httplib
+    nlohmann_json::nlohmann_json
+)

@@ -1,0 +1,336 @@
+#include "fake_transport.hpp"
+#include "rest_client.hpp"
+
+#include <gtest/gtest.h>
+#include <openssl/bio.h>
+#include <openssl/buffer.h>
+#include <openssl/evp.h>
+#include <openssl/pem.h>
+
+#include <memory>
+#include <string>
+
+// ---- Test helpers ----
+
+namespace {
+
+constexpr int kRsaKeyBits = 2048;
+constexpr std::string_view kTestBaseUrl = "https://test.kalshi.co/trade-api/v2";
+constexpr std::string_view kTestTicker = "KXBTCD";
+constexpr int kTestYesPrice = 52;
+constexpr int kTestNoPrice = 48;
+constexpr int kTestQuantity = 10;
+constexpr int kTestFilledQty = 2;
+constexpr int kTestFeeRateBps = 7;
+constexpr std::size_t kOneResult = 1U;
+constexpr std::size_t kTwoResults = 2U;
+constexpr int kHttpOk = 200;
+constexpr int kHttpUnauthorized = 401;
+constexpr int kHttpNotFound = 404;
+constexpr int kHttpInternalError = 500;
+
+std::string generate_test_private_key() {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-cstyle-cast) — OpenSSL C API
+  EVP_PKEY *pkey = EVP_RSA_gen(static_cast<unsigned int>(kRsaKeyBits));
+  BIO *bio = BIO_new(BIO_s_mem());
+  PEM_write_bio_PrivateKey(bio, pkey, nullptr, nullptr, 0, nullptr, nullptr);
+  BUF_MEM *buf_mem = nullptr;
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-cstyle-cast) — OpenSSL C macro
+  BIO_get_mem_ptr(bio, &buf_mem);
+  std::string result(buf_mem->data, buf_mem->length);
+  BIO_free(bio);
+  EVP_PKEY_free(pkey);
+  return result;
+}
+
+} // namespace
+
+// ---- Test fixture ----
+
+class RestClientTest : public ::testing::Test {
+  // NOLINT(cppcoreguidelines-non-private-member-variables-in-classes):
+  // GTest requires protected members accessible in TEST_F bodies.
+protected:
+  static void SetUpTestSuite() { s_priv_pem_ = generate_test_private_key(); }
+
+  [[nodiscard]] static kalshi::RestClient
+  make_client(std::unique_ptr<FakeTransport> transport) {
+    return kalshi::RestClient{kalshi::Auth{"test-api-key", s_priv_pem_},
+                              std::move(transport), std::string(kTestBaseUrl)};
+  }
+
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
+  static std::string s_priv_pem_; // NOLINT — GTest fixture static
+};
+
+std::string RestClientTest::s_priv_pem_; // NOLINT — GTest fixture static
+
+// ---- get_markets ----
+
+TEST_F(RestClientTest, GetMarketsCallsGetWithMarketsUrl) {
+  auto transport = std::make_unique<FakeTransport>();
+  FakeTransport *const transport_raw = transport.get();
+  transport_raw->enqueue({kHttpOk, R"({"markets":[],"cursor":""})"});
+  auto client = make_client(std::move(transport));
+
+  client.get_markets();
+
+  EXPECT_EQ(transport_raw->last_request().method, "GET");
+  EXPECT_NE(transport_raw->last_request().url.find("/markets"),
+            std::string::npos);
+}
+
+TEST_F(RestClientTest, GetMarketsParsesSingleMarket) {
+  auto transport = std::make_unique<FakeTransport>();
+  FakeTransport *const transport_raw = transport.get();
+  transport_raw->enqueue(
+      {kHttpOk,
+       R"({"markets":[{"ticker":"KXBTCD","title":"Bitcoin above $30k?","close_time":"2025-12-25T00:00:00Z","fee_rate_bps":7}],"cursor":""})"});
+  auto client = make_client(std::move(transport));
+
+  auto markets = client.get_markets();
+
+  ASSERT_EQ(markets.size(), kOneResult);
+  EXPECT_EQ(markets[0].ticker, "KXBTCD");
+  EXPECT_EQ(markets[0].title, "Bitcoin above $30k?");
+  EXPECT_EQ(markets[0].fee_rate_bps, kTestFeeRateBps);
+  EXPECT_NE(markets[0].close_time,
+            std::chrono::system_clock::time_point{}); // non-default
+}
+
+TEST_F(RestClientTest, GetMarketsReturnsEmptyVectorForEmptyList) {
+  auto transport = std::make_unique<FakeTransport>();
+  FakeTransport *const transport_raw = transport.get();
+  transport_raw->enqueue({kHttpOk, R"({"markets":[],"cursor":""})"});
+  auto client = make_client(std::move(transport));
+
+  auto markets = client.get_markets();
+
+  EXPECT_TRUE(markets.empty());
+}
+
+TEST_F(RestClientTest, GetMarketsWithEventTickerAppendsQueryParam) {
+  auto transport = std::make_unique<FakeTransport>();
+  FakeTransport *const transport_raw = transport.get();
+  transport_raw->enqueue({kHttpOk, R"({"markets":[],"cursor":""})"});
+  auto client = make_client(std::move(transport));
+
+  client.get_markets("KXBTCD");
+
+  EXPECT_NE(transport_raw->last_request().url.find("event_ticker=KXBTCD"),
+            std::string::npos);
+}
+
+TEST_F(RestClientTest, GetMarketsThrowsOnHttpError) {
+  auto transport = std::make_unique<FakeTransport>();
+  FakeTransport *const transport_raw = transport.get();
+  transport_raw->enqueue(
+      {kHttpInternalError, R"({"error":"internal server error"})"});
+  auto client = make_client(std::move(transport));
+
+  EXPECT_THROW(client.get_markets(), std::runtime_error);
+}
+
+// ---- get_orderbook ----
+
+TEST_F(RestClientTest, GetOrderbookCallsCorrectUrl) {
+  auto transport = std::make_unique<FakeTransport>();
+  FakeTransport *const transport_raw = transport.get();
+  transport_raw->enqueue(
+      {kHttpOk, R"({"orderbook":{"yes":[[52,100]],"no":[[48,150]]}})"});
+  auto client = make_client(std::move(transport));
+
+  client.get_orderbook(kTestTicker);
+
+  const auto &request_url = transport_raw->last_request().url;
+  EXPECT_NE(request_url.find("KXBTCD"), std::string::npos);
+  EXPECT_NE(request_url.find("orderbook"), std::string::npos);
+}
+
+TEST_F(RestClientTest, GetOrderbookParsesYesAndNoLevels) {
+  auto transport = std::make_unique<FakeTransport>();
+  FakeTransport *const transport_raw = transport.get();
+  transport_raw->enqueue(
+      {kHttpOk,
+       R"({"orderbook":{"yes":[[55,200],[52,100]],"no":[[45,150],[43,300]]}})"});
+  auto client = make_client(std::move(transport));
+
+  auto orderbook = client.get_orderbook(kTestTicker);
+
+  ASSERT_EQ(orderbook.yes.size(), kTwoResults);
+  EXPECT_EQ(orderbook.yes[0].price_cents, 55);
+  EXPECT_EQ(orderbook.yes[0].quantity, 200);
+  EXPECT_EQ(orderbook.yes[1].price_cents, 52);
+
+  ASSERT_EQ(orderbook.no.size(), kTwoResults);
+  EXPECT_EQ(orderbook.no[0].price_cents, 45);
+  EXPECT_EQ(orderbook.no[0].quantity, 150);
+}
+
+TEST_F(RestClientTest, GetOrderbookSetsTicker) {
+  auto transport = std::make_unique<FakeTransport>();
+  FakeTransport *const transport_raw = transport.get();
+  transport_raw->enqueue({kHttpOk, R"({"orderbook":{"yes":[],"no":[]}})"});
+  auto client = make_client(std::move(transport));
+
+  auto orderbook = client.get_orderbook(kTestTicker);
+
+  EXPECT_EQ(orderbook.ticker, std::string(kTestTicker));
+}
+
+TEST_F(RestClientTest, GetOrderbookThrowsOnHttpError) {
+  auto transport = std::make_unique<FakeTransport>();
+  FakeTransport *const transport_raw = transport.get();
+  transport_raw->enqueue({kHttpNotFound, R"({"error":"market not found"})"});
+  auto client = make_client(std::move(transport));
+
+  EXPECT_THROW(client.get_orderbook(kTestTicker), std::runtime_error);
+}
+
+// ---- place_order ----
+
+TEST_F(RestClientTest, PlaceOrderSendsPostToOrdersUrl) {
+  auto transport = std::make_unique<FakeTransport>();
+  FakeTransport *const transport_raw = transport.get();
+  transport_raw->enqueue(
+      {kHttpOk,
+       R"({"order":{"order_id":"order-abc","ticker":"KXBTCD","side":"yes","type":"limit","yes_price":52,"count":10,"filled_count":0,"status":"resting","created_time":"2025-01-01T00:00:00Z"}})"});
+  auto client = make_client(std::move(transport));
+
+  client.place_order(kTestTicker, kalshi::Side::Yes, kTestYesPrice,
+                     kTestQuantity, kalshi::OrderType::Limit);
+
+  EXPECT_EQ(transport_raw->last_request().method, "POST");
+  EXPECT_NE(transport_raw->last_request().url.find("/portfolio/orders"),
+            std::string::npos);
+}
+
+TEST_F(RestClientTest, PlaceOrderYesSideUsesYesPriceInBody) {
+  auto transport = std::make_unique<FakeTransport>();
+  FakeTransport *const transport_raw = transport.get();
+  transport_raw->enqueue(
+      {kHttpOk,
+       R"({"order":{"order_id":"order-abc","ticker":"KXBTCD","side":"yes","type":"limit","yes_price":52,"count":10,"filled_count":0,"status":"resting","created_time":"2025-01-01T00:00:00Z"}})"});
+  auto client = make_client(std::move(transport));
+
+  client.place_order(kTestTicker, kalshi::Side::Yes, kTestYesPrice,
+                     kTestQuantity, kalshi::OrderType::Limit);
+
+  const auto &body = transport_raw->last_request().body;
+  EXPECT_NE(body.find(R"("side":"yes")"), std::string::npos);
+  EXPECT_NE(body.find(R"("yes_price":52)"), std::string::npos);
+}
+
+TEST_F(RestClientTest, PlaceOrderNoSideUsesNoPriceInBody) {
+  auto transport = std::make_unique<FakeTransport>();
+  FakeTransport *const transport_raw = transport.get();
+  transport_raw->enqueue(
+      {kHttpOk,
+       R"({"order":{"order_id":"order-abc","ticker":"KXBTCD","side":"no","type":"limit","no_price":48,"count":10,"filled_count":0,"status":"resting","created_time":"2025-01-01T00:00:00Z"}})"});
+  auto client = make_client(std::move(transport));
+
+  client.place_order(kTestTicker, kalshi::Side::No, kTestNoPrice, kTestQuantity,
+                     kalshi::OrderType::Limit);
+
+  const auto &body = transport_raw->last_request().body;
+  EXPECT_NE(body.find(R"("side":"no")"), std::string::npos);
+  EXPECT_NE(body.find(R"("no_price":48)"), std::string::npos);
+}
+
+TEST_F(RestClientTest, PlaceOrderParsesResponseIntoOrder) {
+  auto transport = std::make_unique<FakeTransport>();
+  FakeTransport *const transport_raw = transport.get();
+  transport_raw->enqueue(
+      {kHttpOk,
+       R"({"order":{"order_id":"order-abc","ticker":"KXBTCD","side":"yes","type":"limit","yes_price":52,"count":10,"filled_count":0,"status":"resting","created_time":"2025-01-01T00:00:00Z"}})"});
+  auto client = make_client(std::move(transport));
+
+  auto order = client.place_order(kTestTicker, kalshi::Side::Yes, kTestYesPrice,
+                                  kTestQuantity, kalshi::OrderType::Limit);
+
+  EXPECT_EQ(order.id, "order-abc");
+  EXPECT_EQ(order.market_ticker, std::string(kTestTicker));
+  EXPECT_EQ(order.side, kalshi::Side::Yes);
+  EXPECT_EQ(order.price_cents, kTestYesPrice);
+  EXPECT_EQ(order.quantity, kTestQuantity);
+  EXPECT_EQ(order.filled_quantity, 0);
+  EXPECT_EQ(order.status, kalshi::OrderStatus::Open);
+  EXPECT_EQ(order.type, kalshi::OrderType::Limit);
+  EXPECT_NE(order.created_at, std::chrono::system_clock::time_point{});
+}
+
+// ---- cancel_order ----
+
+TEST_F(RestClientTest, CancelOrderSendsDeleteToCorrectUrl) {
+  auto transport = std::make_unique<FakeTransport>();
+  FakeTransport *const transport_raw = transport.get();
+  transport_raw->enqueue(
+      {kHttpOk, R"({"order":{"order_id":"order-abc","status":"canceled"}})"});
+  auto client = make_client(std::move(transport));
+
+  client.cancel_order("order-abc");
+
+  EXPECT_EQ(transport_raw->last_request().method, "DELETE");
+  EXPECT_NE(transport_raw->last_request().url.find("order-abc"),
+            std::string::npos);
+}
+
+TEST_F(RestClientTest, CancelOrderReturnsTrueOn200) {
+  auto transport = std::make_unique<FakeTransport>();
+  FakeTransport *const transport_raw = transport.get();
+  transport_raw->enqueue(
+      {kHttpOk, R"({"order":{"order_id":"order-abc","status":"canceled"}})"});
+  auto client = make_client(std::move(transport));
+
+  EXPECT_TRUE(client.cancel_order("order-abc"));
+}
+
+TEST_F(RestClientTest, CancelOrderReturnsFalseOn404) {
+  auto transport = std::make_unique<FakeTransport>();
+  FakeTransport *const transport_raw = transport.get();
+  transport_raw->enqueue({kHttpNotFound, R"({"error":"order not found"})"});
+  auto client = make_client(std::move(transport));
+
+  EXPECT_FALSE(client.cancel_order("nonexistent-order"));
+}
+
+// ---- get_open_orders ----
+
+TEST_F(RestClientTest, GetOpenOrdersCallsGetWithOrdersUrl) {
+  auto transport = std::make_unique<FakeTransport>();
+  FakeTransport *const transport_raw = transport.get();
+  transport_raw->enqueue({kHttpOk, R"({"orders":[],"cursor":""})"});
+  auto client = make_client(std::move(transport));
+
+  client.get_open_orders();
+
+  EXPECT_EQ(transport_raw->last_request().method, "GET");
+  EXPECT_NE(transport_raw->last_request().url.find("/portfolio/orders"),
+            std::string::npos);
+}
+
+TEST_F(RestClientTest, GetOpenOrdersParsesOrdersList) {
+  auto transport = std::make_unique<FakeTransport>();
+  FakeTransport *const transport_raw = transport.get();
+  transport_raw->enqueue(
+      {kHttpOk,
+       R"({"orders":[{"order_id":"order-abc","ticker":"KXBTCD","side":"yes","type":"limit","yes_price":52,"count":10,"filled_count":2,"status":"resting","created_time":"2025-01-01T00:00:00Z"}],"cursor":""})"});
+  auto client = make_client(std::move(transport));
+
+  auto orders = client.get_open_orders();
+
+  ASSERT_EQ(orders.size(), kOneResult);
+  EXPECT_EQ(orders[0].id, "order-abc");
+  EXPECT_EQ(orders[0].market_ticker, "KXBTCD");
+  EXPECT_EQ(orders[0].price_cents, kTestYesPrice);
+  EXPECT_EQ(orders[0].filled_quantity, kTestFilledQty);
+}
+
+TEST_F(RestClientTest, GetOpenOrdersThrowsOnHttpError) {
+  auto transport = std::make_unique<FakeTransport>();
+  FakeTransport *const transport_raw = transport.get();
+  transport_raw->enqueue({kHttpUnauthorized, R"({"error":"unauthorized"})"});
+  auto client = make_client(std::move(transport));
+
+  EXPECT_THROW(client.get_open_orders(), std::runtime_error);
+}

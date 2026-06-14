@@ -5,6 +5,7 @@ include(GoogleTest)
 function(kalshi_add_test target source)
     add_executable(${target} ${source})
     target_link_libraries(${target} PRIVATE kalshi_lib GTest::gtest_main)
+    target_include_directories(${target} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/source")
     target_compile_features(${target} PRIVATE cxx_std_23)
     set_target_properties(${target} PROPERTIES
         CXX_CLANG_TIDY "clang-tidy"
@@ -15,3 +16,4 @@ endfunction()
 
 kalshi_add_test(types_test source/types_test.cpp)
 kalshi_add_test(auth_test source/auth_test.cpp)
+kalshi_add_test(rest_client_test source/rest_client_test.cpp)

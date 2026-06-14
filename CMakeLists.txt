@@ -21,6 +21,9 @@ option(kalshi_market_maker_DEVELOPER_MODE "Enable developer mode" ON)
 
 find_package(OpenSSL REQUIRED)
 
+include(cmake/json.cmake)
+include(cmake/httplib.cmake)
+
 # ---- Build source ----
 
 add_subdirectory(source)
