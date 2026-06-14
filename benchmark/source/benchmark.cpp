@@ -1,22 +1,3 @@
-// starter
-#include "add.hpp"
-
-// std
-#include <cstdint>
-#include <exception>
-#include <iostream>
-
-int main() {
-  try {
-    constexpr int kIterations = 1'000'000;
-    std::uint64_t result = 0;
-    for (int i = 0; i < kIterations; ++i) {
-      result += static_cast<std::uint64_t>(starter::add(i, i + 1));
-    }
-    std::cout << "iterations=" << kIterations << " result=" << result << "\n";
-  } catch (const std::exception &e) {
-    std::cerr << "fatal: " << e.what() << "\n";
-    return 1;
-  }
-  return 0;
-}
+// Benchmarks live here. Add micro-benchmarks for hot paths as the project grows
+// (e.g. orderbook delta application, fair value calculation, quote generation).
+int main() { return 0; }

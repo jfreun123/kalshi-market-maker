@@ -7,16 +7,15 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR)
 endif()
 
 project(
-    cpp-starter
+    kalshi-market-maker
     VERSION 0.1.0
-    DESCRIPTION "Short description"
-    HOMEPAGE_URL "https://example.com/"
+    DESCRIPTION "Kalshi prediction market maker"
     LANGUAGES CXX
 )
 
 # ---- Developer mode ----
 
-option(cpp-starter_DEVELOPER_MODE "Enable developer mode" ON)
+option(kalshi_market_maker_DEVELOPER_MODE "Enable developer mode" ON)
 
 # ---- Dependencies ----
 
@@ -28,6 +27,6 @@ add_subdirectory(source)
 
 # ---- Developer mode targets ----
 
-if(cpp-starter_DEVELOPER_MODE)
+if(kalshi_market_maker_DEVELOPER_MODE)
   include(cmake/dev-mode.cmake)
 endif()

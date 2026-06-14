@@ -4,7 +4,7 @@ include(GoogleTest)
 
 function(kalshi_add_test target source)
     add_executable(${target} ${source})
-    target_link_libraries(${target} PRIVATE cpp-starter_lib GTest::gtest_main)
+    target_link_libraries(${target} PRIVATE kalshi_lib GTest::gtest_main)
     target_compile_features(${target} PRIVATE cxx_std_23)
     set_target_properties(${target} PROPERTIES
         CXX_CLANG_TIDY "clang-tidy"
