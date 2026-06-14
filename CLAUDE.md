@@ -22,6 +22,14 @@ A pre-commit hook (`scripts/pre-commit`) runs automatically on every `git commit
 
 On a fresh clone, install the hook once: `bash scripts/install-hooks.sh`
 
+**clang-tidy is probably right.** When clang-tidy warns about something, the default assumption is to fix the code, not suppress the warning. Common cases and what to do:
+
+- `readability-identifier-length` — single-letter or two-letter names (`o`, `f`, `ob`) are not acceptable. Use descriptive names (`order`, `fill`, `book`) everywhere, including in tests. Tests are documentation.
+- `readability-magic-numbers` / `cppcoreguidelines-avoid-magic-numbers` — numeric literals scattered through code have no meaning to a reader. Extract them to named `constexpr` constants that explain intent (e.g., `constexpr int kYesBidPrice = 52`).
+- `readability-uppercase-literal-suffix` — write `1U`, `1L`, `1UL`, not `1u`, `1l`, `1ul`. The lowercase forms are visually ambiguous.
+
+Only suppress a clang-tidy warning (`// NOLINT(check-name)`) when you have a specific, documented reason it doesn't apply. "It's test code" is not a reason.
+
 ## Commits
 
 - Commit small and often — after each test passes, after each phase completes, after any clean refactor.
