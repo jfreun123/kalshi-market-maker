@@ -90,7 +90,7 @@ public:
   //    0 = no reconnect (single run).
   // reconnect_delay: wait between reconnects; 0ms is useful in tests.
   explicit WebSocketClient(
-      const Auth &auth, std::unique_ptr<IWebSocket> ws,
+      Auth auth, std::unique_ptr<IWebSocket> ws_transport,
       std::string base_url = "wss://trading-api.kalshi.com/trade-api/ws/v2",
       int max_reconnects = -1,
       std::chrono::milliseconds reconnect_delay = std::chrono::seconds{5});

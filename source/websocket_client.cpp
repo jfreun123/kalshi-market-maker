@@ -105,12 +105,13 @@ Orderbook parse_snapshot(const nlohmann::json &msg) {
 
 // ---- WebSocketClient ----
 
-WebSocketClient::WebSocketClient(const Auth &auth,
-                                 std::unique_ptr<IWebSocket> ws,
+WebSocketClient::WebSocketClient(Auth auth,
+                                 std::unique_ptr<IWebSocket> ws_transport,
                                  std::string base_url, int max_reconnects,
                                  std::chrono::milliseconds reconnect_delay)
-    : auth_{auth}, ws_{std::move(ws)}, ws_url_{std::move(base_url)},
-      max_reconnects_{max_reconnects}, reconnect_delay_{reconnect_delay} {}
+    : auth_{std::move(auth)}, ws_{std::move(ws_transport)},
+      ws_url_{std::move(base_url)}, max_reconnects_{max_reconnects},
+      reconnect_delay_{reconnect_delay} {}
 
 void WebSocketClient::subscribe(std::string_view ticker) {
   subscribed_tickers_.emplace_back(ticker);
@@ -176,7 +177,9 @@ void WebSocketClient::handle_message(const std::string &raw) {
     if (snapshot_callback_) {
       try {
         snapshot_callback_(parse_snapshot(msg_body));
-      } catch (const nlohmann::json::exception &) {
+      } catch (
+          const nlohmann::json::exception &) { // NOLINT(bugprone-empty-catch)
+        // Server sent a snapshot with missing required fields; drop it.
       }
     }
   } else if (msg_type == "orderbook_delta") {
@@ -188,7 +191,9 @@ void WebSocketClient::handle_message(const std::string &raw) {
         const int price = msg_body.at("price").get<int>();
         const int qty = msg_body.at("delta").get<int>();
         delta_callback_(ticker, side, price, qty);
-      } catch (const nlohmann::json::exception &) {
+      } catch (
+          const nlohmann::json::exception &) { // NOLINT(bugprone-empty-catch)
+        // Server sent a delta with missing required fields; drop it.
       }
     }
   } else if (msg_type == "fill") {
@@ -203,7 +208,9 @@ void WebSocketClient::handle_message(const std::string &raw) {
         fill.timestamp =
             parse_iso8601(msg_body.at("created_time").get<std::string>());
         fill_callback_(fill);
-      } catch (const nlohmann::json::exception &) {
+      } catch (
+          const nlohmann::json::exception &) { // NOLINT(bugprone-empty-catch)
+        // Server sent a fill with missing required fields; drop it.
       }
     }
   }
