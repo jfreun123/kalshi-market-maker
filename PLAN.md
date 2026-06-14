@@ -119,7 +119,7 @@ graph TD
     T --> AUTH
 
     style T fill:#555,color:#fff
-    style AUTH fill:#2a6,color:#fff
+    style AUTH fill:#555,color:#fff
 ```
 
 **Files:**
@@ -644,7 +644,7 @@ int main() {
 ## Phase Checklist
 
 - [x] Phase 1 — Types & Domain Model
-- [ ] Phase 2 — Authentication
+- [x] Phase 2 — Authentication
 - [ ] Phase 3 — REST Client
 - [ ] Phase 4 — Local Orderbook
 - [ ] Phase 5 — WebSocket Client

@@ -18,6 +18,10 @@ project(
 
 option(cpp-starter_DEVELOPER_MODE "Enable developer mode" ON)
 
+# ---- Dependencies ----
+
+find_package(OpenSSL REQUIRED)
+
 # ---- Build source ----
 
 add_subdirectory(source)

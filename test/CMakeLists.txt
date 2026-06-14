@@ -14,3 +14,4 @@ function(kalshi_add_test target source)
 endfunction()
 
 kalshi_add_test(types_test source/types_test.cpp)
+kalshi_add_test(auth_test source/auth_test.cpp)
