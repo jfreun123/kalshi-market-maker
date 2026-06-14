@@ -75,12 +75,12 @@ std::string rsa_sha256_sign(const std::string &pem_key,
 std::map<std::string, std::string>
 Auth::sign(std::string_view method, std::string_view path,
            std::optional<long long> timestamp_ms) const {
-  long long ts = timestamp_ms.value_or(
+  long long timestamp_val = timestamp_ms.value_or(
       std::chrono::duration_cast<std::chrono::milliseconds>(
           std::chrono::system_clock::now().time_since_epoch())
           .count());
 
-  std::string ts_str = std::to_string(ts);
+  std::string ts_str = std::to_string(timestamp_val);
   std::string message = ts_str + std::string(method) + std::string(path);
   std::string signature = rsa_sha256_sign(pem_private_key_, message);
 
