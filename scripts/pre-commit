@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# Pre-commit hook: runs clang-format and clang-tidy on staged C++ files.
+# Install: bash scripts/install-hooks.sh
+
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+BUILD_DIR="$REPO_ROOT/build"
+
+# Collect staged C++ files that still exist
+mapfile -t STAGED < <(git diff --cached --name-only --diff-filter=ACMR \
+    | grep -E '\.(cpp|hpp)$' || true)
+
+if [[ ${#STAGED[@]} -eq 0 ]]; then
+    exit 0
+fi
+
+echo "--- pre-commit: checking ${#STAGED[@]} file(s) ---"
+
+# ---- clang-format ----
+FORMAT_ERRORS=0
+for f in "${STAGED[@]}"; do
+    if ! clang-format --dry-run --Werror "$REPO_ROOT/$f" 2>/dev/null; then
+        echo "  clang-format: $f"
+        FORMAT_ERRORS=$((FORMAT_ERRORS + 1))
+    fi
+done
+
+if [[ $FORMAT_ERRORS -gt 0 ]]; then
+    echo ""
+    echo "clang-format found $FORMAT_ERRORS file(s) with formatting issues."
+    echo "Run: cmake --build build -t format-fix"
+    exit 1
+fi
+
+# ---- clang-tidy ----
+if [[ ! -f "$BUILD_DIR/compile_commands.json" ]]; then
+    echo "Warning: $BUILD_DIR/compile_commands.json not found — skipping clang-tidy."
+    echo "Run: cmake --preset=dev to generate it."
+    exit 0
+fi
+
+TIDY_ERRORS=0
+for f in "${STAGED[@]}"; do
+    # clang-tidy only meaningfully checks .cpp translation units
+    [[ "$f" == *.cpp ]] || continue
+    if ! clang-tidy -p "$BUILD_DIR" "$REPO_ROOT/$f" 2>/dev/null; then
+        echo "  clang-tidy: $f"
+        TIDY_ERRORS=$((TIDY_ERRORS + 1))
+    fi
+done
+
+if [[ $TIDY_ERRORS -gt 0 ]]; then
+    echo ""
+    echo "clang-tidy found issues in $TIDY_ERRORS file(s). Fix before committing."
+    exit 1
+fi
+
+echo "--- pre-commit: all checks passed ---"
