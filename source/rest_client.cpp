@@ -131,10 +131,9 @@ Order parse_order(const nlohmann::json &order_json) {
 
 // --- RestClient implementation ---
 
-RestClient::RestClient(const Auth &auth,
-                       std::unique_ptr<IHttpTransport> transport,
+RestClient::RestClient(Auth auth, std::unique_ptr<IHttpTransport> transport,
                        std::string base_url)
-    : auth_{auth}, transport_{std::move(transport)},
+    : auth_{std::move(auth)}, transport_{std::move(transport)},
       base_url_{std::move(base_url)},
       path_prefix_{extract_path_prefix(base_url_)} {}
 
@@ -181,6 +180,8 @@ Orderbook RestClient::get_orderbook(std::string_view ticker) {
   return result;
 }
 
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters) — price_cents and
+// quantity are semantically distinct
 Order RestClient::place_order(std::string_view ticker, Side side,
                               int price_cents, int quantity, OrderType type) {
   std::string path = path_prefix_ + "/portfolio/orders";

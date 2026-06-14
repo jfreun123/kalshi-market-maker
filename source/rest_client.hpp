@@ -14,7 +14,7 @@ namespace kalshi {
 class RestClient {
 public:
   RestClient(
-      const Auth &auth, std::unique_ptr<IHttpTransport> transport,
+      Auth auth, std::unique_ptr<IHttpTransport> transport,
       std::string base_url = "https://trading-api.kalshi.com/trade-api/v2");
 
   std::vector<Market> get_markets(std::string_view event_ticker = "");
