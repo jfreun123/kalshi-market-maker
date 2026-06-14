@@ -697,7 +697,7 @@ int main() {
 - [x] Phase 1 — Types & Domain Model
 - [x] Phase 2 — Authentication
 - [x] Phase 3 — REST Client
-- [ ] Phase 4 — Local Orderbook
+- [x] Phase 4 — Local Orderbook
 - [ ] Phase 5 — WebSocket Client
 - [ ] Phase 6 — Order Manager
 - [ ] Phase 7 — Risk Manager
