@@ -304,7 +304,7 @@ graph TD
     RC["RestClient"]
     OB["LocalOrderbook"]
     IWS["IWebSocket\n(interface)"]
-    BWSS["BoostBeastWS\n(production)"]
+    BWSS["IxWebSocket\n(stub, impl Phase 10)"]
     FWS["FakeWebSocket\n(test double)"]
     WSC["WebSocketClient\nSubscribe markets\nDispatch callbacks\nReconnect logic"]
 
@@ -317,10 +317,10 @@ graph TD
     style T fill:#555,color:#fff
     style RC fill:#555,color:#fff
     style OB fill:#555,color:#fff
-    style WSC fill:#2a6,color:#fff
-    style IWS fill:#2a6,color:#fff
-    style BWSS fill:#2a6,color:#fff
-    style FWS fill:#2a6,color:#fff
+    style WSC fill:#555,color:#fff
+    style IWS fill:#555,color:#fff
+    style BWSS fill:#555,color:#fff
+    style FWS fill:#555,color:#fff
 ```
 
 **Files:**
@@ -698,7 +698,7 @@ int main() {
 - [x] Phase 2 — Authentication
 - [x] Phase 3 — REST Client
 - [x] Phase 4 — Local Orderbook
-- [ ] Phase 5 — WebSocket Client
+- [x] Phase 5 — WebSocket Client
 - [ ] Phase 6 — Order Manager
 - [ ] Phase 7 — Risk Manager
 - [ ] Phase 8 — Fair Value Engine
