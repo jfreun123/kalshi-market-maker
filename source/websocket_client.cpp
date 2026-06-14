@@ -177,9 +177,8 @@ void WebSocketClient::handle_message(const std::string &raw) {
     if (snapshot_callback_) {
       try {
         snapshot_callback_(parse_snapshot(msg_body));
-      } catch (
-          const nlohmann::json::exception &) { // NOLINT(bugprone-empty-catch)
-        // Server sent a snapshot with missing required fields; drop it.
+      } catch (const nlohmann::json::exception &) {
+        return; // Malformed snapshot; drop message.
       }
     }
   } else if (msg_type == "orderbook_delta") {
@@ -191,9 +190,8 @@ void WebSocketClient::handle_message(const std::string &raw) {
         const int price = msg_body.at("price").get<int>();
         const int qty = msg_body.at("delta").get<int>();
         delta_callback_(ticker, side, price, qty);
-      } catch (
-          const nlohmann::json::exception &) { // NOLINT(bugprone-empty-catch)
-        // Server sent a delta with missing required fields; drop it.
+      } catch (const nlohmann::json::exception &) {
+        return; // Malformed delta; drop message.
       }
     }
   } else if (msg_type == "fill") {
@@ -208,9 +206,8 @@ void WebSocketClient::handle_message(const std::string &raw) {
         fill.timestamp =
             parse_iso8601(msg_body.at("created_time").get<std::string>());
         fill_callback_(fill);
-      } catch (
-          const nlohmann::json::exception &) { // NOLINT(bugprone-empty-catch)
-        // Server sent a fill with missing required fields; drop it.
+      } catch (const nlohmann::json::exception &) {
+        return; // Malformed fill; drop message.
       }
     }
   }
