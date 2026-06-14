@@ -56,6 +56,10 @@ graph TD
 - `source/types.hpp`
 - `test/source/types_test.cpp`
 
+**Testing:**
+- **Unit:** struct construction, field access, equality, `remaining_quantity()`, `is_active()`, `is_valid_price()`, `complement_price()` symmetry. All done — 19 tests passing.
+- **Contract/Integration/ASAN:** N/A — pure value types, no I/O.
+
 **Key types:**
 
 ```cpp
@@ -150,6 +154,11 @@ Kalshi-Access-Signature: <base64(RSA_SHA256(timestamp + method + path))>
 
 **Dependency:** OpenSSL (`find_package(OpenSSL REQUIRED)` in CMake).
 
+**Testing:**
+- **Unit:** generate an RSA keypair at test time, sign a message, verify the signature with the public key. Test header names, API key passthrough, timestamp bounds, invalid key throws. All done — 7 tests passing.
+- **Integration** (`KALSHI_INTEGRATION_TESTS=ON`): sign a real `GET /markets` request against the demo API and assert HTTP 200. This proves the key format, timestamp tolerance, and base64 encoding are all correct end-to-end.
+- **ASAN:** run `cmake --preset=asan` — OpenSSL memory handling is a common source of leaks under sanitizers.
+
 ---
 
 ## Phase 3 — REST Client
@@ -185,6 +194,12 @@ graph TD
 - `source/http_transport.hpp` (interface + CurlTransport)
 - `source/rest_client.hpp` / `source/rest_client.cpp`
 - `test/source/rest_client_test.cpp`
+
+**Testing:**
+- **Unit:** inject `FakeTransport` returning canned JSON strings. Test each method (`get_markets`, `get_orderbook`, `place_order`, `cancel_order`) parses the response into the correct domain struct. Test HTTP error codes (4xx, 5xx) throw or return expected errors.
+- **Contract:** record real responses from the demo API into `test/fixtures/` (e.g. `orderbook_KXBTCD.json`). Add a test that parses the fixture — catches API schema drift without needing a live connection.
+- **Integration** (`KALSHI_INTEGRATION_TESTS=ON`): call `get_markets()` and `get_orderbook(ticker)` against demo. Assert the returned structs are well-formed (non-empty ticker, valid price levels).
+- **ASAN:** libcurl manages its own memory; run under ASAN to confirm no leaks in our wrapper.
 
 **Interface:**
 
@@ -270,6 +285,11 @@ public:
 
 **Note on Kalshi orderbook mechanics:** YES and NO are two sides of the same contract. The YES ask price = `100 - NO bid price`. Kalshi's feed gives you both YES and NO levels; the implied best ask on YES comes from the best bid on NO.
 
+**Testing:**
+- **Unit:** apply a known sequence of snapshot + deltas, assert exact BBO and mid after each step. Test edge cases: empty book returns `std::nullopt` for BBO, single-sided book, delta that removes a level (quantity = 0), delta that adds a new level at a new price.
+- **Contract:** capture a real WebSocket `orderbook_snapshot` message from the demo API, save to `test/fixtures/orderbook_snapshot.json`, write a test that applies it and checks BBO is in [1,99].
+- **Integration/ASAN:** N/A — pure in-memory logic; covered by unit tests under ASAN.
+
 ---
 
 ## Phase 5 — WebSocket Client
@@ -306,6 +326,12 @@ graph TD
 **Files:**
 - `source/websocket_client.hpp` / `source/websocket_client.cpp`
 - `test/source/websocket_client_test.cpp`
+
+**Testing:**
+- **Unit:** inject `FakeWebSocket` that replays a scripted sequence of raw JSON messages. Assert `on_orderbook_snapshot`, `on_orderbook_delta`, and `on_fill` callbacks fire with correctly parsed payloads. Test reconnection: simulate a disconnect, assert the client attempts to reconnect and re-subscribes.
+- **Contract:** capture a real `orderbook_delta` and `fill` message from the demo API into `test/fixtures/`. Test parsing in isolation.
+- **Integration** (`KALSHI_INTEGRATION_TESTS=ON`): connect to the demo WebSocket, subscribe to one market, receive at least one delta within a timeout. Verifies auth handshake, subscription format, and message parsing end-to-end.
+- **TSAN:** the WebSocket client runs a background thread; run under ThreadSanitizer to catch races between the callback thread and the main loop reading `LocalOrderbook`.
 
 **Callbacks registered by the main loop:**
 
@@ -373,6 +399,12 @@ public:
 };
 ```
 
+**Testing:**
+- **Unit:** drive the state machine with synthetic fills and cancellations. Test that a duplicate fill is idempotent. Test that cancelling a filled order is handled gracefully. Test `net_position()` across a sequence of YES buys and NO buys (which reduce YES position). Test `realized_pnl()` against a known sequence of fills.
+- **Contract:** record a real order JSON response from the demo API into `test/fixtures/order_placed.json`. Test that `place_order()` parses it correctly.
+- **Integration** (`KALSHI_INTEGRATION_TESTS=ON`): place a 1-contract limit order at an extreme price (1 cent) on the demo API — unlikely to fill. Assert order appears in `get_open_orders()`. Cancel it. Assert it no longer appears.
+- **ASAN:** `unordered_map` iteration during cancellation is a common bug site.
+
 ---
 
 ## Phase 7 — Risk Manager
@@ -426,6 +458,10 @@ public:
 };
 ```
 
+**Testing:**
+- **Unit:** attempt to breach each limit individually and assert `check_order()` returns false. Test that breaching the daily loss limit triggers `is_halted()`. Test `halt()` blocks all subsequent orders. Test `resume()` restores normal operation. Test that limits are evaluated independently (e.g. position OK but order size too large → reject).
+- **Integration/Contract/ASAN:** N/A — pure logic, no I/O. Run unit tests under ASAN.
+
 ---
 
 ## Phase 8 — Fair Value Engine
@@ -472,6 +508,10 @@ public:
     double estimate(const FairValueInput& input) const;  // returns cents [1, 99]
 };
 ```
+
+**Testing:**
+- **Unit:** for each model layer, feed known inputs and assert the output is within expected bounds. Test that the baseline returns exactly the mid-price. Test that time-decay pulls extreme values toward 50 as `time_to_close_hours` approaches 0. Test that inventory skew shifts the estimate in the correct direction. Test that output is always clamped to [1, 99].
+- **Integration/Contract/ASAN:** N/A — pure math. Run under ASAN to catch any floating-point UB.
 
 ---
 
@@ -538,6 +578,11 @@ public:
     void update(const std::string& ticker, const LocalOrderbook& ob);
 };
 ```
+
+**Testing:**
+- **Unit:** inject fake `FairValueEngine`, `OrderManager`, and `RiskManager`. Assert that `update()` places a bid and ask at the correct prices given a known fair value and zero inventory. Assert inventory skew shifts both quotes in the correct direction. Assert that a quote within `reprice_threshold_cents` of its target is not cancelled and replaced. Assert that risk rejection (fake RM returns false) results in no order.
+- **Integration** (`KALSHI_INTEGRATION_TESTS=ON`): run one `update()` cycle against the demo API with a real `LocalOrderbook` populated from REST. Verify a bid and ask appear in the live orderbook. Cancel them.
+- **TSAN:** `update()` will be called from the WebSocket callback thread — run under ThreadSanitizer with a concurrent fake feed.
 
 ---
 
@@ -625,6 +670,12 @@ int main() {
     ws.run();  // blocks, drives event loop
 }
 ```
+
+**Testing:**
+- **Integration** (`KALSHI_INTEGRATION_TESTS=ON`): full end-to-end run on the demo environment for 60 seconds. Assert the process places quotes, receives at least one orderbook delta, reprices at least once, and shuts down cleanly without open orders (cancel-on-exit).
+- **Docker:** build and run inside `Dockerfile.test`. Credentials injected via Docker secrets. This is the form used in CI.
+- **ASAN + TSAN:** run the full integration test under each sanitizer. The WebSocket thread + main loop interaction is the highest-risk race condition surface.
+- **Backtesting:** record a 10-minute live session to a delta log, replay it through the quoter offline. Compare simulated PnL vs. recorded fills to validate the model.
 
 ---
 
