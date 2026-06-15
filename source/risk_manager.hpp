@@ -37,7 +37,8 @@ public:
 
   // Snapshots open order counts, net positions, and realized PnL from om for
   // each ticker in the provided list. Auto-halts on daily loss breach.
-  void update(const OrderManager &om, const std::vector<std::string> &tickers);
+  void update(const OrderManager &order_mgr,
+              const std::vector<std::string> &tickers);
 
   [[nodiscard]] bool is_halted() const;
   void halt();
