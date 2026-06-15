@@ -86,14 +86,14 @@ void Quoter::refresh_ask(const std::string &ticker, int desired_ask) {
   }
 }
 
-void Quoter::update(std::string_view ticker, const LocalOrderbook &ob) {
-  if (!ob.best_bid().has_value() || !ob.best_ask().has_value()) {
+void Quoter::update(std::string_view ticker, const LocalOrderbook &book) {
+  if (!book.best_bid().has_value() || !book.best_ask().has_value()) {
     return;
   }
 
   const std::string ticker_str{ticker};
-  const double mid = ob.mid_price_cents();
-  const double fv = FairValueEngine::estimate(
+  const double mid = book.mid_price_cents();
+  const double fair_val = FairValueEngine::estimate(
       FairValueInput{mid, kDefaultTimeToCloseHours, 0, {}});
 
   const int half_spread =
@@ -103,7 +103,7 @@ void Quoter::update(std::string_view ticker, const LocalOrderbook &ob) {
       config_.skew_per_contract_cents;
 
   const auto [desired_bid, desired_ask] =
-      compute_quotes(fv, half_spread, inventory_skew);
+      compute_quotes(fair_val, half_spread, inventory_skew);
 
   refresh_bid(ticker_str, desired_bid);
   refresh_ask(ticker_str, desired_ask);

@@ -33,7 +33,7 @@ class Quoter {
 public:
   Quoter(QuoterConfig config, OrderManager &order_mgr, RiskManager &risk_mgr);
 
-  void update(std::string_view ticker, const LocalOrderbook &ob);
+  void update(std::string_view ticker, const LocalOrderbook &book);
 
 private:
   struct LiveQuote {
