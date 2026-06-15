@@ -481,7 +481,7 @@ graph TD
 
     style T fill:#555,color:#fff
     style OB fill:#555,color:#fff
-    style FV fill:#2a6,color:#fff
+    style FV fill:#555,color:#fff
 ```
 
 **Files:**
@@ -538,7 +538,7 @@ graph TD
     style FV fill:#555,color:#fff
     style RM fill:#555,color:#fff
     style OM fill:#555,color:#fff
-    style QE fill:#2a6,color:#fff
+    style QE fill:#555,color:#fff
 ```
 
 **Files:**
@@ -701,6 +701,6 @@ int main() {
 - [x] Phase 5 — WebSocket Client
 - [x] Phase 6 — Order Manager
 - [x] Phase 7 — Risk Manager
-- [ ] Phase 8 — Fair Value Engine
-- [ ] Phase 9 — Quoter
+- [x] Phase 8 — Fair Value Engine
+- [x] Phase 9 — Quoter
 - [ ] Phase 10 — Main Loop & Integration
