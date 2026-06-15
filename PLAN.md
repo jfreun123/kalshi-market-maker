@@ -748,6 +748,64 @@ struct TheoGrid {
 
 ---
 
+### Phase 13 — Constraint Bitset & Adverse Selection Guard
+
+**Constraint bitset (replaces `bool halted_` in `RiskManager`)**
+
+The current `RiskManager` uses a single boolean halt flag. Replace it with a `std::bitset` where each bit represents a named, independently set/clearable constraint. `is_halted()` becomes `constraints_.any()` — the Quoter interface stays unchanged.
+
+```cpp
+enum class Constraint : uint8_t {
+    kPnLLimit      = 0,  // daily loss limit breached — requires manual resume()
+    kPositionLimit = 1,  // net position too large on a ticker
+    kOpenOrders    = 2,  // too many resting orders
+    kHighFillRate  = 3,  // adverse selection signal — auto-clears after cooldown
+    kStaleBook     = 4,  // no WS delta received within staleness window
+    kModelDiverge  = 5,  // FairValueEngine output outside plausible range
+    kManualHalt    = 6,  // operator kill switch
+    kConnectivity  = 7,  // WS/REST transport failure
+};
+
+class RiskManager {
+public:
+    void   set(Constraint bit);
+    void   clear(Constraint bit);
+    bool   is_set(Constraint bit) const;
+    bool   is_halted() const;           // constraints_.any()
+
+    // Diagnostic: which constraints are active?
+    std::string active_constraints() const;
+    ...
+};
+```
+
+Benefits over a single flag:
+- Operators can see *why* the system is pulled, not just *that* it is
+- Bits with different clearing semantics: `kPnLLimit` requires manual `resume()`; `kStaleBook` auto-clears on the next WS message; `kHighFillRate` auto-clears after a cooldown timer
+- Tooling/logging can track constraint transitions over time
+
+**Pull-on-fill-count (adverse selection guard)**
+
+If `N` fills arrive on a ticker within `T` seconds, the system is likely being picked off by an informed trader or stale on news. The correct response is to pull quotes, wait for the orderbook to stabilize, and re-enter after a model refresh.
+
+```cpp
+struct AdverseSelectionConfig {
+    static constexpr int    kDefaultFillThreshold  = 5;
+    static constexpr double kDefaultWindowSeconds  = 30.0;
+    static constexpr double kDefaultCooldownSeconds = 10.0;
+
+    int    fill_threshold   = kDefaultFillThreshold;   // fills within window → pull
+    double window_seconds   = kDefaultWindowSeconds;
+    double cooldown_seconds = kDefaultCooldownSeconds; // before re-entry attempt
+};
+```
+
+On each `record_fill()` call, the guard checks the rolling window. If the threshold is crossed it sets `Constraint::kHighFillRate` and cancels all quotes for that ticker. The main loop clears `kHighFillRate` after `cooldown_seconds` and triggers a fresh `quoter.update()` cycle.
+
+This fits prediction markets particularly well: information events (news drops, vote counts, weather readings) arrive discretely and move prices step-wise, so the pull-wait-re-enter cycle is a better response than continuous repricing.
+
+---
+
 ## Dependency Summary
 
 | Library | Purpose | How to add |
