@@ -2,6 +2,7 @@
 
 #include <cstdlib>
 #include <string>
+#include <string_view>
 
 namespace kalshi {
 
@@ -9,7 +10,7 @@ constexpr double kCentsToDollars = 100.0;
 
 RiskManager::RiskManager(RiskLimits limits) : limits_{limits} {}
 
-bool RiskManager::check_order(const std::string &ticker, Side side,
+bool RiskManager::check_order(std::string_view ticker, Side side,
                               int /*price_cents*/, int quantity) const {
   if (halted_) {
     return false;
@@ -18,14 +19,15 @@ bool RiskManager::check_order(const std::string &ticker, Side side,
     return false;
   }
 
-  auto open_it = cached_open_order_count_.find(ticker);
+  const std::string ticker_str{ticker};
+  auto open_it = cached_open_order_count_.find(ticker_str);
   const int open_count =
       (open_it != cached_open_order_count_.end()) ? open_it->second : 0;
   if (open_count >= limits_.max_open_orders_per_market) {
     return false;
   }
 
-  auto pos_it = cached_position_.find(ticker);
+  auto pos_it = cached_position_.find(ticker_str);
   const int current_pos =
       (pos_it != cached_position_.end()) ? pos_it->second : 0;
   const int delta = (side == Side::Yes) ? quantity : -quantity;

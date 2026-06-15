@@ -5,6 +5,7 @@
 
 #include <deque>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -23,27 +24,27 @@ public:
 
   // Place a limit order and record it locally.
   // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
-  Order place(const std::string &ticker, Side side, int price_cents,
+  Order place(std::string_view ticker, Side side, int price_cents,
               int quantity);
 
   // Cancel an order. Returns true on success, false if the API rejected it.
   // Does not remove the order from open_orders on failure.
-  bool cancel(const std::string &order_id);
+  bool cancel(std::string_view order_id);
 
   // Cancel all open orders for ticker. No-op for unknown tickers.
-  void cancel_all(const std::string &ticker);
+  void cancel_all(std::string_view ticker);
 
   // Process a fill event from the WebSocket feed.
   // Idempotent: duplicate fills (same order_id + timestamp) are ignored.
   void record_fill(const Fill &fill);
 
   // Net YES contracts for ticker (negative = net NO exposure).
-  [[nodiscard]] int net_position(const std::string &ticker) const;
+  [[nodiscard]] int net_position(std::string_view ticker) const;
 
   // Cumulative PnL in cents for matched (YES + NO) position pairs.
   // Computed via FIFO: each NO fill that closes a YES lot (or vice versa)
   // contributes (100 - yes_price - no_price) * matched_qty cents.
-  [[nodiscard]] double realized_pnl(const std::string &ticker) const;
+  [[nodiscard]] double realized_pnl(std::string_view ticker) const;
 
   [[nodiscard]] const std::unordered_map<std::string, Order> &
   open_orders() const;

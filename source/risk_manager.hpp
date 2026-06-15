@@ -4,6 +4,7 @@
 #include "types.hpp"
 
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -32,7 +33,7 @@ public:
 
   // Returns false if halted or any limit would be breached by this order.
   // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
-  bool check_order(const std::string &ticker, Side side, int price_cents,
+  bool check_order(std::string_view ticker, Side side, int price_cents,
                    int quantity) const;
 
   // Snapshots open order counts, net positions, and realized PnL from om for

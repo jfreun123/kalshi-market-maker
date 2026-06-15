@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace kalshi {
@@ -12,7 +13,7 @@ OrderManager::OrderManager(RestClient &rest_client)
     : rest_client_{rest_client} {}
 
 // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
-Order OrderManager::place(const std::string &ticker, Side side, int price_cents,
+Order OrderManager::place(std::string_view ticker, Side side, int price_cents,
                           int quantity) {
   Order order = rest_client_.place_order(ticker, side, price_cents, quantity,
                                          OrderType::Limit);
@@ -20,15 +21,15 @@ Order OrderManager::place(const std::string &ticker, Side side, int price_cents,
   return order;
 }
 
-bool OrderManager::cancel(const std::string &order_id) {
+bool OrderManager::cancel(std::string_view order_id) {
   bool success = rest_client_.cancel_order(order_id);
   if (success) {
-    open_orders_.erase(order_id);
+    open_orders_.erase(std::string{order_id});
   }
   return success;
 }
 
-void OrderManager::cancel_all(const std::string &ticker) {
+void OrderManager::cancel_all(std::string_view ticker) {
   std::vector<std::string> to_cancel;
   for (const auto &[order_id, order] : open_orders_) {
     if (order.market_ticker == ticker) {
@@ -93,13 +94,13 @@ void OrderManager::record_fill(const Fill &fill) {
   }
 }
 
-int OrderManager::net_position(const std::string &ticker) const {
-  auto position_it = net_position_.find(ticker);
+int OrderManager::net_position(std::string_view ticker) const {
+  auto position_it = net_position_.find(std::string{ticker});
   return position_it == net_position_.end() ? 0 : position_it->second;
 }
 
-double OrderManager::realized_pnl(const std::string &ticker) const {
-  auto pnl_it = realized_pnl_.find(ticker);
+double OrderManager::realized_pnl(std::string_view ticker) const {
+  auto pnl_it = realized_pnl_.find(std::string{ticker});
   return pnl_it == realized_pnl_.end() ? 0.0 : pnl_it->second;
 }
 
