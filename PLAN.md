@@ -633,7 +633,7 @@ graph TD
     style RM fill:#555,color:#fff
     style FV fill:#555,color:#fff
     style QE fill:#555,color:#fff
-    style LOOP fill:#2a6,color:#fff
+    style LOOP fill:#555,color:#fff
 ```
 
 **Main loop pseudocode:**
@@ -879,4 +879,4 @@ The `spdlog` already in the dependency list covers event logging; `Metrics` is a
 - [x] Phase 7 — Risk Manager
 - [x] Phase 8 — Fair Value Engine
 - [x] Phase 9 — Quoter
-- [ ] Phase 10 — Main Loop & Integration
+- [x] Phase 10 — Main Loop & Integration
