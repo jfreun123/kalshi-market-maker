@@ -17,7 +17,7 @@ constexpr double kMaxValidCents = 99.0;
 constexpr double kMidPointCents = 50.0;
 constexpr double kContractMaxCents = 100.0;
 
-double FairValueEngine::estimate(const FairValueInput &input) const {
+double FairValueEngine::estimate(const FairValueInput &input) {
   // v1: baseline — start from the orderbook mid.
   double value = input.mid_cents;
 

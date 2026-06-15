@@ -38,89 +38,77 @@ kalshi::FairValueInput make_input(double mid_cents,
 
 TEST(FairValueTest, EstimateReturnsMidPriceForBaselineInputs) {
   // Large time → no decay; zero position → no skew; no external.
-  const kalshi::FairValueEngine engine;
-  const double result =
-      engine.estimate(make_input(kTestPriceCents, kLargeTimeHours));
+  const double result = kalshi::FairValueEngine::estimate(
+      make_input(kTestPriceCents, kLargeTimeHours));
   EXPECT_NEAR(result, kTestPriceCents, kTolerance);
 }
 
 TEST(FairValueTest, OutputClampedToMinimumAtBelowMinMidPrice) {
-  const kalshi::FairValueEngine engine;
-  const double result =
-      engine.estimate(make_input(kBelowMinPriceCents, kLargeTimeHours));
+  const double result = kalshi::FairValueEngine::estimate(
+      make_input(kBelowMinPriceCents, kLargeTimeHours));
   EXPECT_NEAR(result, kMinValidCents, kTolerance);
 }
 
 TEST(FairValueTest, OutputClampedToMaximumAtAboveMaxMidPrice) {
-  const kalshi::FairValueEngine engine;
-  const double result =
-      engine.estimate(make_input(kAboveMaxPriceCents, kLargeTimeHours));
+  const double result = kalshi::FairValueEngine::estimate(
+      make_input(kAboveMaxPriceCents, kLargeTimeHours));
   EXPECT_NEAR(result, kMaxValidCents, kTolerance);
 }
 
 TEST(FairValueTest, TimeDecayPullsHighPriceTowardFifty) {
-  const kalshi::FairValueEngine engine;
-  const double result =
-      engine.estimate(make_input(kHighPriceCents, kSmallTimeHours));
+  const double result = kalshi::FairValueEngine::estimate(
+      make_input(kHighPriceCents, kSmallTimeHours));
   EXPECT_LT(result, kHighPriceCents);
 }
 
 TEST(FairValueTest, TimeDecayPullsLowPriceTowardFifty) {
-  const kalshi::FairValueEngine engine;
-  const double result =
-      engine.estimate(make_input(kLowPriceCents, kSmallTimeHours));
+  const double result = kalshi::FairValueEngine::estimate(
+      make_input(kLowPriceCents, kSmallTimeHours));
   EXPECT_GT(result, kLowPriceCents);
 }
 
 TEST(FairValueTest, TimeDecayNegligibleWhenFarFromClose) {
-  const kalshi::FairValueEngine engine;
-  const double result =
-      engine.estimate(make_input(kHighPriceCents, kLargeTimeHours));
+  const double result = kalshi::FairValueEngine::estimate(
+      make_input(kHighPriceCents, kLargeTimeHours));
   EXPECT_NEAR(result, kHighPriceCents, kTolerance);
 }
 
 TEST(FairValueTest, InventorySkewReducesFairValueWhenLong) {
-  const kalshi::FairValueEngine engine;
-  const double result = engine.estimate(
+  const double result = kalshi::FairValueEngine::estimate(
       make_input(kMidPriceCents, kLargeTimeHours, kLongPositionContracts));
   EXPECT_LT(result, kMidPriceCents);
 }
 
 TEST(FairValueTest, InventorySkewIncreasesFairValueWhenShort) {
-  const kalshi::FairValueEngine engine;
-  const double result = engine.estimate(
+  const double result = kalshi::FairValueEngine::estimate(
       make_input(kMidPriceCents, kLargeTimeHours, kShortPositionContracts));
   EXPECT_GT(result, kMidPriceCents);
 }
 
 TEST(FairValueTest, ZeroPositionDoesNotSkewFairValue) {
-  const kalshi::FairValueEngine engine;
-  const double result =
-      engine.estimate(make_input(kTestPriceCents, kLargeTimeHours, 0));
+  const double result = kalshi::FairValueEngine::estimate(
+      make_input(kTestPriceCents, kLargeTimeHours, 0));
   EXPECT_NEAR(result, kTestPriceCents, kTolerance);
 }
 
 TEST(FairValueTest, ExternalProbabilityBlendedIntoEstimate) {
   // mid=50, external=80%: blended result should be between 50 and 80.
-  const kalshi::FairValueEngine engine;
-  const double result = engine.estimate(
+  const double result = kalshi::FairValueEngine::estimate(
       make_input(kMidPriceCents, kLargeTimeHours, 0, kExternalProbHigh));
   EXPECT_GT(result, kMidPriceCents);
   EXPECT_LT(result, kExternalProbHighCents);
 }
 
 TEST(FairValueTest, AbsentExternalProbabilityGivesBaselineResult) {
-  const kalshi::FairValueEngine engine;
-  const double result =
-      engine.estimate(make_input(kTestPriceCents, kLargeTimeHours));
+  const double result = kalshi::FairValueEngine::estimate(
+      make_input(kTestPriceCents, kLargeTimeHours));
   EXPECT_NEAR(result, kTestPriceCents, kTolerance);
 }
 
 TEST(FairValueTest, FairValueMonotonicallyDecreasesWithIncreasingLongPosition) {
-  const kalshi::FairValueEngine engine;
-  const double result_small = engine.estimate(
+  const double result_small = kalshi::FairValueEngine::estimate(
       make_input(kMidPriceCents, kLargeTimeHours, kSmallLongPosition));
-  const double result_larger = engine.estimate(
+  const double result_larger = kalshi::FairValueEngine::estimate(
       make_input(kMidPriceCents, kLargeTimeHours, kLargerLongPosition));
   EXPECT_GT(result_small, result_larger);
 }

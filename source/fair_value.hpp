@@ -21,7 +21,7 @@ struct FairValueInput {
 //   v4 (external):   blend an external probability signal if provided
 class FairValueEngine {
 public:
-  [[nodiscard]] double estimate(const FairValueInput &input) const;
+  [[nodiscard]] static double estimate(const FairValueInput &input);
 };
 
 } // namespace kalshi
