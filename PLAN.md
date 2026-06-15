@@ -679,6 +679,75 @@ int main() {
 
 ---
 
+## Post-Phase-10 Roadmap
+
+### Phase 11 — Pluggable Pricing Model
+
+The current `FairValueEngine` is a rule-based heuristic (mid + time-decay + inventory skew + external signal hook). Replace the internals with a `IPricingModel` interface so the estimation strategy is swappable without touching the Quoter or OrderManager.
+
+**Concrete implementations to build toward:**
+
+- **Heuristic** (current): mid-price + parametric time-decay. Ship-safe baseline with no edge.
+- **Calibrated statistical model**: train on historical resolution outcomes vs. market price at various time horizons. Logistic regression or XGBoost on features: time-to-close, bid/ask imbalance, recent delta velocity, cross-market correlation. Output is a calibrated probability that feeds as `external_prob`.
+- **Order flow model**: short-term signal from trade imbalance and quote stuffing — effective in liquid prediction markets where informed traders leave footprints.
+- **Reinforcement learning (long-term)**: directly optimize spread/skew parameters rather than computing a fair value. The Quoter's `QuoterConfig` fields become policy outputs from an RL agent trained on historical PnL.
+
+**Architecture sketch:**
+
+```cpp
+class IPricingModel {
+public:
+    virtual double estimate(const FairValueInput &input) = 0;
+    virtual ~IPricingModel() = default;
+};
+
+class FairValueEngine {
+public:
+    explicit FairValueEngine(std::unique_ptr<IPricingModel> model);
+    [[nodiscard]] double estimate(const FairValueInput &input) const;
+private:
+    std::unique_ptr<IPricingModel> model_;
+};
+```
+
+The `external_prob` field in `FairValueInput` is already the natural injection point for any model that outputs a probability.
+
+---
+
+### Phase 12 — Theo Grid (Fast Repricing for Underlying-Linked Markets)
+
+For markets driven by a fast-moving underlying (BTC price, S&P index, weather score), re-running the pricing model on every tick is too slow and wasteful. Borrow the options market-making technique of pre-computing a **theo grid**: a lookup table of `(underlying_value, time_remaining) → fair_probability`, updated periodically and interpolated linearly between ticks.
+
+**When this matters:**
+- Quoting multiple correlated tickers simultaneously (e.g., all BTC price-tier markets: `>$90k`, `>$95k`, `>$99k`). One spot move → reprice all tickers via table lookup with no model calls.
+- Underlying moves faster than the model can evaluate (sub-millisecond repricing required).
+- Running an ML model whose inference cost is non-trivial.
+
+**Analogy to options greeks:**
+- **Delta equivalent**: ∂prob/∂underlying — how much fair value shifts per unit of underlying movement. Drives how quickly quotes must reprice when spot ticks.
+- **Theta equivalent**: ∂prob/∂time — already captured by the time-decay layer in FairValueEngine; the grid makes it a free table lookup.
+
+**Architecture sketch:**
+
+```cpp
+struct TheoGrid {
+    // Precomputed: underlying_prices[i], time_buckets[j] → fair_prob[i][j]
+    std::vector<double> underlying_prices;  // e.g. BTC in $1000 increments
+    std::vector<double> time_buckets_hours;
+    std::vector<std::vector<double>> fair_prob;
+
+    // Called on every underlying tick; O(log n) binary search + O(1) lerp
+    double interpolate(double underlying, double time_hours) const;
+
+    // Rebuild the full grid (called on model retrain or param change)
+    void rebuild(const IPricingModel &model, const std::string &ticker);
+};
+```
+
+`TheoGrid::interpolate()` replaces `FairValueEngine::estimate()` on the hot path. The grid is rebuilt in a background thread whenever the model is retrained or market conditions shift significantly.
+
+---
+
 ## Dependency Summary
 
 | Library | Purpose | How to add |
