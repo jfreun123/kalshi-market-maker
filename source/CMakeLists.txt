@@ -1,6 +1,6 @@
 # ---- Library ----
 
-add_library(kalshi_lib STATIC auth.cpp http_transport.cpp rest_client.cpp orderbook.cpp websocket_client.cpp order_manager.cpp risk_manager.cpp fair_value.cpp)
+add_library(kalshi_lib STATIC auth.cpp http_transport.cpp rest_client.cpp orderbook.cpp websocket_client.cpp order_manager.cpp risk_manager.cpp fair_value.cpp quoter.cpp)
 
 target_include_directories(
     kalshi_lib
