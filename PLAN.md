@@ -806,6 +806,55 @@ This fits prediction markets particularly well: information events (news drops, 
 
 ---
 
+### Phase 14 — Logging & Observability
+
+**Structured logging (spdlog)**
+
+Every significant event should emit a structured log line — order placed/cancelled, fill received, constraint set/cleared, reprice triggered. Use [spdlog](https://github.com/gabime/spdlog) (already listed as a dependency) with a JSON sink so logs are machine-parseable.
+
+Key log sites:
+- `OrderManager::place()` / `cancel()` — order ID, ticker, side, price, qty, latency
+- `OrderManager::record_fill()` — fill details, updated net position, realized PnL
+- `RiskManager::set(Constraint)` / `clear(Constraint)` — which bit, current full constraint state
+- `Quoter::refresh_bid/ask()` — desired vs. current price, reprice decision
+- `WebSocketClient` — connect, disconnect, reconnect attempts
+
+**Latency metrics**
+
+The critical latency path is: WS delta received → fair value computed → order sent. Instrument each segment independently so regressions are visible immediately.
+
+Latencies to track (as histograms or rolling percentiles — p50/p95/p99):
+
+| Metric | Definition |
+|---|---|
+| `ws_delta_to_fv_us` | Time from WS message receipt to `FairValueEngine::estimate()` returning |
+| `fv_to_order_us` | Time from `estimate()` returning to HTTP POST sent |
+| `order_rtt_ms` | Time from POST sent to 200 response received |
+| `fill_to_record_us` | Time from fill WS message to `record_fill()` completing |
+| `quote_cycle_us` | Full `quoter.update()` wall time |
+| `reprice_rate` | Reprices per minute per ticker (churn indicator) |
+| `fill_rate` | Fills per minute per ticker (adverse selection indicator) |
+
+**Implementation sketch**
+
+A lock-free ring-buffer metric collector keeps overhead under 1 µs per sample. A background thread drains it to a Prometheus endpoint or a local CSV file every second.
+
+```cpp
+// Minimal interface — no virtual dispatch on the hot path
+class Metrics {
+public:
+    void record(std::string_view name, double value_us);
+    void increment(std::string_view name);
+
+    // Called from a background thread to flush samples
+    void flush(std::ostream &out);
+};
+```
+
+The `spdlog` already in the dependency list covers event logging; `Metrics` is a separate lightweight collector. Keep them separate — logs are for debugging, metrics are for dashboards and alerting.
+
+---
+
 ## Dependency Summary
 
 | Library | Purpose | How to add |
