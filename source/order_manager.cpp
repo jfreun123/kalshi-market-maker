@@ -6,6 +6,8 @@
 
 namespace kalshi {
 
+constexpr int kContractMaxCents = 100;
+
 OrderManager::OrderManager(RestClient &rest_client)
     : rest_client_{rest_client} {}
 
@@ -60,7 +62,8 @@ void OrderManager::record_fill(const Fill &fill) {
     Lot &front = opposing_inventory.front();
     const int matched = std::min(remaining, front.remaining);
     realized_pnl_[fill.market_ticker] +=
-        static_cast<double>(100 - fill.price_cents - front.price_cents) *
+        static_cast<double>(kContractMaxCents - fill.price_cents -
+                            front.price_cents) *
         matched;
     remaining -= matched;
     front.remaining -= matched;
