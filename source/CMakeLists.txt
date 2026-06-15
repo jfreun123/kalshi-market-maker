@@ -2,6 +2,11 @@
 
 add_library(kalshi_lib STATIC auth.cpp http_transport.cpp rest_client.cpp orderbook.cpp websocket_client.cpp order_manager.cpp risk_manager.cpp fair_value.cpp quoter.cpp)
 
+add_executable(kalshi_mm main.cpp)
+target_link_libraries(kalshi_mm PRIVATE kalshi_lib)
+target_compile_features(kalshi_mm PRIVATE cxx_std_23)
+set_target_properties(kalshi_mm PROPERTIES CXX_CLANG_TIDY "clang-tidy")
+
 target_include_directories(
     kalshi_lib
     PUBLIC
