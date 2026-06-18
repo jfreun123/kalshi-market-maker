@@ -855,6 +855,311 @@ The `spdlog` already in the dependency list covers event logging; `Metrics` is a
 
 ---
 
+### Phase 15 — Config File & Graceful Shutdown
+
+All runtime parameters (target tickers, spread, position limits, API credentials) are loaded from a TOML or JSON config file at startup. A SIGTERM/SIGINT handler cancels all open orders before the process exits.
+
+**Why these together:** Both are required before going live on real capital. Hardcoded parameters mean recompiling to change a ticker; no graceful shutdown means leaving naked quotes on the book after Ctrl-C.
+
+```mermaid
+graph TD
+    CFG["config.toml"]
+    LOADER["load_config\nAppConfig"]
+    AUTH["Auth"]
+    RC["RestClient"]
+    RM["RiskManager"]
+    QE["Quoter"]
+    OM["OrderManager"]
+    SIG["SignalHandler\nSIGTERM / SIGINT"]
+
+    CFG --> LOADER
+    LOADER --> AUTH
+    LOADER --> RC
+    LOADER --> RM
+    LOADER --> QE
+    SIG -->|cancel_all + stop| OM
+
+    style AUTH fill:#555,color:#fff
+    style RC fill:#555,color:#fff
+    style RM fill:#555,color:#fff
+    style QE fill:#555,color:#fff
+    style OM fill:#555,color:#fff
+    style CFG fill:#2a6,color:#fff
+    style LOADER fill:#2a6,color:#fff
+    style SIG fill:#2a6,color:#fff
+```
+
+**Files:**
+- `source/config.hpp` / `source/config.cpp`
+- `test/source/config_test.cpp`
+- `config.example.toml`
+
+**Interface:**
+
+```cpp
+struct AppConfig {
+    std::string api_key;
+    std::string private_key_path;
+    std::string base_url;
+    std::vector<std::string> target_tickers;
+    QuoterConfig quoter;
+    RiskLimits risk;
+};
+
+AppConfig load_config(const std::filesystem::path& path);
+```
+
+**Graceful shutdown (in main):**
+
+```cpp
+std::signal(SIGTERM, [](int) { g_shutdown.store(true); });
+std::signal(SIGINT,  [](int) { g_shutdown.store(true); });
+
+// On shutdown:
+om.cancel_all_markets();
+ws.stop();
+```
+
+**Testing:**
+- **Unit:** parse a known fixture, assert every field maps correctly. Test missing required fields throw. Test optional fields get defaults. Test unknown fields are ignored (forward-compat).
+- **Unit (shutdown):** send SIGINT to the process under test via `kill(getpid(), SIGINT)`, assert `cancel_all` was called on the fake `OrderManager`.
+
+---
+
+### Phase 16 — CI Pipeline & Coverage
+
+GitHub Actions workflow: build, test, clang-tidy, ASAN, and coverage report on every push and pull request. A coverage threshold fails the build if coverage drops below 80%.
+
+```mermaid
+graph TD
+    PR["Push / Pull Request"]
+    BUILD["cmake --preset=dev\nbuild"]
+    TEST["ctest\nall units"]
+    TIDY["clang-tidy\nstaged files"]
+    ASAN["cmake --preset=asan\nctest"]
+    COV["lcov\nHTML report"]
+
+    PR --> BUILD
+    BUILD --> TEST
+    BUILD --> TIDY
+    BUILD --> ASAN
+    TEST --> COV
+
+    style PR fill:#2a6,color:#fff
+    style BUILD fill:#2a6,color:#fff
+    style TEST fill:#2a6,color:#fff
+    style TIDY fill:#2a6,color:#fff
+    style ASAN fill:#2a6,color:#fff
+    style COV fill:#2a6,color:#fff
+```
+
+**Files:**
+- `.github/workflows/ci.yml`
+- `cmake/coverage.cmake`
+- `CMakePresets.json` — add `coverage` preset (`-fprofile-arcs -ftest-coverage`)
+
+**CI jobs:**
+
+| Job | Preset | Steps |
+|---|---|---|
+| `build-and-test` | `dev` | configure → build → ctest |
+| `clang-tidy` | `dev` | run tidy on all `.cpp` files |
+| `asan` | `asan` | build → ctest under ASAN |
+| `coverage` | `coverage` | build → ctest → lcov → upload HTML artifact |
+
+**Testing:**
+- The CI itself is the test. Green check on every PR is the deliverable.
+- Coverage threshold enforced via `lcov --fail-under-line 80`.
+
+---
+
+### Phase 17 — Benchmarking
+
+Google Benchmark microbenchmarks for the hot path. Gives concrete µs numbers before Phase 12 (Theo Grid) optimization and prevents performance regressions from being silently introduced.
+
+```mermaid
+graph TD
+    OB["LocalOrderbook"]
+    FV["FairValueEngine"]
+    QE["Quoter"]
+    BM["Google Benchmark\nbench/ targets"]
+    OUT["Latency Report\nµs per operation"]
+
+    OB -->|BM_ApplyDelta| BM
+    FV -->|BM_FairValueEstimate| BM
+    QE -->|BM_QuoterUpdate| BM
+    BM --> OUT
+
+    style OB fill:#555,color:#fff
+    style FV fill:#555,color:#fff
+    style QE fill:#555,color:#fff
+    style BM fill:#2a6,color:#fff
+    style OUT fill:#2a6,color:#fff
+```
+
+**Files:**
+- `bench/orderbook_bench.cpp`
+- `bench/fair_value_bench.cpp`
+- `bench/quoter_bench.cpp`
+- `cmake/benchmark.cmake`
+
+**Key benchmarks:**
+
+| Benchmark | What it measures | Target |
+|---|---|---|
+| `BM_ApplyDelta` | `LocalOrderbook::apply_delta()` on a 100-level book | < 1 µs |
+| `BM_ApplySnapshot` | Full snapshot apply | < 10 µs |
+| `BM_FairValueEstimate` | `FairValueEngine::estimate()` round trip | < 5 µs |
+| `BM_QuoterUpdate` | Full `Quoter::update()` with fake OM/RM | < 50 µs |
+
+**Testing:**
+- Benchmarks are not part of `ctest` — run manually with `cmake --build build -t bench`.
+- CI job (optional, gated) runs benchmarks and posts results as a PR comment for comparison.
+
+---
+
+### Phase 18 — Replay & Fuzz Testing
+
+Two distinct test capabilities addressing the two highest-risk gaps:
+
+1. **Replay:** Record a live WebSocket session to a newline-delimited JSON file and replay it through the full component stack offline. Validates quoting behavior on real market data without a live connection. Essential for regression-testing pricing changes.
+2. **Fuzz:** libFuzzer targets for WebSocket message parsing and JSON deserialization — the most likely crash site from a malformed or unexpected exchange message.
+
+```mermaid
+graph TD
+    LIVE["Live WebSocket\n(demo env)"]
+    REC["record_session\ntool"]
+    JSONL["test/fixtures/\nsession_*.jsonl"]
+    FAKE["FakeWebSocket"]
+    STACK["Full Stack\n(LocalOrderbook + Quoter)"]
+    FUZZ["libFuzzer\ntargets"]
+    PARSER["WS Message Parser\nJSON Parser"]
+
+    LIVE --> REC
+    REC --> JSONL
+    JSONL --> FAKE
+    FAKE --> STACK
+    FUZZ --> PARSER
+
+    style FAKE fill:#555,color:#fff
+    style STACK fill:#555,color:#fff
+    style PARSER fill:#555,color:#fff
+    style REC fill:#2a6,color:#fff
+    style JSONL fill:#2a6,color:#fff
+    style FUZZ fill:#2a6,color:#fff
+```
+
+**Files:**
+- `tools/record_session.cpp` — connects to live WS and writes raw messages to `session_<timestamp>.jsonl`
+- `test/replay/replay_test.cpp` — drives `FakeWebSocket` from a `.jsonl` file, asserts no crash, no open orders at end
+- `test/fuzz/parse_ws_message_fuzz.cpp` — libFuzzer entry point over the WS message parser
+- `test/fuzz/parse_json_fuzz.cpp` — libFuzzer entry point over JSON orderbook parsing
+- `test/fixtures/session_*.jsonl` — committed recorded sessions (anonymized/demo data)
+
+**Testing:**
+- **Replay:** feed a 10-minute demo session; assert no assertions fire, no open orders remain after shutdown, simulated PnL is within plausible bounds.
+- **Fuzz (CI):** run with `-max_total_time=30`; any crash or ASAN finding = CI failure. Corpus committed to `test/fuzz/corpus/`.
+
+---
+
+### Phase 19 — Paper Trading Mode
+
+A `--paper` CLI flag wires `PaperTransport` in place of `HttpTransport`. Orders are logged to stdout and a JSON file but not submitted. Fills are simulated when the WebSocket mid-price crosses a resting quote. Lets you run the full system on live market data with zero financial risk.
+
+```mermaid
+graph TD
+    FLAG["--paper flag"]
+    IHT["IHttpTransport"]
+    HTTP["HttpTransport\n(production)"]
+    PAPER["PaperTransport\n(simulated fills\n+ order log)"]
+    OM["OrderManager"]
+    LOG["orders.jsonl\nsimulated PnL"]
+
+    FLAG -->|selects| PAPER
+    IHT --> HTTP
+    IHT --> PAPER
+    PAPER --> OM
+    PAPER --> LOG
+
+    style IHT fill:#555,color:#fff
+    style HTTP fill:#555,color:#fff
+    style OM fill:#555,color:#fff
+    style FLAG fill:#2a6,color:#fff
+    style PAPER fill:#2a6,color:#fff
+    style LOG fill:#2a6,color:#fff
+```
+
+**Files:**
+- `source/paper_transport.hpp` / `source/paper_transport.cpp`
+- `test/source/paper_transport_test.cpp`
+
+**Interface:**
+
+```cpp
+class PaperTransport : public IHttpTransport {
+public:
+    // Returns a synthetic 201 with a generated order ID; logs the order
+    HttpResponse request(const HttpRequest& req) override;
+
+    // Called by the WS callback when mid crosses a resting quote
+    void simulate_fill(const std::string& order_id, int qty);
+
+    const std::vector<Order>& simulated_orders() const;
+    double simulated_pnl() const;
+};
+```
+
+**Testing:**
+- **Unit:** verify `place_order` via `PaperTransport` returns a synthetic order ID and logs the order. Verify `cancel_order` removes it from the internal book. Verify `simulated_pnl()` accumulates correctly across a sequence of fills.
+- **Manual:** run `--paper` against the demo WS for 10 minutes; verify log output and PnL report are internally consistent.
+
+---
+
+### Phase 20 — Documentation
+
+Doxygen for all public headers. Architecture Decision Records (ADRs) for choices that would otherwise be re-litigated every time someone reads the code.
+
+```mermaid
+graph TD
+    HDR["source/*.hpp\npublic headers"]
+    DOX["Doxygen\ndocs/ target"]
+    HTML["docs/html/\nbrowsable API"]
+    ADR["docs/adr/\nArchitecture\nDecision Records"]
+
+    HDR --> DOX
+    DOX --> HTML
+
+    style HDR fill:#555,color:#fff
+    style DOX fill:#2a6,color:#fff
+    style HTML fill:#2a6,color:#fff
+    style ADR fill:#2a6,color:#fff
+```
+
+**Files:**
+- `docs/Doxyfile` — targets `source/*.hpp`, outputs to `docs/html/`
+- `docs/adr/001-http-client.md` — cpp-httplib over libcurl
+- `docs/adr/002-timestamp-parsing.md` — strptime/timegm over `std::chrono::parse`
+- `docs/adr/003-websocket-library.md`
+- `docs/adr/004-json-library.md`
+- `docs/adr/005-tdd-approach.md`
+- CMake target `docs` runs Doxygen
+
+**ADR format:**
+
+```markdown
+# ADR-NNN: Title
+## Status: Accepted
+## Context
+## Decision
+## Consequences
+```
+
+**Testing:**
+- `cmake --build build -t docs` must succeed with zero warnings in CI.
+- New ADR required on any PR that changes a library dependency or core interface.
+
+---
+
 ## Dependency Summary
 
 | Library | Purpose | How to add |
@@ -864,7 +1169,10 @@ The `spdlog` already in the dependency list covers event logging; `Metrics` is a
 | Boost.Beast | WebSocket client | `find_package(Boost REQUIRED COMPONENTS system)` |
 | nlohmann/json | JSON parsing | FetchContent or `find_package` |
 | spdlog | Structured logging | FetchContent |
-| Google Test | Unit testing (already configured) | Already in cmake/gtest.cmake |
+| Google Test | Unit testing (already configured) | Already in `cmake/gtest.cmake` |
+| Google Benchmark | Hot-path microbenchmarks | FetchContent `google/benchmark` |
+| libFuzzer | Fuzz testing WS/JSON parsers | Clang built-in — `-fsanitize=fuzzer` preset |
+| lcov | Test coverage reports | System package `lcov` + `cmake/coverage.cmake` |
 
 ---
 
@@ -880,3 +1188,13 @@ The `spdlog` already in the dependency list covers event logging; `Metrics` is a
 - [x] Phase 8 — Fair Value Engine
 - [x] Phase 9 — Quoter
 - [x] Phase 10 — Main Loop & Integration
+- [ ] Phase 11 — Pluggable Pricing Model
+- [ ] Phase 12 — Theo Grid
+- [ ] Phase 13 — Constraint Bitset & Adverse Selection Guard
+- [ ] Phase 14 — Logging & Observability
+- [x] Phase 15 — Config File & Graceful Shutdown
+- [x] Phase 16 — CI Pipeline & Coverage
+- [x] Phase 17 — Benchmarking
+- [x] Phase 18 — Replay & Fuzz Testing
+- [x] Phase 19 — Paper Trading Mode
+- [x] Phase 20 — Documentation

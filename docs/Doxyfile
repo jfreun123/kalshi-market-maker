@@ -1,0 +1,26 @@
+PROJECT_NAME           = "Kalshi Market Maker"
+PROJECT_NUMBER         = 0.1.0
+PROJECT_BRIEF          = "Automated market maker for Kalshi prediction markets"
+
+OUTPUT_DIRECTORY       = @CMAKE_CURRENT_SOURCE_DIR@/html
+INPUT                  = @PROJECT_SOURCE_DIR@/source
+FILE_PATTERNS          = *.hpp
+RECURSIVE              = NO
+EXTRACT_ALL            = YES
+EXTRACT_PRIVATE        = NO
+EXTRACT_STATIC         = YES
+
+GENERATE_HTML          = YES
+GENERATE_LATEX         = NO
+HTML_OUTPUT            = .
+
+QUIET                  = NO
+WARNINGS               = YES
+WARN_IF_UNDOCUMENTED   = YES
+WARN_AS_ERROR          = YES
+
+ENABLE_PREPROCESSING   = YES
+MACRO_EXPANSION        = YES
+
+ALPHABETICAL_INDEX     = YES
+SORT_MEMBER_DOCS       = YES

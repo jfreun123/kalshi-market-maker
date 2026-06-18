@@ -14,3 +14,7 @@ add_subdirectory(benchmark)
 # ---- Linting (clang-format) ----
 
 include(cmake/lint-targets.cmake)
+
+# ---- Documentation (Doxygen) ----
+
+include(cmake/docs.cmake)
