@@ -7,8 +7,8 @@ on:
     branches: [main]
 
 jobs:
-  test:
-    name: Tests
+  build-and-test:
+    name: Build & Test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -16,7 +16,9 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y clang clang-tidy cppcheck ninja-build
+          sudo apt-get install -y \
+            clang clang-tidy ninja-build \
+            libssl-dev
 
       - name: Configure
         run: cmake --preset dev
@@ -36,7 +38,9 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y clang clang-tidy cppcheck ninja-build
+          sudo apt-get install -y \
+            clang clang-tidy ninja-build \
+            libssl-dev
 
       - name: Configure
         run: cmake --preset asan
@@ -47,7 +51,46 @@ jobs:
       - name: Test
         run: ctest --preset asan
 
-  bench:
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y \
+            clang clang-tidy ninja-build \
+            libssl-dev lcov
+
+      - name: Configure
+        run: cmake --preset coverage
+
+      - name: Build
+        run: cmake --build --preset coverage --parallel
+
+      - name: Test
+        run: ctest --preset coverage
+
+      - name: Generate coverage report
+        run: |
+          lcov --capture \
+               --directory build-coverage \
+               --output-file coverage.info \
+               --ignore-errors mismatch
+          lcov --remove coverage.info \
+               '*/test/*' '*/_deps/*' '/usr/*' \
+               --output-file coverage_filtered.info
+          lcov --list coverage_filtered.info
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage_filtered.info
+
+  benchmark:
     name: Benchmark
     runs-on: ubuntu-latest
     steps:
@@ -56,7 +99,9 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y clang clang-tidy cppcheck ninja-build
+          sudo apt-get install -y \
+            clang clang-tidy ninja-build \
+            libssl-dev
 
       - name: Configure
         run: cmake --preset bench
