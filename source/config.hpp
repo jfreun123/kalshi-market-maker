@@ -1,0 +1,27 @@
+#pragma once
+
+#include "quoter.hpp"
+#include "risk_manager.hpp"
+
+#include <filesystem>
+#include <string>
+#include <vector>
+
+namespace kalshi {
+
+struct AppConfig {
+  std::string api_key;
+  std::string private_key_path;
+  std::string base_url;
+  std::string ws_url;
+  std::vector<std::string> target_tickers;
+  QuoterConfig quoter;
+  RiskLimits risk;
+};
+
+// Loads configuration from a JSON file.
+// Throws std::runtime_error if the file cannot be read or a required field
+// is absent.
+AppConfig load_config(const std::filesystem::path &path);
+
+} // namespace kalshi

@@ -1,0 +1,22 @@
+{
+  "api_key": "YOUR_KALSHI_API_KEY",
+  "private_key_path": "/path/to/your/kalshi-private-key.pem",
+  "base_url": "https://trading-api.kalshi.com/trade-api/v2",
+  "ws_url": "wss://trading-api.kalshi.com/trade-api/ws/v2",
+  "target_tickers": [
+    "KXBTCD-25DEC31-B90000",
+    "KXBTCD-25DEC31-B95000"
+  ],
+  "quoter": {
+    "target_spread_cents": 4,
+    "skew_per_contract_cents": 0.05,
+    "reprice_threshold_cents": 1,
+    "quote_size": 10
+  },
+  "risk": {
+    "max_position_per_market": 100,
+    "max_open_orders_per_market": 4,
+    "max_order_size": 25,
+    "daily_loss_limit": -500.0
+  }
+}

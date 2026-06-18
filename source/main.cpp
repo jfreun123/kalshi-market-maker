@@ -1,4 +1,5 @@
 #include "auth.hpp"
+#include "config.hpp"
 #include "http_transport.hpp"
 #include "order_manager.hpp"
 #include "orderbook.hpp"
@@ -10,10 +11,12 @@
 #include <atomic>
 #include <chrono>
 #include <csignal>
-#include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <iterator>
 #include <memory>
-#include <sstream>
+#include <span>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -27,70 +30,41 @@ static std::atomic<bool> g_shutdown{false};
 // Signal handler: must be a plain C function (no C++ linkage).
 extern "C" void handle_signal(int /*sig*/) { g_shutdown.store(true); }
 
-// ---- Helpers ----
-
-namespace {
-
-// Reads a required environment variable; throws if absent.
-std::string require_env(const char *name) {
-  // NOLINTNEXTLINE(concurrency-mt-unsafe) — called before any threads start
-  const char *value = std::getenv(name);
-  if (value == nullptr) {
-    throw std::runtime_error(std::string{"Required env var not set: "} + name);
-  }
-  return std::string{value};
-}
-
-// Splits a comma-separated string into a vector of trimmed tokens.
-std::vector<std::string> split_csv(std::string_view input) {
-  std::vector<std::string> tokens;
-  std::string current_token;
-  for (char character : input) {
-    if (character == ',') {
-      if (!current_token.empty()) {
-        tokens.push_back(std::move(current_token));
-        current_token.clear();
-      }
-    } else {
-      current_token += character;
-    }
-  }
-  if (!current_token.empty()) {
-    tokens.push_back(std::move(current_token));
-  }
-  return tokens;
-}
-
-} // namespace
-
 // ---- Entry point ----
 
-int main() {
+int main(int argc, char *argv[]) {
   try {
-    // Load credentials and target markets from environment.
-    const std::string api_key = require_env("KALSHI_API_KEY");
-    const std::string private_key_pem = require_env("KALSHI_PRIVATE_KEY_PEM");
-    const std::vector<std::string> tickers =
-        split_csv(require_env("KALSHI_TICKERS"));
+    const auto args = std::span<char *>(argv, static_cast<std::size_t>(argc));
+    const std::filesystem::path config_path =
+        (argc > 1) ? std::filesystem::path{args[1]}
+                   : std::filesystem::path{"config.json"};
 
-    if (tickers.empty()) {
-      std::cerr << "KALSHI_TICKERS must contain at least one ticker\n";
+    const kalshi::AppConfig app_config = kalshi::load_config(config_path);
+
+    // Read private key PEM content from the path in config.
+    std::ifstream key_file{app_config.private_key_path};
+    if (!key_file) {
+      std::cerr << "Cannot open private key: " << app_config.private_key_path
+                << '\n';
       return 1;
     }
+    const std::string private_key_pem{std::istreambuf_iterator<char>{key_file},
+                                      std::istreambuf_iterator<char>{}};
 
     // Build components.
-    kalshi::Auth auth{api_key, private_key_pem};
-    kalshi::RestClient rest{auth, std::make_unique<kalshi::HttpTransport>()};
-    kalshi::WebSocketClient ws_client{auth,
-                                      std::make_unique<kalshi::IxWebSocket>()};
+    kalshi::Auth auth{app_config.api_key, private_key_pem};
+    kalshi::RestClient rest{auth, std::make_unique<kalshi::HttpTransport>(),
+                            app_config.base_url};
+    kalshi::WebSocketClient ws_client{
+        auth, std::make_unique<kalshi::IxWebSocket>(), app_config.ws_url};
 
     std::unordered_map<std::string, kalshi::LocalOrderbook> ob_map;
     kalshi::OrderManager order_mgr{rest};
-    kalshi::RiskManager risk_mgr{kalshi::RiskLimits{}};
-    kalshi::Quoter quoter{kalshi::QuoterConfig{}, order_mgr, risk_mgr};
+    kalshi::RiskManager risk_mgr{app_config.risk};
+    kalshi::Quoter quoter{app_config.quoter, order_mgr, risk_mgr};
 
     // Seed orderbooks from REST so quotes can fire on the first WS delta.
-    for (const auto &ticker : tickers) {
+    for (const auto &ticker : app_config.target_tickers) {
       auto snap = rest.get_orderbook(ticker);
       ob_map[ticker].apply_snapshot(snap);
       ws_client.subscribe(ticker);
@@ -109,9 +83,9 @@ int main() {
     });
 
     ws_client.on_fill(
-        [&order_mgr, &risk_mgr, &tickers](const kalshi::Fill &fill) {
+        [&order_mgr, &risk_mgr, &app_config](const kalshi::Fill &fill) {
           order_mgr.record_fill(fill);
-          risk_mgr.update(order_mgr, tickers);
+          risk_mgr.update(order_mgr, app_config.target_tickers);
         });
 
     // Register signal handlers then start WS in a background thread.
@@ -130,7 +104,7 @@ int main() {
     ws_thread.join();
 
     // Cancel all open orders before exiting.
-    for (const auto &ticker : tickers) {
+    for (const auto &ticker : app_config.target_tickers) {
       order_mgr.cancel_all(ticker);
     }
 

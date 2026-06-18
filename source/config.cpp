@@ -1,0 +1,75 @@
+#include "config.hpp"
+
+#include <nlohmann/json.hpp>
+
+#include <fstream>
+#include <stdexcept>
+#include <string>
+
+namespace kalshi {
+
+namespace {
+
+template <typename ValueType>
+ValueType require_field(const nlohmann::json &object,
+                        const std::string &field_name) {
+  if (!object.contains(field_name)) {
+    throw std::runtime_error{"Config missing required field: " + field_name};
+  }
+  return object.at(field_name).template get<ValueType>();
+}
+
+constexpr auto kDefaultRestUrl = "https://trading-api.kalshi.com/trade-api/v2";
+constexpr auto kDefaultWsUrl = "wss://trading-api.kalshi.com/trade-api/ws/v2";
+
+} // namespace
+
+AppConfig load_config(const std::filesystem::path &path) {
+  std::ifstream file{path};
+  if (!file) {
+    throw std::runtime_error{"Cannot open config file: " + path.string()};
+  }
+
+  const nlohmann::json json_data = nlohmann::json::parse(file);
+
+  AppConfig config;
+  config.api_key = require_field<std::string>(json_data, "api_key");
+  config.private_key_path =
+      require_field<std::string>(json_data, "private_key_path");
+  config.base_url = json_data.value("base_url", std::string{kDefaultRestUrl});
+  config.ws_url = json_data.value("ws_url", std::string{kDefaultWsUrl});
+  config.target_tickers =
+      require_field<std::vector<std::string>>(json_data, "target_tickers");
+
+  if (config.target_tickers.empty()) {
+    throw std::runtime_error{"Config 'target_tickers' must not be empty"};
+  }
+
+  if (json_data.contains("quoter")) {
+    const auto &quoter_json = json_data.at("quoter");
+    config.quoter.target_spread_cents = quoter_json.value(
+        "target_spread_cents", QuoterConfig::kDefaultTargetSpreadCents);
+    config.quoter.skew_per_contract_cents = quoter_json.value(
+        "skew_per_contract_cents", QuoterConfig::kDefaultSkewPerContractCents);
+    config.quoter.reprice_threshold_cents = quoter_json.value(
+        "reprice_threshold_cents", QuoterConfig::kDefaultRepriceThresholdCents);
+    config.quoter.quote_size =
+        quoter_json.value("quote_size", QuoterConfig::kDefaultQuoteSize);
+  }
+
+  if (json_data.contains("risk")) {
+    const auto &risk_json = json_data.at("risk");
+    config.risk.max_position_per_market = risk_json.value(
+        "max_position_per_market", RiskLimits::kDefaultMaxPosition);
+    config.risk.max_open_orders_per_market = risk_json.value(
+        "max_open_orders_per_market", RiskLimits::kDefaultMaxOpenOrders);
+    config.risk.max_order_size =
+        risk_json.value("max_order_size", RiskLimits::kDefaultMaxOrderSize);
+    config.risk.daily_loss_limit =
+        risk_json.value("daily_loss_limit", RiskLimits::kDefaultDailyLossLimit);
+  }
+
+  return config;
+}
+
+} // namespace kalshi
