@@ -1,0 +1,11 @@
+{"type":"orderbook_snapshot","msg":{"market_ticker":"REPLAY-TICK","yes":[[51,100],[50,200],[49,300]],"no":[[47,100],[46,200],[45,300]]}}
+{"type":"orderbook_delta","msg":{"market_ticker":"REPLAY-TICK","side":"yes","price":52,"delta":50}}
+{"type":"orderbook_delta","msg":{"market_ticker":"REPLAY-TICK","side":"no","price":44,"delta":75}}
+{"type":"orderbook_delta","msg":{"market_ticker":"REPLAY-TICK","side":"yes","price":50,"delta":0}}
+{"type":"fill","msg":{"order_id":"ord-replay-001","market_ticker":"REPLAY-TICK","side":"yes","yes_price":51,"count":5,"created_time":"2025-12-31T10:00:00Z"}}
+{"type":"orderbook_delta","msg":{"market_ticker":"REPLAY-TICK","side":"no","price":45,"delta":0}}
+{"type":"orderbook_delta","msg":{"market_ticker":"REPLAY-TICK","side":"yes","price":49,"delta":25}}
+{"type":"fill","msg":{"order_id":"ord-replay-002","market_ticker":"REPLAY-TICK","side":"no","yes_price":48,"count":3,"created_time":"2025-12-31T10:00:01Z"}}
+{"type":"orderbook_delta","msg":{"market_ticker":"REPLAY-TICK","side":"yes","price":52,"delta":80}}
+{"type":"unknown_type","msg":{"some_field":"should be silently ignored"}}
+{"not":"a valid ws message at all"}

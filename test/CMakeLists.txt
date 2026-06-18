@@ -25,3 +25,23 @@ kalshi_add_test(fair_value_test source/fair_value_test.cpp)
 kalshi_add_test(quoter_test source/quoter_test.cpp)
 kalshi_add_test(main_loop_test source/main_loop_test.cpp)
 kalshi_add_test(config_test source/config_test.cpp)
+
+# ---- Replay tests ----
+
+add_executable(replay_test replay/replay_test.cpp)
+target_link_libraries(replay_test PRIVATE kalshi_lib GTest::gtest_main OpenSSL::Crypto)
+target_include_directories(replay_test PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/source"
+    "${PROJECT_SOURCE_DIR}/source"
+)
+target_compile_features(replay_test PRIVATE cxx_std_23)
+target_compile_definitions(replay_test PRIVATE
+    KALSHI_FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
+)
+set_target_properties(replay_test PROPERTIES CXX_CLANG_TIDY "clang-tidy")
+gtest_discover_tests(replay_test)
+
+# ---- Fuzz targets (KALSHI_FUZZ_TESTS=ON, fuzz preset) ----
+
+option(KALSHI_FUZZ_TESTS "Build libFuzzer fuzz targets (requires Clang -fsanitize=fuzzer)" OFF)
+add_subdirectory(fuzz)
