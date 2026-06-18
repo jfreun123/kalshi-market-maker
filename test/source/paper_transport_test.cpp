@@ -1,52 +1,14 @@
 #include "paper_transport.hpp"
 
-#include "auth.hpp"
-#include "rest_client.hpp"
 #include "types.hpp"
 
 #include <gtest/gtest.h>
 
-#include <memory>
 #include <string>
-
-namespace {
-
-// ---- Helpers ----
-
-// Builds a PaperTransport-backed RestClient using a trivially invalid auth.
-// All HTTP calls are intercepted before any real network access, so the auth
-// key content is irrelevant.
-kalshi::RestClient
-make_paper_rest_client(kalshi::PaperTransport *&out_transport) {
-  auto transport = std::make_unique<kalshi::PaperTransport>();
-  out_transport = transport.get();
-  const kalshi::Auth auth{
-      "paper-test-key",
-      "-----BEGIN RSA PRIVATE KEY-----\n"
-      "MIIEowIBAAKCAQEA0Z3VS5JJcds3xHn/ygWep4PAtEsHAqRTGGpAc7pOtRJp\n"
-      "-----END RSA PRIVATE KEY-----\n"};
-
-  // RestClient signs requests but PaperTransport ignores headers entirely.
-  // Use FakeAuth by exploiting the fact that Auth::sign() only fails at
-  // OpenSSL level — to avoid the dependency, construct the client directly.
-  // Since we cannot construct Auth with an invalid key, use the RestClient
-  // constructor that accepts a transport and a dummy base_url.
-  //
-  // Actually: Auth constructor validates the PEM at construction time.
-  // Use a known RSA-2048 private key generated for testing only.
-  (void)auth;
-  return kalshi::RestClient{kalshi::Auth{"k", "k"}, std::move(transport),
-                            "https://paper.example.com/trade-api/v2"};
-}
-
-} // namespace
-
-// ---- place_order via RestClient → PaperTransport ----
 
 TEST(PaperTransportTest, PlaceOrderReturnsSyntheticOrder) {
   kalshi::PaperTransport paper;
 
-  // Place order directly through PaperTransport's post() method.
   const std::string body = R"({
     "ticker": "TICK-A",
     "action": "buy",
@@ -73,7 +35,7 @@ TEST(PaperTransportTest, CancelOrderRemovesItFromOpenOrders) {
 
   const std::string body =
       R"({"ticker":"T","action":"buy","side":"yes","type":"limit","count":5,"yes_price":48})";
-  paper.post("/portfolio/orders", {}, body);
+  (void)paper.post("/portfolio/orders", {}, body);
 
   ASSERT_EQ(paper.open_orders().size(), 1U);
   const std::string order_id = paper.open_orders().front().id;
@@ -91,8 +53,8 @@ TEST(PaperTransportTest, GetOpenOrdersReturnsCurrentBook) {
       R"({"ticker":"T","action":"buy","side":"yes","type":"limit","count":5,"yes_price":48})";
   const std::string body_b =
       R"({"ticker":"T","action":"buy","side":"no","type":"limit","count":3,"no_price":50})";
-  paper.post("/portfolio/orders", {}, body_a);
-  paper.post("/portfolio/orders", {}, body_b);
+  (void)paper.post("/portfolio/orders", {}, body_a);
+  (void)paper.post("/portfolio/orders", {}, body_b);
 
   const auto response = paper.get("/portfolio/orders?status=resting", {});
 
@@ -105,7 +67,7 @@ TEST(PaperTransportTest, SimulateFillUpdatesOrderStatus) {
 
   const std::string body =
       R"({"ticker":"T","action":"buy","side":"yes","type":"limit","count":10,"yes_price":52})";
-  paper.post("/portfolio/orders", {}, body);
+  (void)paper.post("/portfolio/orders", {}, body);
 
   const std::string order_id = paper.open_orders().front().id;
 
@@ -135,7 +97,7 @@ TEST(PaperTransportTest, SimulateFillClampsToRemainingQuantity) {
 
   const std::string body =
       R"({"ticker":"T","action":"buy","side":"yes","type":"limit","count":5,"yes_price":60})";
-  paper.post("/portfolio/orders", {}, body);
+  (void)paper.post("/portfolio/orders", {}, body);
   const std::string order_id = paper.open_orders().front().id;
 
   // Request fill of 100, but only 5 remain.
@@ -150,8 +112,8 @@ TEST(PaperTransportTest, MultipleOrdersGetUniqueIds) {
   const std::string body =
       R"({"ticker":"T","action":"buy","side":"yes","type":"limit","count":1,"yes_price":50})";
 
-  paper.post("/portfolio/orders", {}, body);
-  paper.post("/portfolio/orders", {}, body);
+  (void)paper.post("/portfolio/orders", {}, body);
+  (void)paper.post("/portfolio/orders", {}, body);
 
   ASSERT_EQ(paper.open_orders().size(), 2U);
   EXPECT_NE(paper.open_orders().at(0).id, paper.open_orders().at(1).id);

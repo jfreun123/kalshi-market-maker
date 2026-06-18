@@ -115,11 +115,11 @@ HttpResponse PaperTransport::delete_(
   const auto slash_pos = url.rfind('/');
   if (slash_pos != std::string_view::npos) {
     const std::string order_id{url.substr(slash_pos + 1U)};
-    const auto it = std::find_if(
+    const auto order_iter = std::find_if(
         open_orders_.begin(), open_orders_.end(),
         [&order_id](const Order &order) { return order.id == order_id; });
-    if (it != open_orders_.end()) {
-      open_orders_.erase(it);
+    if (order_iter != open_orders_.end()) {
+      open_orders_.erase(order_iter);
     }
   }
   return {kHttpOk, "{}"};
@@ -127,35 +127,36 @@ HttpResponse PaperTransport::delete_(
 
 bool PaperTransport::simulate_fill(const std::string &order_id,
                                    int fill_quantity) {
-  const auto it = std::find_if(open_orders_.begin(), open_orders_.end(),
-                               [&order_id](const Order &order) {
-                                 return order.id == order_id &&
-                                        order.status != OrderStatus::Filled &&
-                                        order.status != OrderStatus::Cancelled;
-                               });
+  const auto order_iter =
+      std::find_if(open_orders_.begin(), open_orders_.end(),
+                   [&order_id](const Order &order) {
+                     return order.id == order_id &&
+                            order.status != OrderStatus::Filled &&
+                            order.status != OrderStatus::Cancelled;
+                   });
 
-  if (it == open_orders_.end()) {
+  if (order_iter == open_orders_.end()) {
     return false;
   }
 
-  const int remaining = it->quantity - it->filled_quantity;
+  const int remaining = order_iter->quantity - order_iter->filled_quantity;
   const int actual_fill = std::min(fill_quantity, remaining);
-  it->filled_quantity += actual_fill;
-  it->status = (it->filled_quantity == it->quantity)
-                   ? OrderStatus::Filled
-                   : OrderStatus::PartiallyFilled;
+  order_iter->filled_quantity += actual_fill;
+  order_iter->status = (order_iter->filled_quantity == order_iter->quantity)
+                           ? OrderStatus::Filled
+                           : OrderStatus::PartiallyFilled;
 
   Fill fill;
   fill.order_id = order_id;
-  fill.market_ticker = it->market_ticker;
-  fill.side = it->side;
-  fill.price_cents = it->price_cents;
+  fill.market_ticker = order_iter->market_ticker;
+  fill.side = order_iter->side;
+  fill.price_cents = order_iter->price_cents;
   fill.quantity = actual_fill;
   fill.timestamp = std::chrono::system_clock::now();
   fills_.push_back(fill);
 
-  if (it->status == OrderStatus::Filled) {
-    open_orders_.erase(it);
+  if (order_iter->status == OrderStatus::Filled) {
+    open_orders_.erase(order_iter);
   }
 
   return true;
