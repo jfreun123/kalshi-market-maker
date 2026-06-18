@@ -39,6 +39,58 @@ graph TD
 
 ---
 
+## UAT Blockers
+
+These must be resolved before any live or demo-exchange testing.
+
+### BLOCKER-1: WebSocket subscribe message not sent
+
+**File:** `source/websocket_client.cpp`, `subscribe()` method
+
+`subscribe()` records the ticker locally but never sends the subscribe command
+over the wire. Kalshi's feed requires a JSON command after the connection opens:
+
+```json
+{"id": 1, "cmd": "subscribe", "params": {"channels": ["orderbook_delta"], "market_tickers": ["TICKER"]}}
+```
+
+Without this, the client connects but receives no orderbook or fill messages.
+The subscribe command must be sent (or queued for re-send on reconnect) inside
+the `onOpen` callback.
+
+**Fix:** Send the subscribe JSON in the `onOpen` handler for each ticker stored
+in the pending-subscription list. Re-send on reconnect.
+
+---
+
+### BLOCKER-2: REST API paths and field names unverified against UAT
+
+**File:** `source/rest_client.cpp`
+
+The REST client was written against documented API shapes but has not been
+tested against the live UAT environment (`https://demo-api.kalshi.co/trade-api/v2`).
+Kalshi has changed field names across API versions. A single wrong field name
+silently breaks order placement or parsing without a compile-time error.
+
+Fields most likely to drift: `yes_price`/`no_price` vs `price`, `count` vs
+`quantity`, `status` string values (`resting` vs `open`), timestamp format.
+
+**Fix:** Run against UAT with a single ticker, log raw request/response bodies,
+and reconcile every field against Kalshi's current API reference before trading.
+
+---
+
+### Pre-UAT Checklist
+
+- [ ] BLOCKER-1: WebSocket subscribe command wired into `onOpen`
+- [ ] BLOCKER-2: Raw REST request/response bodies verified against UAT
+- [ ] Demo account created at kalshi.com, API key + RSA key pair generated
+- [ ] `config.json` created from `config.example.json` with demo base URL
+- [ ] Paper mode (`--paper`) runs to completion without errors
+- [ ] Phase 14 (structured logging) in place so UAT output is readable
+
+---
+
 ## Phase 1 — Types & Domain Model
 
 Define the shared data structures the entire system depends on. No I/O, no logic — just plain structs and enums. This is the foundation everything else builds on.
