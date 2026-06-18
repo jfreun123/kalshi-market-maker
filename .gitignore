@@ -2,13 +2,26 @@
 .idea/
 .vs/
 .vscode/
+
+# CMake build directories (all presets)
 build/
-build-bench/
 build-asan/
 build-tsan/
+build-bench/
+build-coverage/
+build-fuzz/
 cmake-build-*/
 prefix/
+
+# CMake user files
 .clangd
 CMakeLists.txt.user
 CMakeUserPresets.json
 compile_commands.json
+
+# Doxygen generated output
+docs/html/
+docs/Doxyfile.configured
+
+# Local config with real API keys — never commit
+config.json
