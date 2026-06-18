@@ -25,6 +25,7 @@ kalshi_add_test(fair_value_test source/fair_value_test.cpp)
 kalshi_add_test(quoter_test source/quoter_test.cpp)
 kalshi_add_test(main_loop_test source/main_loop_test.cpp)
 kalshi_add_test(config_test source/config_test.cpp)
+kalshi_add_test(paper_transport_test source/paper_transport_test.cpp)
 
 # ---- Replay tests ----
 

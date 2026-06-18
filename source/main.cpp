@@ -3,6 +3,7 @@
 #include "http_transport.hpp"
 #include "order_manager.hpp"
 #include "orderbook.hpp"
+#include "paper_transport.hpp"
 #include "quoter.hpp"
 #include "rest_client.hpp"
 #include "risk_manager.hpp"
@@ -35,9 +36,19 @@ extern "C" void handle_signal(int /*sig*/) { g_shutdown.store(true); }
 int main(int argc, char *argv[]) {
   try {
     const auto args = std::span<char *>(argv, static_cast<std::size_t>(argc));
-    const std::filesystem::path config_path =
-        (argc > 1) ? std::filesystem::path{args[1]}
-                   : std::filesystem::path{"config.json"};
+
+    // Parse CLI flags: [--paper] [config_path]
+    bool paper_mode = false;
+    std::filesystem::path config_path{"config.json"};
+    for (std::size_t arg_index = 1U; arg_index < static_cast<std::size_t>(argc);
+         ++arg_index) {
+      const std::string_view arg{args[arg_index]};
+      if (arg == "--paper") {
+        paper_mode = true;
+      } else {
+        config_path = std::filesystem::path{args[arg_index]};
+      }
+    }
 
     const kalshi::AppConfig app_config = kalshi::load_config(config_path);
 
@@ -51,9 +62,21 @@ int main(int argc, char *argv[]) {
     const std::string private_key_pem{std::istreambuf_iterator<char>{key_file},
                                       std::istreambuf_iterator<char>{}};
 
-    // Build components.
+    // Build components — paper mode swaps HttpTransport for PaperTransport.
     kalshi::Auth auth{app_config.api_key, private_key_pem};
-    kalshi::RestClient rest{auth, std::make_unique<kalshi::HttpTransport>(),
+
+    std::unique_ptr<kalshi::IHttpTransport> http_transport;
+    kalshi::PaperTransport *paper_transport_ptr = nullptr;
+    if (paper_mode) {
+      auto paper = std::make_unique<kalshi::PaperTransport>();
+      paper_transport_ptr = paper.get();
+      http_transport = std::move(paper);
+      std::cout << "[paper] Running in paper-trading mode — no live orders.\n";
+    } else {
+      http_transport = std::make_unique<kalshi::HttpTransport>();
+    }
+
+    kalshi::RestClient rest{auth, std::move(http_transport),
                             app_config.base_url};
     kalshi::WebSocketClient ws_client{
         auth, std::make_unique<kalshi::IxWebSocket>(), app_config.ws_url};
@@ -106,6 +129,11 @@ int main(int argc, char *argv[]) {
     // Cancel all open orders before exiting.
     for (const auto &ticker : app_config.target_tickers) {
       order_mgr.cancel_all(ticker);
+    }
+
+    if (paper_mode && paper_transport_ptr != nullptr) {
+      std::cout << "[paper] Simulated fills: "
+                << paper_transport_ptr->fills().size() << '\n';
     }
 
     std::cout << "Shutdown complete.\n";
