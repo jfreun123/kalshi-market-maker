@@ -43,23 +43,25 @@ graph TD
 
 These must be resolved before any live or demo-exchange testing.
 
-### BLOCKER-1: WebSocket subscribe message not sent
+### BLOCKER-1: IxWebSocket production implementation is a stub
 
-**File:** `source/websocket_client.cpp`, `subscribe()` method
+**File:** `source/websocket_client.cpp`, lines 22–50
 
-`subscribe()` records the ticker locally but never sends the subscribe command
-over the wire. Kalshi's feed requires a JSON command after the connection opens:
+`IxWebSocket` — the concrete class used in production — throws
+`std::runtime_error("IxWebSocket: not yet implemented")` on every method
+(`connect`, `send`, `on_message`, `on_connect`, `on_disconnect`, `run`,
+`stop`). The `IWebSocket` interface and all unit tests use `FakeWebSocket`
+(synchronous test double), so every test passes, but the binary cannot make a
+real WebSocket connection.
 
-```json
-{"id": 1, "cmd": "subscribe", "params": {"channels": ["orderbook_delta"], "market_tickers": ["TICKER"]}}
-```
+Additionally, the `IXWebSocket` C++ library (`machinezone/IXWebSocket`) is not
+fetched by CMake — it appears in no `cmake/*.cmake` file.
 
-Without this, the client connects but receives no orderbook or fill messages.
-The subscribe command must be sent (or queued for re-send on reconnect) inside
-the `onOpen` callback.
-
-**Fix:** Send the subscribe JSON in the `onOpen` handler for each ticker stored
-in the pending-subscription list. Re-send on reconnect.
+**Fix:**
+1. Add `cmake/ixwebsocket.cmake` that fetches `machinezone/IXWebSocket` via
+   FetchContent and links it to `kalshi_lib`.
+2. Implement each `IxWebSocket` method by delegating to the underlying
+   `ix::WebSocket` object stored in `IxWebSocket::Impl`.
 
 ---
 
@@ -82,7 +84,8 @@ and reconcile every field against Kalshi's current API reference before trading.
 
 ### Pre-UAT Checklist
 
-- [ ] BLOCKER-1: WebSocket subscribe command wired into `onOpen`
+- [ ] BLOCKER-1: Implement `IxWebSocket` using the real `ix::WebSocket` library
+- [ ] BLOCKER-1: Add `cmake/ixwebsocket.cmake` FetchContent fetch
 - [ ] BLOCKER-2: Raw REST request/response bodies verified against UAT
 - [ ] Demo account created at kalshi.com, API key + RSA key pair generated
 - [ ] `config.json` created from `config.example.json` with demo base URL
