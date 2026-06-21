@@ -1,6 +1,7 @@
 #include "theo_grid.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <cstddef>
 
@@ -19,29 +20,34 @@ namespace {
 constexpr std::size_t kDefaultRows = 5;
 constexpr std::size_t kDefaultCols = 5;
 
-constexpr double kDefaultTtc[kDefaultRows] = {0.25, 1.0, 4.0, 12.0, 48.0};
-constexpr double kDefaultMid[kDefaultCols] = {10.0, 25.0, 50.0, 75.0, 90.0};
+using TtcRow = std::array<double, kDefaultRows>;
+using MidRow = std::array<double, kDefaultCols>;
+using ValueRow = std::array<double, kDefaultCols>;
+using ValueTable = std::array<ValueRow, kDefaultRows>;
+
+constexpr TtcRow kDefaultTtc = {0.25, 1.0, 4.0, 12.0, 48.0};
+constexpr MidRow kDefaultMid = {10.0, 25.0, 50.0, 75.0, 90.0};
 
 // values[ttc_idx][mid_idx]
-constexpr double kDefaultValues[kDefaultRows][kDefaultCols] = {
+constexpr ValueTable kDefaultValues = {{
     //  mid=10  mid=25  mid=50  mid=75  mid=90
     {12.0, 27.0, 50.0, 73.0, 88.0}, // ttc=0.25h — compress toward 50
     {11.0, 26.0, 50.0, 74.0, 89.0}, // ttc=1.0h
     {10.0, 25.0, 50.0, 75.0, 90.0}, // ttc=4.0h  — near identity
     {10.0, 25.0, 50.0, 75.0, 90.0}, // ttc=12.0h
     {10.0, 25.0, 50.0, 75.0, 90.0}, // ttc=48.0h
-};
+}};
 
 } // namespace
 
 TheoGridConfig TheoGridConfig::default_config() {
   TheoGridConfig cfg;
-  cfg.ttc_breakpoints.assign(kDefaultTtc, kDefaultTtc + kDefaultRows);
-  cfg.mid_breakpoints.assign(kDefaultMid, kDefaultMid + kDefaultCols);
+  cfg.ttc_breakpoints.assign(kDefaultTtc.begin(), kDefaultTtc.end());
+  cfg.mid_breakpoints.assign(kDefaultMid.begin(), kDefaultMid.end());
   cfg.values.resize(kDefaultRows);
   for (std::size_t row = 0; row < kDefaultRows; ++row) {
-    cfg.values.at(row).assign(kDefaultValues[row],
-                              kDefaultValues[row] + kDefaultCols);
+    cfg.values.at(row).assign(kDefaultValues.at(row).begin(),
+                              kDefaultValues.at(row).end());
   }
   return cfg;
 }
