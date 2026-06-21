@@ -79,8 +79,8 @@ auto parse_dollars_to_cents(const std::string &dollars) -> int {
 }
 
 // Parses a fixed-point count string to integer: "10.00" -> 10
-auto parse_fp_count(const std::string &fp) -> int {
-  return static_cast<int>(std::round(std::stod(fp)));
+auto parse_fp_count(const std::string &fp_str) -> int {
+  return static_cast<int>(std::round(std::stod(fp_str)));
 }
 
 // --- Enum parsers ---
@@ -262,14 +262,9 @@ Order RestClient::place_order(std::string_view ticker, Side side,
   const int filled_qty =
       parse_fp_count(json_data.at("fill_count").get<std::string>());
 
-  OrderStatus status;
-  if (filled_qty >= quantity) {
-    status = OrderStatus::Filled;
-  } else if (filled_qty > 0) {
-    status = OrderStatus::PartiallyFilled;
-  } else {
-    status = OrderStatus::Open;
-  }
+  const OrderStatus status = (filled_qty >= quantity) ? OrderStatus::Filled
+                             : (filled_qty > 0) ? OrderStatus::PartiallyFilled
+                                                : OrderStatus::Open;
 
   // ts_ms is Unix epoch milliseconds.
   const auto ts_ms = json_data.at("ts_ms").get<long long>();
