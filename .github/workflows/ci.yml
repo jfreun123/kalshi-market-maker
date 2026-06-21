@@ -17,7 +17,7 @@ jobs:
         run: |
           sudo apt-get update -q
           sudo apt-get install -y \
-            clang clang-tidy ninja-build \
+            clang clang-tidy cppcheck ninja-build \
             libssl-dev
 
       - name: Configure
@@ -39,7 +39,7 @@ jobs:
         run: |
           sudo apt-get update -q
           sudo apt-get install -y \
-            clang clang-tidy ninja-build \
+            clang clang-tidy cppcheck ninja-build \
             libssl-dev
 
       - name: Configure
@@ -61,7 +61,7 @@ jobs:
         run: |
           sudo apt-get update -q
           sudo apt-get install -y \
-            clang clang-tidy ninja-build \
+            clang clang-tidy cppcheck ninja-build \
             libssl-dev lcov
 
       - name: Configure
@@ -100,7 +100,7 @@ jobs:
         run: |
           sudo apt-get update -q
           sudo apt-get install -y \
-            clang clang-tidy ninja-build \
+            clang clang-tidy cppcheck ninja-build \
             libssl-dev
 
       - name: Configure
