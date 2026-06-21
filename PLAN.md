@@ -43,25 +43,14 @@ graph TD
 
 These must be resolved before any live or demo-exchange testing.
 
-### BLOCKER-1: IxWebSocket production implementation is a stub
+### BLOCKER-1: IxWebSocket — RESOLVED
 
-**File:** `source/websocket_client.cpp`, lines 22–50
+`cmake/ixwebsocket.cmake` fetches `machinezone/IXWebSocket` via FetchContent.
+`IxWebSocket` in `source/websocket_client.cpp` delegates every method to an
+`ix::WebSocket` stored in a pimpl `Impl`. The library compiles and links.
 
-`IxWebSocket` — the concrete class used in production — throws
-`std::runtime_error("IxWebSocket: not yet implemented")` on every method
-(`connect`, `send`, `on_message`, `on_connect`, `on_disconnect`, `run`,
-`stop`). The `IWebSocket` interface and all unit tests use `FakeWebSocket`
-(synchronous test double), so every test passes, but the binary cannot make a
-real WebSocket connection.
-
-Additionally, the `IXWebSocket` C++ library (`machinezone/IXWebSocket`) is not
-fetched by CMake — it appears in no `cmake/*.cmake` file.
-
-**Fix:**
-1. Add `cmake/ixwebsocket.cmake` that fetches `machinezone/IXWebSocket` via
-   FetchContent and links it to `kalshi_lib`.
-2. Implement each `IxWebSocket` method by delegating to the underlying
-   `ix::WebSocket` object stored in `IxWebSocket::Impl`.
+**Remaining:** connection to the live UAT endpoint has not been tested end-to-end.
+That verification happens as part of the UAT dry run (BLOCKER-2 step).
 
 ---
 
@@ -84,13 +73,13 @@ and reconcile every field against Kalshi's current API reference before trading.
 
 ### Pre-UAT Checklist
 
-- [ ] BLOCKER-1: Implement `IxWebSocket` using the real `ix::WebSocket` library
-- [ ] BLOCKER-1: Add `cmake/ixwebsocket.cmake` FetchContent fetch
+- [x] BLOCKER-1: Implement `IxWebSocket` using the real `ix::WebSocket` library
+- [x] BLOCKER-1: Add `cmake/ixwebsocket.cmake` FetchContent fetch
 - [ ] BLOCKER-2: Raw REST request/response bodies verified against UAT
 - [ ] Demo account created at kalshi.com, API key + RSA key pair generated
 - [ ] `config.json` created from `config.example.json` with demo base URL
 - [ ] Paper mode (`--paper`) runs to completion without errors
-- [ ] Phase 14 (structured logging) in place so UAT output is readable
+- [x] Phase 14 (structured logging) in place so UAT output is readable
 
 ---
 
@@ -736,9 +725,30 @@ int main() {
 
 ## Post-Phase-10 Roadmap
 
-### Phase 11 — Pluggable Pricing Model
+### Phase 11 — Pluggable Pricing Model ✓
 
-The current `FairValueEngine` is a rule-based heuristic (mid + time-decay + inventory skew + external signal hook). Replace the internals with a `IPricingModel` interface so the estimation strategy is swappable without touching the Quoter or OrderManager.
+**Status: complete.** `source/pricing_model.hpp/cpp`, 12 unit tests + 2 delegation tests in `test/source/pricing_model_test.cpp`.
+
+`FairValueEngine` now owns a `std::unique_ptr<IPricingModel>` and delegates `estimate()` to it. The 3-arg `Quoter` constructor injects a `HeuristicModel` by default; tests inject stubs (`FixedModel`, `EchoMidModel`). `FairValueInput` lives in `pricing_model.hpp`.
+
+```mermaid
+graph TD
+    FVI["FairValueInput\nmid · ttc · position · ext_prob"]
+    IPM["IPricingModel\n«interface»"]
+    HM["HeuristicModel"]
+    FVE["FairValueEngine\nmodel_: unique_ptr"]
+    QT["Quoter"]
+
+    FVI --> FVE
+    IPM --> HM
+    HM --> FVE
+    FVE --> QT
+
+    style FVI fill:#555,color:#fff
+    style HM fill:#555,color:#fff
+    style FVE fill:#555,color:#fff
+    style QT fill:#555,color:#fff
+```
 
 **Concrete implementations to build toward:**
 
@@ -747,166 +757,99 @@ The current `FairValueEngine` is a rule-based heuristic (mid + time-decay + inve
 - **Order flow model**: short-term signal from trade imbalance and quote stuffing — effective in liquid prediction markets where informed traders leave footprints.
 - **Reinforcement learning (long-term)**: directly optimize spread/skew parameters rather than computing a fair value. The Quoter's `QuoterConfig` fields become policy outputs from an RL agent trained on historical PnL.
 
-**Architecture sketch:**
-
-```cpp
-class IPricingModel {
-public:
-    virtual double estimate(const FairValueInput &input) = 0;
-    virtual ~IPricingModel() = default;
-};
-
-class FairValueEngine {
-public:
-    explicit FairValueEngine(std::unique_ptr<IPricingModel> model);
-    [[nodiscard]] double estimate(const FairValueInput &input) const;
-private:
-    std::unique_ptr<IPricingModel> model_;
-};
-```
-
-The `external_prob` field in `FairValueInput` is already the natural injection point for any model that outputs a probability.
-
 ---
 
-### Phase 12 — Theo Grid (Fast Repricing for Underlying-Linked Markets)
+### Phase 12 — Theo Grid (Fast Repricing for Underlying-Linked Markets) ✓
 
-For markets driven by a fast-moving underlying (BTC price, S&P index, weather score), re-running the pricing model on every tick is too slow and wasteful. Borrow the options market-making technique of pre-computing a **theo grid**: a lookup table of `(underlying_value, time_remaining) → fair_probability`, updated periodically and interpolated linearly between ticks.
+**Status: complete.** `source/theo_grid.hpp/cpp`, 10 unit tests in `test/source/theo_grid_test.cpp`.
+
+`TheoGrid` holds a 2-D `vector<vector<double>>` of `(ttc_hours × mid_cents) → fair_value_cents`. `lookup()` does a binary search on each axis then bilinear interpolation; inputs outside the breakpoint range are clamped. `TheoGridConfig::default_config()` ships a 5×5 placeholder grid. All arithmetic uses `.at()` for bounds safety.
+
+```mermaid
+graph TD
+    TGC["TheoGridConfig\nttc_breakpoints · mid_breakpoints · values"]
+    TG["TheoGrid\nlookup(ttc, mid) → cents"]
+    BS["std::lower_bound\nbinary search × 2 axes"]
+    BI["bilinear lerp\nO(1) per tick"]
+
+    TGC --> TG
+    TG --> BS
+    BS --> BI
+
+    style TGC fill:#555,color:#fff
+    style TG fill:#555,color:#fff
+    style BS fill:#555,color:#fff
+    style BI fill:#555,color:#fff
+```
 
 **When this matters:**
 - Quoting multiple correlated tickers simultaneously (e.g., all BTC price-tier markets: `>$90k`, `>$95k`, `>$99k`). One spot move → reprice all tickers via table lookup with no model calls.
 - Underlying moves faster than the model can evaluate (sub-millisecond repricing required).
 - Running an ML model whose inference cost is non-trivial.
 
-**Analogy to options greeks:**
-- **Delta equivalent**: ∂prob/∂underlying — how much fair value shifts per unit of underlying movement. Drives how quickly quotes must reprice when spot ticks.
-- **Theta equivalent**: ∂prob/∂time — already captured by the time-decay layer in FairValueEngine; the grid makes it a free table lookup.
+---
 
-**Architecture sketch:**
+### Phase 13 — Constraint Bitset & Adverse Selection Guard ✓
 
-```cpp
-struct TheoGrid {
-    // Precomputed: underlying_prices[i], time_buckets[j] → fair_prob[i][j]
-    std::vector<double> underlying_prices;  // e.g. BTC in $1000 increments
-    std::vector<double> time_buckets_hours;
-    std::vector<std::vector<double>> fair_prob;
+**Status: complete.** Constraint bitset: `source/risk_manager.hpp/cpp`, 7 new tests in `test/source/risk_manager_test.cpp`. Adverse selection guard: `source/adverse_selection.hpp/cpp`, 6 tests in `test/source/adverse_selection_test.cpp`.
 
-    // Called on every underlying tick; O(log n) binary search + O(1) lerp
-    double interpolate(double underlying, double time_hours) const;
+```mermaid
+graph TD
+    RM["RiskManager\nconstraints_: bitset&lt;8&gt;"]
+    CB["Constraint enum\nkPnLLimit…kConnectivity"]
+    ASG["AdverseSelectionGuard\nfill_times_ per ticker"]
+    ASC["AdverseSelectionConfig\nthreshold · window · cooldown"]
+    ML["Main Loop"]
 
-    // Rebuild the full grid (called on model retrain or param change)
-    void rebuild(const IPricingModel &model, const std::string &ticker);
-};
+    CB --> RM
+    ASC --> ASG
+    ASG -->|"threshold breached\nset(kHighFillRate)"| RM
+    ML -->|"cooldown elapsed\nclear(kHighFillRate)"| RM
+    RM -->|"is_halted()"| ML
+
+    style RM fill:#555,color:#fff
+    style CB fill:#555,color:#fff
+    style ASG fill:#555,color:#fff
+    style ASC fill:#555,color:#fff
+    style ML fill:#555,color:#fff
 ```
 
-`TheoGrid::interpolate()` replaces `FairValueEngine::estimate()` on the hot path. The grid is rebuilt in a background thread whenever the model is retrained or market conditions shift significantly.
+`is_halted()` is `constraints_.any()` — Quoter sees no interface change. `active_constraints()` returns a space-separated string of set bit names for logging and diagnostics. `RiskManager::set()` and `clear()` emit `warn`/`info` log lines via `get_logger()`.
 
 ---
 
-### Phase 13 — Constraint Bitset & Adverse Selection Guard
+### Phase 14 — Logging & Observability ✓
 
-**Constraint bitset (replaces `bool halted_` in `RiskManager`)**
+**Status: complete.** `source/logger.hpp/cpp`, 4 tests in `test/source/logger_test.cpp`. spdlog fetched via `cmake/spdlog.cmake` (v1.14.1).
 
-The current `RiskManager` uses a single boolean halt flag. Replace it with a `std::bitset` where each bit represents a named, independently set/clearable constraint. `is_halted()` becomes `constraints_.any()` — the Quoter interface stays unchanged.
+```mermaid
+graph TD
+    SL["spdlog v1.14.1"]
+    LG["logger.hpp\nget_logger() / set_logger()"]
+    OM["OrderManager\nplace · cancel · fill"]
+    RM["RiskManager\nset · clear constraint"]
+    QT["Quoter\nreprice debug line"]
+    WS["WebSocketClient\nconnect · disconnect"]
 
-```cpp
-enum class Constraint : uint8_t {
-    kPnLLimit      = 0,  // daily loss limit breached — requires manual resume()
-    kPositionLimit = 1,  // net position too large on a ticker
-    kOpenOrders    = 2,  // too many resting orders
-    kHighFillRate  = 3,  // adverse selection signal — auto-clears after cooldown
-    kStaleBook     = 4,  // no WS delta received within staleness window
-    kModelDiverge  = 5,  // FairValueEngine output outside plausible range
-    kManualHalt    = 6,  // operator kill switch
-    kConnectivity  = 7,  // WS/REST transport failure
-};
+    SL --> LG
+    LG --> OM
+    LG --> RM
+    LG --> QT
+    LG --> WS
 
-class RiskManager {
-public:
-    void   set(Constraint bit);
-    void   clear(Constraint bit);
-    bool   is_set(Constraint bit) const;
-    bool   is_halted() const;           // constraints_.any()
-
-    // Diagnostic: which constraints are active?
-    std::string active_constraints() const;
-    ...
-};
+    style SL fill:#555,color:#fff
+    style LG fill:#555,color:#fff
+    style OM fill:#555,color:#fff
+    style RM fill:#555,color:#fff
+    style QT fill:#555,color:#fff
+    style WS fill:#555,color:#fff
 ```
 
-Benefits over a single flag:
-- Operators can see *why* the system is pulled, not just *that* it is
-- Bits with different clearing semantics: `kPnLLimit` requires manual `resume()`; `kStaleBook` auto-clears on the next WS message; `kHighFillRate` auto-clears after a cooldown timer
-- Tooling/logging can track constraint transitions over time
+`get_logger()` returns a process-wide `spdlog::logger` (stdout color sink by default). `set_logger()` replaces it — used in tests to inject an `ostream_sink` backed by `ostringstream` for hermetic log-content assertions. Log levels: `info` for orders/fills/constraint clears, `warn` for constraint sets and disconnects, `debug` for reprice ticks.
 
-**Pull-on-fill-count (adverse selection guard)**
+**Latency metrics (Phase 14b — not yet built)**
 
-If `N` fills arrive on a ticker within `T` seconds, the system is likely being picked off by an informed trader or stale on news. The correct response is to pull quotes, wait for the orderbook to stabilize, and re-enter after a model refresh.
-
-```cpp
-struct AdverseSelectionConfig {
-    static constexpr int    kDefaultFillThreshold  = 5;
-    static constexpr double kDefaultWindowSeconds  = 30.0;
-    static constexpr double kDefaultCooldownSeconds = 10.0;
-
-    int    fill_threshold   = kDefaultFillThreshold;   // fills within window → pull
-    double window_seconds   = kDefaultWindowSeconds;
-    double cooldown_seconds = kDefaultCooldownSeconds; // before re-entry attempt
-};
-```
-
-On each `record_fill()` call, the guard checks the rolling window. If the threshold is crossed it sets `Constraint::kHighFillRate` and cancels all quotes for that ticker. The main loop clears `kHighFillRate` after `cooldown_seconds` and triggers a fresh `quoter.update()` cycle.
-
-This fits prediction markets particularly well: information events (news drops, vote counts, weather readings) arrive discretely and move prices step-wise, so the pull-wait-re-enter cycle is a better response than continuous repricing.
-
----
-
-### Phase 14 — Logging & Observability
-
-**Structured logging (spdlog)**
-
-Every significant event should emit a structured log line — order placed/cancelled, fill received, constraint set/cleared, reprice triggered. Use [spdlog](https://github.com/gabime/spdlog) (already listed as a dependency) with a JSON sink so logs are machine-parseable.
-
-Key log sites:
-- `OrderManager::place()` / `cancel()` — order ID, ticker, side, price, qty, latency
-- `OrderManager::record_fill()` — fill details, updated net position, realized PnL
-- `RiskManager::set(Constraint)` / `clear(Constraint)` — which bit, current full constraint state
-- `Quoter::refresh_bid/ask()` — desired vs. current price, reprice decision
-- `WebSocketClient` — connect, disconnect, reconnect attempts
-
-**Latency metrics**
-
-The critical latency path is: WS delta received → fair value computed → order sent. Instrument each segment independently so regressions are visible immediately.
-
-Latencies to track (as histograms or rolling percentiles — p50/p95/p99):
-
-| Metric | Definition |
-|---|---|
-| `ws_delta_to_fv_us` | Time from WS message receipt to `FairValueEngine::estimate()` returning |
-| `fv_to_order_us` | Time from `estimate()` returning to HTTP POST sent |
-| `order_rtt_ms` | Time from POST sent to 200 response received |
-| `fill_to_record_us` | Time from fill WS message to `record_fill()` completing |
-| `quote_cycle_us` | Full `quoter.update()` wall time |
-| `reprice_rate` | Reprices per minute per ticker (churn indicator) |
-| `fill_rate` | Fills per minute per ticker (adverse selection indicator) |
-
-**Implementation sketch**
-
-A lock-free ring-buffer metric collector keeps overhead under 1 µs per sample. A background thread drains it to a Prometheus endpoint or a local CSV file every second.
-
-```cpp
-// Minimal interface — no virtual dispatch on the hot path
-class Metrics {
-public:
-    void record(std::string_view name, double value_us);
-    void increment(std::string_view name);
-
-    // Called from a background thread to flush samples
-    void flush(std::ostream &out);
-};
-```
-
-The `spdlog` already in the dependency list covers event logging; `Metrics` is a separate lightweight collector. Keep them separate — logs are for debugging, metrics are for dashboards and alerting.
+The event-log layer is in place. A separate `Metrics` collector (lock-free ring buffer → Prometheus or CSV) is deferred until UAT confirms the hot path is correct. Key metrics to instrument when ready: `ws_delta_to_fv_us`, `fv_to_order_us`, `order_rtt_ms`, `quote_cycle_us`, `reprice_rate`, `fill_rate`.
 
 ---
 
@@ -1243,10 +1186,10 @@ graph TD
 - [x] Phase 8 — Fair Value Engine
 - [x] Phase 9 — Quoter
 - [x] Phase 10 — Main Loop & Integration
-- [ ] Phase 11 — Pluggable Pricing Model
-- [ ] Phase 12 — Theo Grid
-- [ ] Phase 13 — Constraint Bitset & Adverse Selection Guard
-- [ ] Phase 14 — Logging & Observability
+- [x] Phase 11 — Pluggable Pricing Model
+- [x] Phase 12 — Theo Grid
+- [x] Phase 13 — Constraint Bitset & Adverse Selection Guard
+- [x] Phase 14 — Logging & Observability
 - [x] Phase 15 — Config File & Graceful Shutdown
 - [x] Phase 16 — CI Pipeline & Coverage
 - [x] Phase 17 — Benchmarking
