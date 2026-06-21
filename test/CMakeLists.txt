@@ -28,6 +28,7 @@ kalshi_add_test(main_loop_test source/main_loop_test.cpp)
 kalshi_add_test(config_test source/config_test.cpp)
 kalshi_add_test(paper_transport_test source/paper_transport_test.cpp)
 kalshi_add_test(adverse_selection_test source/adverse_selection_test.cpp)
+kalshi_add_test(theo_grid_test source/theo_grid_test.cpp)
 
 # ---- Replay tests ----
 
