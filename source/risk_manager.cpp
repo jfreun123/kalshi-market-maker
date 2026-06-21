@@ -1,5 +1,6 @@
 #include "risk_manager.hpp"
 
+#include <array>
 #include <cstdlib>
 #include <string>
 #include <string_view>
@@ -8,11 +9,17 @@ namespace kalshi {
 
 constexpr double kCentsToDollars = 100.0;
 
+// Human-readable names for each constraint bit — indexed by Constraint value.
+constexpr std::array<std::string_view, 8> kConstraintNames = {
+    "kPnLLimit",  "kPositionLimit", "kOpenOrders", "kHighFillRate",
+    "kStaleBook", "kModelDiverge",  "kManualHalt", "kConnectivity",
+};
+
 RiskManager::RiskManager(RiskLimits limits) : limits_{limits} {}
 
 bool RiskManager::check_order(std::string_view ticker, Side side,
                               int /*price_cents*/, int quantity) const {
-  if (halted_) {
+  if (constraints_.any()) {
     return false;
   }
   if (quantity > limits_.max_order_size) {
@@ -50,14 +57,39 @@ void RiskManager::update(const OrderManager &order_mgr,
   }
 
   if (cached_total_pnl_cents_ / kCentsToDollars < limits_.daily_loss_limit) {
-    halted_ = true;
+    set(Constraint::kPnLLimit);
   }
 }
 
-bool RiskManager::is_halted() const { return halted_; }
+void RiskManager::set(Constraint bit) {
+  constraints_.set(static_cast<std::size_t>(bit));
+}
 
-void RiskManager::halt() { halted_ = true; }
+void RiskManager::clear(Constraint bit) {
+  constraints_.reset(static_cast<std::size_t>(bit));
+}
 
-void RiskManager::resume() { halted_ = false; }
+bool RiskManager::is_set(Constraint bit) const {
+  return constraints_.test(static_cast<std::size_t>(bit));
+}
+
+std::string RiskManager::active_constraints() const {
+  std::string result;
+  for (std::size_t idx = 0; idx < kNumConstraints; ++idx) {
+    if (constraints_.test(idx)) {
+      if (!result.empty()) {
+        result += ' ';
+      }
+      result += kConstraintNames[idx];
+    }
+  }
+  return result;
+}
+
+bool RiskManager::is_halted() const { return constraints_.any(); }
+
+void RiskManager::halt() { set(Constraint::kManualHalt); }
+
+void RiskManager::resume() { constraints_.reset(); }
 
 } // namespace kalshi

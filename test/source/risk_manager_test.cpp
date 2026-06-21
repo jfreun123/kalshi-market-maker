@@ -300,3 +300,71 @@ TEST_F(RiskManagerTest, ResumeRestoresAfterAutoHalt) {
   EXPECT_TRUE(
       risk_mgr.check_order(kTicker, kalshi::Side::Yes, kValidPrice, kSmallQty));
 }
+
+// ---- Constraint bitset ----
+
+TEST_F(RiskManagerTest, HaltSetsManualHaltConstraint) {
+  kalshi::RiskManager risk_mgr{default_limits()};
+  risk_mgr.halt();
+  EXPECT_TRUE(risk_mgr.is_set(kalshi::Constraint::kManualHalt));
+}
+
+TEST_F(RiskManagerTest, SetAndClearIndividualConstraint) {
+  kalshi::RiskManager risk_mgr{default_limits()};
+  risk_mgr.set(kalshi::Constraint::kHighFillRate);
+  EXPECT_TRUE(risk_mgr.is_set(kalshi::Constraint::kHighFillRate));
+  EXPECT_TRUE(risk_mgr.is_halted());
+  risk_mgr.clear(kalshi::Constraint::kHighFillRate);
+  EXPECT_FALSE(risk_mgr.is_set(kalshi::Constraint::kHighFillRate));
+  EXPECT_FALSE(risk_mgr.is_halted());
+}
+
+TEST_F(RiskManagerTest, MultipleConstraintBitsAreIndependent) {
+  kalshi::RiskManager risk_mgr{default_limits()};
+  risk_mgr.set(kalshi::Constraint::kManualHalt);
+  risk_mgr.set(kalshi::Constraint::kHighFillRate);
+  EXPECT_TRUE(risk_mgr.is_halted());
+
+  risk_mgr.clear(kalshi::Constraint::kManualHalt);
+  EXPECT_TRUE(risk_mgr.is_halted()); // kHighFillRate still set
+  EXPECT_FALSE(risk_mgr.is_set(kalshi::Constraint::kManualHalt));
+
+  risk_mgr.clear(kalshi::Constraint::kHighFillRate);
+  EXPECT_FALSE(risk_mgr.is_halted());
+}
+
+TEST_F(RiskManagerTest, ResumesClearsAllConstraints) {
+  kalshi::RiskManager risk_mgr{default_limits()};
+  risk_mgr.set(kalshi::Constraint::kManualHalt);
+  risk_mgr.set(kalshi::Constraint::kHighFillRate);
+  risk_mgr.resume();
+  EXPECT_FALSE(risk_mgr.is_halted());
+  EXPECT_FALSE(risk_mgr.is_set(kalshi::Constraint::kManualHalt));
+  EXPECT_FALSE(risk_mgr.is_set(kalshi::Constraint::kHighFillRate));
+}
+
+TEST_F(RiskManagerTest, PnlLimitBreachSetsKPnLLimitConstraint) {
+  auto rest = make_rest_client(std::make_unique<FakeTransport>());
+  kalshi::OrderManager order_mgr{rest};
+  order_mgr.record_fill(make_fill(kOrderId1, kTicker, kalshi::Side::Yes,
+                                  kLossPriceYes, 1, kTs1Ns));
+  order_mgr.record_fill(
+      make_fill(kOrderId2, kTicker, kalshi::Side::No, kLossPriceNo, 1, kTs2Ns));
+
+  kalshi::RiskManager risk_mgr{tight_loss_limits()};
+  risk_mgr.update(order_mgr, {kTicker});
+
+  EXPECT_TRUE(risk_mgr.is_set(kalshi::Constraint::kPnLLimit));
+}
+
+TEST_F(RiskManagerTest, ActiveConstraintsReturnsSetBitNames) {
+  kalshi::RiskManager risk_mgr{default_limits()};
+  risk_mgr.set(kalshi::Constraint::kManualHalt);
+  const std::string active = risk_mgr.active_constraints();
+  EXPECT_NE(active.find("kManualHalt"), std::string::npos);
+}
+
+TEST_F(RiskManagerTest, ActiveConstraintsEmptyWhenNoneSet) {
+  kalshi::RiskManager risk_mgr{default_limits()};
+  EXPECT_TRUE(risk_mgr.active_constraints().empty());
+}
