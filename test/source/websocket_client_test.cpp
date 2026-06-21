@@ -7,6 +7,7 @@
 #include <openssl/pem.h>
 #include <openssl/rsa.h>
 
+#include <format>
 #include <memory>
 #include <string>
 #include <vector>
@@ -24,14 +25,19 @@ constexpr int kFillPrice = 52;
 constexpr int kFillCount = 5;
 constexpr int kSecondLevelPrice = 51;
 constexpr int kSecondLevelQty = 100;
+constexpr double kCentsPerDollar = 100.0;
+constexpr long long kFillTsMs = 1735689600000LL; // 2025-01-01T00:00:00Z in ms
 constexpr std::size_t kOneLevel = 1U;
 constexpr std::size_t kTwoLevels = 2U;
+constexpr std::size_t kFillPlusOneMarket = 2U;  // fill sub + 1 market sub
+constexpr std::size_t kFillPlusTwoMarkets = 3U; // fill sub + 2 market subs
+constexpr std::size_t kFourMessages = 4U; // 2 reconnects x (fill + market)
 constexpr int kNoReconnect = 0;
 constexpr int kOneReconnect = 1;
 constexpr int kTwoConnects = 2;
 
 const std::string kTestTicker = "KXBTCD";
-const std::string kWsUrl = "wss://trading-api.kalshi.com/trade-api/ws/v2";
+const std::string kWsUrl = "wss://external-api-ws.kalshi.com/trade-api/ws/v2";
 
 // RSA key generated once per test suite (expensive operation).
 std::string
@@ -67,13 +73,32 @@ make_client(std::unique_ptr<kalshi::FakeWebSocket> fake_ws,
 // named constants, so the swappability risk is accepted.
 // NOLINTBEGIN(bugprone-easily-swappable-parameters)
 
+// Format int cents as fixed-point dollar string: 52 -> "0.5200"
+std::string cents_to_dollars(int cents) {
+  return std::format("{:.4f}", cents / kCentsPerDollar);
+}
+
+// Format int count as fixed-point string: 10 -> "10.00"
+std::string format_count(int count) {
+  return std::format("{:.2f}", static_cast<double>(count));
+}
+
+// nlohmann/json treats {{str, str}} as a key-value object, not a nested array.
+// Must use json::array() explicitly to build [[price, count], ...] structures.
+nlohmann::json make_level(int price_cents, int qty) {
+  return nlohmann::json::array(
+      {cents_to_dollars(price_cents), format_count(qty)});
+}
+
 std::string snapshot_message(const std::string &ticker, int yes_price,
                              int yes_qty, int no_price, int no_qty) {
   nlohmann::json msg;
   msg["type"] = "orderbook_snapshot";
   msg["msg"]["market_ticker"] = ticker;
-  msg["msg"]["yes"] = {{yes_price, yes_qty}};
-  msg["msg"]["no"] = {{no_price, no_qty}};
+  msg["msg"]["yes_dollars_fp"] =
+      nlohmann::json::array({make_level(yes_price, yes_qty)});
+  msg["msg"]["no_dollars_fp"] =
+      nlohmann::json::array({make_level(no_price, no_qty)});
   return msg.dump();
 }
 
@@ -83,21 +108,23 @@ std::string delta_message(const std::string &ticker, const std::string &side,
   msg["type"] = "orderbook_delta";
   msg["msg"]["market_ticker"] = ticker;
   msg["msg"]["side"] = side;
-  msg["msg"]["price"] = price;
-  msg["msg"]["delta"] = qty;
+  msg["msg"]["price_dollars"] = cents_to_dollars(price);
+  msg["msg"]["delta_fp"] = format_count(qty);
   return msg.dump();
 }
 
 std::string fill_message(const std::string &order_id, const std::string &ticker,
-                         const std::string &side, int price, int count) {
+                         const std::string &side, int price, int count,
+                         bool is_taker = false) {
   nlohmann::json msg;
   msg["type"] = "fill";
   msg["msg"]["order_id"] = order_id;
   msg["msg"]["market_ticker"] = ticker;
   msg["msg"]["side"] = side;
-  msg["msg"]["yes_price"] = price;
-  msg["msg"]["count"] = count;
-  msg["msg"]["created_time"] = "2025-01-01T00:00:00Z";
+  msg["msg"]["yes_price_dollars"] = cents_to_dollars(price);
+  msg["msg"]["count_fp"] = format_count(count);
+  msg["msg"]["ts_ms"] = kFillTsMs;
+  msg["msg"]["is_taker"] = is_taker;
   return msg.dump();
 }
 
@@ -122,9 +149,26 @@ TEST_F(WebSocketClientTest, SubscribeSendsJsonWithCorrectCmd) {
   client.subscribe(kTestTicker);
   client.run();
 
-  ASSERT_EQ(ws_raw->sent_messages().size(), kOneLevel);
-  const auto sub = nlohmann::json::parse(ws_raw->sent_messages()[0]);
-  EXPECT_EQ(sub["cmd"], "subscribe");
+  // [0] = fill channel sub, [1] = market sub
+  ASSERT_EQ(ws_raw->sent_messages().size(), kFillPlusOneMarket);
+  const auto market_sub = nlohmann::json::parse(ws_raw->sent_messages()[1]);
+  EXPECT_EQ(market_sub["cmd"], "subscribe");
+}
+
+TEST_F(WebSocketClientTest, SubscribesToFillChannelOnConnect) {
+  auto fake_ws = std::make_unique<kalshi::FakeWebSocket>();
+  kalshi::FakeWebSocket *ws_raw = fake_ws.get();
+
+  auto client = make_client(std::move(fake_ws));
+  client.run();
+
+  ASSERT_GE(ws_raw->sent_messages().size(), kOneLevel);
+  const auto fill_sub = nlohmann::json::parse(ws_raw->sent_messages()[0]);
+  EXPECT_EQ(fill_sub["cmd"], "subscribe");
+  const auto &channels = fill_sub["params"]["channels"];
+  ASSERT_EQ(channels.size(), kOneLevel);
+  EXPECT_EQ(channels[0], "fill");
+  EXPECT_FALSE(fill_sub["params"].contains("market_ticker"));
 }
 
 TEST_F(WebSocketClientTest, SubscribeSendsCorrectTicker) {
@@ -135,9 +179,9 @@ TEST_F(WebSocketClientTest, SubscribeSendsCorrectTicker) {
   client.subscribe(kTestTicker);
   client.run();
 
-  ASSERT_EQ(ws_raw->sent_messages().size(), kOneLevel);
-  const auto sub = nlohmann::json::parse(ws_raw->sent_messages()[0]);
-  const auto &tickers = sub["params"]["market_tickers"];
+  ASSERT_EQ(ws_raw->sent_messages().size(), kFillPlusOneMarket);
+  const auto market_sub = nlohmann::json::parse(ws_raw->sent_messages()[1]);
+  const auto &tickers = market_sub["params"]["market_tickers"];
   ASSERT_EQ(tickers.size(), kOneLevel);
   EXPECT_EQ(tickers[0], kTestTicker);
 }
@@ -150,14 +194,14 @@ TEST_F(WebSocketClientTest, SubscribeSendsOrderbookDeltaChannel) {
   client.subscribe(kTestTicker);
   client.run();
 
-  ASSERT_EQ(ws_raw->sent_messages().size(), kOneLevel);
-  const auto sub = nlohmann::json::parse(ws_raw->sent_messages()[0]);
-  const auto &channels = sub["params"]["channels"];
+  ASSERT_EQ(ws_raw->sent_messages().size(), kFillPlusOneMarket);
+  const auto market_sub = nlohmann::json::parse(ws_raw->sent_messages()[1]);
+  const auto &channels = market_sub["params"]["channels"];
   ASSERT_FALSE(channels.empty());
   EXPECT_EQ(channels[0], "orderbook_delta");
 }
 
-TEST_F(WebSocketClientTest, TwoSubscribesSendTwoMessages) {
+TEST_F(WebSocketClientTest, TwoMarketSubscribesSendThreeMessages) {
   auto fake_ws = std::make_unique<kalshi::FakeWebSocket>();
   kalshi::FakeWebSocket *ws_raw = fake_ws.get();
 
@@ -166,7 +210,8 @@ TEST_F(WebSocketClientTest, TwoSubscribesSendTwoMessages) {
   client.subscribe("KXETHU");
   client.run();
 
-  EXPECT_EQ(ws_raw->sent_messages().size(), kTwoLevels);
+  // fill sub + 2 market subs = 3
+  EXPECT_EQ(ws_raw->sent_messages().size(), kFillPlusTwoMarkets);
 }
 
 TEST_F(WebSocketClientTest, ConnectUsesConfiguredUrl) {
@@ -266,9 +311,10 @@ TEST_F(WebSocketClientTest, SnapshotWithMultipleLevelsPreservesAll) {
   nlohmann::json msg;
   msg["type"] = "orderbook_snapshot";
   msg["msg"]["market_ticker"] = kTestTicker;
-  msg["msg"]["yes"] = {{kYesBidPrice, kYesBidQty},
-                       {kSecondLevelPrice, kSecondLevelQty}};
-  msg["msg"]["no"] = nlohmann::json::array();
+  msg["msg"]["yes_dollars_fp"] =
+      nlohmann::json::array({make_level(kYesBidPrice, kYesBidQty),
+                             make_level(kSecondLevelPrice, kSecondLevelQty)});
+  msg["msg"]["no_dollars_fp"] = nlohmann::json::array();
   ws_raw->enqueue_message(msg.dump());
 
   auto client = make_client(std::move(fake_ws));
@@ -367,6 +413,24 @@ TEST_F(WebSocketClientTest, FillFieldsParsedCorrectly) {
   EXPECT_EQ(received.side, kalshi::Side::Yes);
   EXPECT_EQ(received.price_cents, kFillPrice);
   EXPECT_EQ(received.quantity, kFillCount);
+  EXPECT_FALSE(received.is_taker); // default fill_message is maker (passive)
+}
+
+TEST_F(WebSocketClientTest, FillIsTakerParsedCorrectly) {
+  auto fake_ws = std::make_unique<kalshi::FakeWebSocket>();
+  kalshi::FakeWebSocket *ws_raw = fake_ws.get();
+  ws_raw->enqueue_message(fill_message("order-abc", kTestTicker, "yes",
+                                       kFillPrice, kFillCount,
+                                       /*is_taker=*/true));
+
+  auto client = make_client(std::move(fake_ws));
+
+  bool recv_is_taker = false;
+  client.on_fill(
+      [&](const kalshi::Fill &fill) { recv_is_taker = fill.is_taker; });
+  client.run();
+
+  EXPECT_TRUE(recv_is_taker);
 }
 
 TEST_F(WebSocketClientTest, FillSideNoIsParsedCorrectly) {
@@ -447,6 +511,6 @@ TEST_F(WebSocketClientTest, ResubscribesAfterReconnect) {
   client.subscribe(kTestTicker);
   client.run();
 
-  // One subscribe per connect: initial connect + one reconnect = 2.
-  EXPECT_EQ(ws_raw->sent_messages().size(), kTwoLevels);
+  // 2 connects × (fill sub + market sub) = 4 messages total.
+  EXPECT_EQ(ws_raw->sent_messages().size(), kFourMessages);
 }

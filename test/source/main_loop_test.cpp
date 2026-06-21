@@ -13,6 +13,7 @@
 #include <openssl/pem.h>
 #include <openssl/rsa.h>
 
+#include <format>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -36,14 +37,16 @@ constexpr int kSubBboDeltaQty = 100;
 constexpr int kFillQty = 20;
 constexpr int kFillPrice = 50;
 constexpr int kHttpOk = 200;
+constexpr double kCentsPerDollar = 100.0;
+constexpr long long kFillTsMs = 1735689600000LL; // 2025-01-01T00:00:00Z in ms
 
 const std::string kTicker = "KXBTCD";
 const std::string kOrderId1 = "order-001";
 const std::string kOrderId2 = "order-002";
 const std::string kFillOrderId = "fill-order-001";
 const std::string kApiKey = "test-key-id";
-const std::string kBaseUrl = "https://trading-api.kalshi.com/trade-api/v2";
-const std::string kWsUrl = "wss://trading-api.kalshi.com/trade-api/ws/v2";
+const std::string kBaseUrl = "https://external-api.kalshi.com/trade-api/v2";
+const std::string kWsUrl = "wss://external-api-ws.kalshi.com/trade-api/ws/v2";
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::string kPemPrivateKey;
@@ -68,13 +71,23 @@ std::string generate_rsa_pem() {
 
 // NOLINTBEGIN(bugprone-easily-swappable-parameters)
 
+// nlohmann/json treats {{str, str}} as a key-value object, not a nested array.
+// Use json::array() explicitly for [[price, count], ...] structures.
+nlohmann::json make_level(int price_cents, int qty) {
+  return nlohmann::json::array(
+      {std::format("{:.4f}", price_cents / kCentsPerDollar),
+       std::format("{:.2f}", static_cast<double>(qty))});
+}
+
 std::string snapshot_msg(const std::string &ticker, int yes_price, int yes_qty,
                          int no_price, int no_qty) {
   nlohmann::json msg;
   msg["type"] = "orderbook_snapshot";
   msg["msg"]["market_ticker"] = ticker;
-  msg["msg"]["yes"] = {{yes_price, yes_qty}};
-  msg["msg"]["no"] = {{no_price, no_qty}};
+  msg["msg"]["yes_dollars_fp"] =
+      nlohmann::json::array({make_level(yes_price, yes_qty)});
+  msg["msg"]["no_dollars_fp"] =
+      nlohmann::json::array({make_level(no_price, no_qty)});
   return msg.dump();
 }
 
@@ -84,8 +97,8 @@ std::string delta_msg(const std::string &ticker, const std::string &side,
   msg["type"] = "orderbook_delta";
   msg["msg"]["market_ticker"] = ticker;
   msg["msg"]["side"] = side;
-  msg["msg"]["price"] = price;
-  msg["msg"]["delta"] = qty;
+  msg["msg"]["price_dollars"] = std::format("{:.4f}", price / kCentsPerDollar);
+  msg["msg"]["delta_fp"] = std::format("{:.2f}", static_cast<double>(qty));
   return msg.dump();
 }
 
@@ -96,9 +109,11 @@ std::string fill_msg(const std::string &order_id, const std::string &ticker,
   msg["msg"]["order_id"] = order_id;
   msg["msg"]["market_ticker"] = ticker;
   msg["msg"]["side"] = side;
-  msg["msg"]["yes_price"] = price;
-  msg["msg"]["count"] = count;
-  msg["msg"]["created_time"] = "2025-01-01T00:00:00Z";
+  msg["msg"]["yes_price_dollars"] =
+      std::format("{:.4f}", price / kCentsPerDollar);
+  msg["msg"]["count_fp"] = std::format("{:.2f}", static_cast<double>(count));
+  msg["msg"]["ts_ms"] = kFillTsMs;
+  msg["msg"]["is_taker"] = false;
   return msg.dump();
 }
 

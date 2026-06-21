@@ -1,72 +1,120 @@
 # Kalshi API Reference
 
+> Last verified against docs.kalshi.com on 2026-06-21.
+
 ## Environments
 
-| Environment | Base URL | Web UI |
+| Environment | REST base URL | WebSocket URL |
 |---|---|---|
-| Production | `https://trading-api.kalshi.com/trade-api/v2` | kalshi.com |
-| Demo | `https://demo-api.kalshi.co/trade-api/v2` | demo.kalshi.co |
+| Production | `https://external-api.kalshi.com/trade-api/v2` | `wss://external-api-ws.kalshi.com/trade-api/ws/v2` |
+| Demo | `https://external-api.demo.kalshi.co/trade-api/v2` | `wss://external-api-ws.demo.kalshi.co/trade-api/ws/v2` |
 
-The demo environment is a full paper-trading sandbox with the same API contract as production. Create a separate account at demo.kalshi.co. API keys are environment-specific — a prod key will not work on demo.
+Credentials are not shared between environments. Demo API keys only work against demo endpoints.
 
 ## Authentication
 
-Every request requires three headers signed with your RSA-2048 private key:
+Every request requires three headers:
 
 ```
-Kalshi-Access-Key:       <api-key-id>
-Kalshi-Access-Timestamp: <unix-milliseconds>
-Kalshi-Access-Signature: <base64(RSA_SHA256(timestamp_ms + METHOD + path))>
+KALSHI-ACCESS-KEY:       <api-key-id>
+KALSHI-ACCESS-TIMESTAMP: <unix-milliseconds>
+KALSHI-ACCESS-SIGNATURE: base64(RSA-PSS-SHA256(timestamp_ms + METHOD + path))
 ```
 
-**Message construction:**
+**Signature construction:**
 ```
 message = str(timestamp_ms) + "GET" + "/trade-api/v2/markets"
-          ↑ no separators, concatenated directly
+          ↑ no separators, concatenated directly; path has NO query params
 ```
 
-Keys are generated at kalshi.com/account/api. The private key is downloaded once at creation time — store it securely, Kalshi does not retain it.
+Algorithm: RSA-PSS, SHA-256, MGF1 with SHA-256, salt length = digest length.
 
-See `source/auth.hpp` for the implementation.
+Keys are generated at kalshi.com → Settings → API Keys. The private key is downloaded once — Kalshi does not retain it. See `source/auth.hpp` for the C++ implementation.
+
+## Price and Count Representation (current API)
+
+All prices use `_dollars` suffix: fixed-point dollar strings.
+- `"0.5200"` = 52 cents = 52% probability
+- Range: `"0.0100"` – `"0.9900"` for standard markets
+
+All quantities use `_fp` suffix: fixed-point strings, 2 decimal places.
+- `"10.00"` = 10 contracts
+
+**Tick size** depends on `price_level_structure` field on the market:
+- `linear_cent` — $0.01 tick (most event contracts)
+- `tapered_deci_cent` — $0.001 at extremes (<$0.10, >$0.90), $0.01 in middle
+- `deci_cent` — $0.001 everywhere (financial markets)
+
+Our `price_cents` int model assumes `linear_cent`. Sub-cent markets need care.
+
+## Order Direction
+
+Two equivalent vocabularies — use either, not both:
+
+| Vocabulary | Long Yes | Long No |
+|---|---|---|
+| `outcome_side` | `yes` | `no` |
+| `book_side` | `bid` | `ask` |
+
+`bid` = `yes`. `ask` = `no`. There is no true "No contract" — a No order is routed
+as the complement of a Yes order. Legacy `side`/`action` fields deprecated May 28 2026.
 
 ## Key Endpoints
 
 ### Markets
 
 ```
-GET /markets
-GET /markets?event_ticker=KXBTCD    # filter by event
-GET /markets/{ticker}
-GET /markets/{ticker}/orderbook
+GET /markets                         # list markets (filter: ?event_ticker=...)
+GET /markets/{ticker}                # single market
+GET /markets/{ticker}/orderbook      # REST orderbook snapshot
 ```
+
+**Market response fields (key subset):**
+
+| Field | Type | Notes |
+|---|---|---|
+| `ticker` | string | Unique market ID |
+| `close_time` | ISO8601 | When trading stops; all orders rejected after this |
+| `status` | enum | `initialized`\|`inactive`\|`active`\|`closed`\|`determined`\|`disputed`\|`amended`\|`finalized` |
+| `yes_bid_dollars` | string | Best YES bid in dollars |
+| `yes_ask_dollars` | string | Best YES ask in dollars |
+| `last_price_dollars` | string | Last YES trade price |
+| `result` | enum | `"yes"`\|`"no"`\|`"scalar"`\|`""` (empty until determined) |
+| `price_level_structure` | string | Tick size regime |
 
 ### Orders
 
 ```
-POST   /orders                  # place a new order
-GET    /orders?status=resting   # list orders
-GET    /orders/{order_id}
-DELETE /orders/{order_id}       # cancel
+POST   /portfolio/events/orders      # place order (V2)
+GET    /portfolio/orders?status=resting
+DELETE /portfolio/orders/{order_id}  # cancel
 ```
 
-**Place order body:**
+**Create order request body (V2):**
+
+| Field | Required | Notes |
+|---|---|---|
+| `ticker` | yes | Market identifier |
+| `side` | yes | `bid` (long yes) or `ask` (long no) |
+| `count` | yes | Fixed-point string e.g. `"10.00"` |
+| `price` | yes | Fixed-point dollars e.g. `"0.5200"` — always in YES dimension |
+| `time_in_force` | yes | `good_till_canceled` \| `fill_or_kill` \| `immediate_or_cancel` |
+| `self_trade_prevention_type` | yes | `taker_at_cross` \| `maker` |
+| `post_only` | no | Set `true` for passive MM quotes (rejects if would cross) |
+| `cancel_order_on_pause` | no | Set `true` to auto-cancel when exchange pauses market |
+
+**Price field for No orders:** always pass YES price = `100 - no_price_cents`. The API
+uses a single YES-dimension price book. See `rest_client.cpp::place_order`.
+
+**Create order response:**
+
 ```json
 {
-  "ticker": "KXBTCD-25DEC31-T50000",
-  "side": "yes",
-  "action": "buy",
-  "type": "limit",
-  "count": 10,
-  "yes_price": 52
+  "order_id": "3b23c1c7-...",
+  "fill_count": "0.00",
+  "remaining_count": "10.00",
+  "ts_ms": 1715793600123
 }
-```
-
-`yes_price` is in cents (1–99). Kalshi has no separate `no_price` field — when buying NO, pass `yes_price = 100 - your_no_price`.
-
-### Fills
-
-```
-GET /fills?ticker=KXBTCD-25DEC31-T50000
 ```
 
 ### Portfolio
@@ -74,66 +122,150 @@ GET /fills?ticker=KXBTCD-25DEC31-T50000
 ```
 GET /portfolio/balance
 GET /portfolio/positions
+GET /portfolio/fills
 ```
 
-## Orderbook Format
+## Orderbook Format (REST)
+
+`GET /markets/{ticker}/orderbook` returns:
 
 ```json
 {
-  "orderbook": {
-    "yes": [[52, 200], [51, 150]],
-    "no":  [[45, 100], [44, 300]]
+  "orderbook_fp": {
+    "yes_dollars": [["0.5100", "150.00"], ["0.5200", "200.00"]],
+    "no_dollars":  [["0.4700", "100.00"], ["0.4800", "150.00"]]
   }
 }
 ```
 
-Each entry is `[price_cents, quantity]`. YES levels are sorted descending by price. The implied YES ask = `100 - best_no_bid`. There is no crossed market by definition.
+Each entry is `[price_dollars, count_fp]`. Arrays sorted **ascending** by price
+(best bid = **last** element). The YES ask is implied: `1.00 - best_no_bid`.
 
-**Best bid/ask derivation:**
+**Spread derivation:**
 ```
-best_yes_bid = yes[0][0]          (highest price someone will buy YES)
-best_yes_ask = 100 - no[0][0]     (cheapest YES implied from NO bids)
+best_yes_bid = yes_dollars[-1][0]        e.g. "0.5200" = 52¢
+best_yes_ask = 1.00 - no_dollars[-1][0]  e.g. 1.00 - 0.48 = 0.52 → 52¢
 mid          = (best_yes_bid + best_yes_ask) / 2.0
 ```
 
 ## WebSocket Feed
 
 ```
-wss://trading-api.kalshi.com/trade-api/ws/v2
+wss://external-api-ws.kalshi.com/trade-api/ws/v2
 ```
 
-Authentication uses the same RSA-SHA256 scheme, passed as a `login` message after connecting.
+Authentication: include `KALSHI-ACCESS-KEY`, `KALSHI-ACCESS-TIMESTAMP`,
+`KALSHI-ACCESS-SIGNATURE` as HTTP headers during the WebSocket handshake.
 
-**Subscribe to an orderbook:**
+**Subscribe command format:**
 ```json
-{ "id": 1, "cmd": "subscribe", "params": { "channels": ["orderbook_delta"], "market_tickers": ["KXBTCD-25DEC31-T50000"] } }
+{ "id": 1, "cmd": "subscribe", "params": { "channels": ["orderbook_delta"], "market_tickers": ["KXBTCD-25DEC31"] } }
 ```
 
-**Message types received:**
-
-| Type | Payload |
-|---|---|
-| `orderbook_snapshot` | Full orderbook state on subscribe |
-| `orderbook_delta` | `{ side, price, delta }` — `delta < 0` means removal |
-| `fill` | Your order was filled |
-| `order` | Order status change |
-
-**Delta application rule:**
+For user-level channels (`fill`, `user_orders`) omit `market_tickers`:
+```json
+{ "id": 2, "cmd": "subscribe", "params": { "channels": ["fill"] } }
 ```
-new_quantity = old_quantity + delta
-if new_quantity <= 0: remove level
+
+### orderbook_snapshot
+
+Sent immediately on subscription:
+
+```json
+{
+  "type": "orderbook_snapshot",
+  "sid": 1,
+  "seq": 1,
+  "msg": {
+    "market_ticker": "KXBTCD-25DEC31",
+    "yes_dollars_fp": [["0.5100", "150.00"], ["0.5200", "200.00"]],
+    "no_dollars_fp":  [["0.4700", "100.00"], ["0.4800", "150.00"]]
+  }
+}
 ```
+
+### orderbook_delta
+
+Incremental update after snapshot:
+
+```json
+{
+  "type": "orderbook_delta",
+  "sid": 1,
+  "seq": 2,
+  "msg": {
+    "market_ticker": "KXBTCD-25DEC31",
+    "side": "yes",
+    "price_dollars": "0.5200",
+    "delta_fp": "-5.00",
+    "ts_ms": 1715793600123
+  }
+}
+```
+
+Apply rule: `level[side][price] += delta_fp`. Remove level when result ≤ 0.
+
+### fill
+
+Fired when one of your resting orders is filled:
+
+```json
+{
+  "type": "fill",
+  "sid": 2,
+  "msg": {
+    "trade_id": "...",
+    "order_id": "...",
+    "market_ticker": "KXBTCD-25DEC31",
+    "is_taker": false,
+    "side": "yes",
+    "yes_price_dollars": "0.5200",
+    "count_fp": "10.00",
+    "fee_cost": "0.0100",
+    "action": "buy",
+    "ts_ms": 1715793600123,
+    "post_position_fp": "10.00",
+    "outcome_side": "yes",
+    "book_side": "bid"
+  }
+}
+```
+
+`is_taker: false` = we were the passive (maker) side — expected for LP fills.
+
+## Market Lifecycle
+
+```
+initialized → active (at open_time)
+active ↔ inactive (exchange pause/unpause)
+active/inactive → closed (at close_time) — all orders auto-cancelled
+closed → determined → finalized
+```
+
+Subscribe to `market_lifecycle_v2` channel to track state transitions.
+After `close_time`, all order operations return `MARKET_INACTIVE`.
 
 ## Rate Limits
 
-- REST: ~10 requests/second per key (verify in Kalshi docs — subject to change)
-- WebSocket: one connection per key recommended; reconnect with exponential backoff
+Token bucket — separate Read and Write buckets, 10 tokens per request (default).
+
+| Tier | Read tok/s | Write tok/s | Earn threshold (30d vol share) |
+|---|---|---|---|
+| Basic | 200 | 100 | — |
+| Advanced | 300 | 300 | — |
+| Expert | 600 | 600 | 0.15% |
+| Premier | 1,000 | 1,000 | 0.25% |
+| Paragon | 2,000 | 2,000 | 0.50% |
+
+Basic = 10 orders/second sustained. Batch orders cost 10×N tokens (no discount).
+429 response on exhaustion; no penalty, bucket refills continuously.
 
 ## Fees
 
-Kalshi charges a fee on fills, expressed in basis points of the notional value. The fee is embedded in `Market.fee_rate_bps`. It reduces net PnL but does not affect quote pricing directly — factor it into your minimum required spread.
+Kalshi charges fees on fills. No settlement fee for binary YES/NO markets.
+The `fee_cost` field on fill events gives the per-fill fee in dollars.
 
+Fee reduces net PnL; factor it into minimum required spread:
 ```
-fee_per_contract = price_cents / 100.0 * fee_rate_bps / 10000.0
-min_spread_for_breakeven = 2 * fee_per_contract * 100  (in cents)
+min_spread_for_breakeven ≥ 2 × fee_per_contract
 ```

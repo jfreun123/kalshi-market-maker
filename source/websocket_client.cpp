@@ -7,8 +7,8 @@
 #include <nlohmann/json.hpp>
 
 #include <chrono>
+#include <cmath>
 #include <condition_variable>
-#include <ctime>
 #include <mutex>
 #include <stdexcept>
 #include <string>
@@ -122,6 +122,18 @@ std::string extract_ws_path(const std::string &url) {
   return std::string(rest.substr(slash_pos));
 }
 
+constexpr double kCentsPerDollar = 100.0;
+
+// "0.5200" -> 52
+int dollars_to_cents(const std::string &dollars_str) {
+  return static_cast<int>(std::round(std::stod(dollars_str) * kCentsPerDollar));
+}
+
+// "10.00" -> 10
+int parse_fp_count(const std::string &fp_str) {
+  return static_cast<int>(std::round(std::stod(fp_str)));
+}
+
 Side parse_side(const std::string &side_str) {
   if (side_str == "yes") {
     return Side::Yes;
@@ -129,25 +141,21 @@ Side parse_side(const std::string &side_str) {
   return Side::No;
 }
 
-// NOLINTNEXTLINE(concurrency-mt-unsafe)
-std::chrono::system_clock::time_point parse_iso8601(const std::string &str) {
-  std::tm time_fields{};
-  // NOLINTNEXTLINE(modernize-use-nullptr)
-  if (strptime(str.c_str(), "%Y-%m-%dT%H:%M:%SZ", &time_fields) == nullptr) {
-    return std::chrono::system_clock::time_point{};
-  }
-  return std::chrono::system_clock::from_time_t(timegm(&time_fields));
-}
-
+// Snapshot msg uses yes_dollars_fp / no_dollars_fp: arrays of [price_str,
+// count_str] pairs.
 Orderbook parse_snapshot(const nlohmann::json &msg) {
   Orderbook book;
   book.ticker = msg.at("market_ticker").get<std::string>();
 
-  for (const auto &entry : msg.at("yes")) {
-    book.yes.push_back({entry.at(0).get<int>(), entry.at(1).get<int>()});
+  for (const auto &entry : msg.at("yes_dollars_fp")) {
+    const int price = dollars_to_cents(entry.at(0).get<std::string>());
+    const int qty = parse_fp_count(entry.at(1).get<std::string>());
+    book.yes.push_back({price, qty});
   }
-  for (const auto &entry : msg.at("no")) {
-    book.no.push_back({entry.at(0).get<int>(), entry.at(1).get<int>()});
+  for (const auto &entry : msg.at("no_dollars_fp")) {
+    const int price = dollars_to_cents(entry.at(0).get<std::string>());
+    const int qty = parse_fp_count(entry.at(1).get<std::string>());
+    book.no.push_back({price, qty});
   }
   return book;
 }
@@ -199,8 +207,17 @@ void WebSocketClient::send_subscribe(const std::string &ticker) {
   ws_->send(msg.dump());
 }
 
+void WebSocketClient::send_subscribe_fills() {
+  nlohmann::json msg;
+  msg["id"] = next_msg_id_++;
+  msg["cmd"] = "subscribe";
+  msg["params"]["channels"] = {"fill"};
+  ws_->send(msg.dump());
+}
+
 void WebSocketClient::handle_connect() {
   get_logger()->info("websocket connected url={}", ws_url_);
+  send_subscribe_fills();
   for (const auto &ticker : subscribed_tickers_) {
     send_subscribe(ticker);
   }
@@ -239,8 +256,10 @@ void WebSocketClient::handle_message(const std::string &raw) {
         const std::string ticker =
             msg_body.at("market_ticker").get<std::string>();
         const Side side = parse_side(msg_body.at("side").get<std::string>());
-        const int price = msg_body.at("price").get<int>();
-        const int qty = msg_body.at("delta").get<int>();
+        const int price =
+            dollars_to_cents(msg_body.at("price_dollars").get<std::string>());
+        const int qty =
+            parse_fp_count(msg_body.at("delta_fp").get<std::string>());
         delta_callback_(ticker, side, price, qty);
       } catch (const nlohmann::json::exception &) {
         return; // Malformed delta; drop message.
@@ -253,10 +272,14 @@ void WebSocketClient::handle_message(const std::string &raw) {
         fill.order_id = msg_body.at("order_id").get<std::string>();
         fill.market_ticker = msg_body.at("market_ticker").get<std::string>();
         fill.side = parse_side(msg_body.at("side").get<std::string>());
-        fill.price_cents = msg_body.at("yes_price").get<int>();
-        fill.quantity = msg_body.at("count").get<int>();
-        fill.timestamp =
-            parse_iso8601(msg_body.at("created_time").get<std::string>());
+        fill.price_cents = dollars_to_cents(
+            msg_body.at("yes_price_dollars").get<std::string>());
+        fill.quantity =
+            parse_fp_count(msg_body.at("count_fp").get<std::string>());
+        fill.is_taker = msg_body.at("is_taker").get<bool>();
+        const auto ts_ms = msg_body.at("ts_ms").get<long long>();
+        fill.timestamp = std::chrono::system_clock::time_point(
+            std::chrono::milliseconds(ts_ms));
         fill_callback_(fill);
       } catch (const nlohmann::json::exception &) {
         return; // Malformed fill; drop message.

@@ -58,6 +58,7 @@ struct Fill {
   Side side{Side::Yes};
   int price_cents{0};
   int quantity{0};
+  bool is_taker{false};
   std::chrono::system_clock::time_point timestamp;
 };
 

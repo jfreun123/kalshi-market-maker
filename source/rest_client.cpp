@@ -253,6 +253,10 @@ Order RestClient::place_order(std::string_view ticker, Side side,
   body_json["count"] = format_count(quantity);
   body_json["time_in_force"] = v2_tif;
   body_json["self_trade_prevention_type"] = "taker_at_cross";
+  if (v2_tif == "good_till_canceled") {
+    body_json["post_only"] = true;
+    body_json["cancel_order_on_pause"] = true;
+  }
 
   auto resp = transport_->post(url, headers, body_json.dump());
   check_response(resp);
