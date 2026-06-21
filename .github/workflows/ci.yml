@@ -62,7 +62,7 @@ jobs:
           sudo apt-get update -q
           sudo apt-get install -y \
             clang clang-tidy cppcheck ninja-build \
-            libssl-dev lcov
+            libssl-dev lcov llvm
 
       - name: Configure
         run: cmake --preset coverage
@@ -75,13 +75,18 @@ jobs:
 
       - name: Generate coverage report
         run: |
+          # lcov must use llvm-cov as its gcov tool when the build used clang --coverage
+          printf '#!/bin/bash\nexec llvm-cov gcov "$@"\n' > /tmp/llvm-gcov.sh
+          chmod +x /tmp/llvm-gcov.sh
           lcov --capture \
                --directory build-coverage \
                --output-file coverage.info \
-               --ignore-errors mismatch
+               --gcov-tool /tmp/llvm-gcov.sh \
+               --ignore-errors mismatch,empty
           lcov --remove coverage.info \
                '*/test/*' '*/_deps/*' '/usr/*' \
-               --output-file coverage_filtered.info
+               --output-file coverage_filtered.info \
+               --ignore-errors unused
           lcov --list coverage_filtered.info
 
       - name: Upload coverage report
