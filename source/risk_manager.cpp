@@ -80,7 +80,7 @@ std::string RiskManager::active_constraints() const {
       if (!result.empty()) {
         result += ' ';
       }
-      result += kConstraintNames[idx];
+      result += kConstraintNames.at(idx);
     }
   }
   return result;
