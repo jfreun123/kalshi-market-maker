@@ -1,94 +1,189 @@
-# cpp-starter
+# kalshi-market-maker
 
-A C++23 project template with CMake, Google Test, clang-tidy, cppcheck, clang-format, ASAN/TSAN, and GitHub Actions CI.
+A C++23 automated market maker for [Kalshi](https://kalshi.com) prediction markets. Quotes two-sided markets across configurable tickers, manages risk via a constraint bitset, and detects adverse selection with a rolling-window fill-rate guard.
 
-## Using This Template
+## Architecture
 
-1. Click **Use this template** on GitHub (or `gh repo create --template jacobfreund/cpp-starter`)
-2. Clone your new repo
-3. Rename `cpp-starter` → your project name in:
-   - `CMakeLists.txt` (`project(...)` and the `DEVELOPER_MODE` option)
-   - `CMakePresets.json` (the `cpp-starter_DEVELOPER_MODE` cache variable)
-   - `source/CMakeLists.txt` (the `cpp-starter_lib` target)
-   - `test/CMakeLists.txt` and `benchmark/CMakeLists.txt` (link targets)
-4. Replace `source/add.hpp`, `test/source/add_test.cpp`, and `benchmark/source/benchmark.cpp` with your code
+```
+WebSocketClient ──► Quoter ──► OrderManager ──► RestClient ──► Kalshi API
+     │                │              │
+     │            FairValueEngine    └── RiskManager
+     │           (IPricingModel)         (Constraint bitset)
+     │
+     └── AdverseSelectionGuard
+```
+
+**Key components:**
+
+| Component | File | Responsibility |
+|---|---|---|
+| `RestClient` | `rest_client.hpp` | Place/cancel orders, poll fills (HTTP) |
+| `WebSocketClient` | `websocket_client.hpp` | Orderbook snapshots + fill events (WS) |
+| `OrderManager` | `order_manager.hpp` | Track open orders, positions, realized PnL |
+| `RiskManager` | `risk_manager.hpp` | 8-bit constraint bitset; blocks orders when any bit is set |
+| `FairValueEngine` | `fair_value.hpp` | Delegates to a pluggable `IPricingModel` |
+| `HeuristicModel` | `pricing_model.hpp` | Mid-price + time-decay + inventory skew |
+| `TheoGrid` | `theo_grid.hpp` | Bilinear interpolation table for fast repricing |
+| `Quoter` | `quoter.hpp` | Computes bid/ask, reprices on orderbook delta |
+| `AdverseSelectionGuard` | `adverse_selection.hpp` | Pulls quotes when fill rate exceeds threshold |
+| `Auth` | `auth.hpp` | RSA-SHA256 request signing |
 
 ## Prerequisites
 
-Install on macOS (Homebrew):
+**Ubuntu / Debian:**
 ```bash
-brew install cmake llvm cppcheck ninja
-# llvm is keg-only; symlink clang-tidy into PATH:
-ln -sf /usr/local/opt/llvm/bin/clang-tidy /usr/local/bin/clang-tidy
+sudo apt-get install cmake clang clang-tidy cppcheck ninja-build libssl-dev llvm lcov
 ```
 
-Install on Ubuntu/Debian:
+**macOS (Homebrew):**
 ```bash
-sudo apt-get install cmake clang clang-tidy cppcheck ninja-build
+brew install cmake llvm cppcheck ninja openssl
+export PATH="/opt/homebrew/opt/llvm/bin:$PATH"
 ```
 
-## Building and Testing
+All other dependencies (nlohmann/json, cpp-httplib, IXWebSocket, spdlog, GoogleTest, Google Benchmark) are fetched automatically by CMake via FetchContent.
+
+## Building
 
 ```bash
-# Configure (Debug build with static analysis)
+# Install the pre-commit hook (once per clone)
+bash scripts/install-hooks.sh
+
+# Configure + build (Debug, static analysis enabled)
 cmake --preset=dev
-
-# Build
 cmake --build --preset=dev
 
-# Run tests
+# Run all tests
 ctest --preset=dev
 ```
 
-## Sanitizers
+## Configuration
+
+Copy the example config and fill in your credentials:
+
+```bash
+cp config.example.json config.json
+```
+
+```json
+{
+  "api_key": "YOUR_KALSHI_API_KEY",
+  "private_key_path": "/path/to/kalshi-private-key.pem",
+  "base_url": "https://trading-api.kalshi.com/trade-api/v2",
+  "ws_url": "wss://trading-api.kalshi.com/trade-api/ws/v2",
+  "target_tickers": ["KXBTCD-25DEC31-B90000"],
+  "quoter": {
+    "target_spread_cents": 4,
+    "skew_per_contract_cents": 0.05,
+    "reprice_threshold_cents": 1,
+    "quote_size": 10
+  },
+  "risk": {
+    "max_position_per_market": 100,
+    "max_open_orders_per_market": 4,
+    "max_order_size": 25,
+    "daily_loss_limit": -500.0
+  }
+}
+```
+
+Generate an RSA key pair for API authentication:
+
+```bash
+openssl genrsa -out kalshi-private-key.pem 2048
+openssl rsa -in kalshi-private-key.pem -pubout -out kalshi-public-key.pem
+# Upload the public key at kalshi.com → Settings → API Keys
+```
+
+## Running
+
+```bash
+# Live trading
+./build/source/kalshi_mm config.json
+
+# Paper trading (simulates fills locally, no real orders)
+./build/source/kalshi_mm --paper config.json
+
+# Demo / UAT environment
+# Set base_url to https://demo-api.kalshi.co/trade-api/v2 in config.json
+```
+
+## Development
+
+### CMake presets
+
+| Preset | Purpose |
+|---|---|
+| `dev` | Debug build with clang-tidy + cppcheck |
+| `asan` | AddressSanitizer |
+| `tsan` | ThreadSanitizer |
+| `coverage` | Line coverage via lcov |
+| `bench` | Optimized build for benchmarks |
 
 ```bash
 # AddressSanitizer
 cmake --preset=asan && cmake --build --preset=asan && ctest --preset=asan
 
-# ThreadSanitizer
-cmake --preset=tsan && cmake --build --preset=tsan && ctest --preset=tsan
+# Coverage report
+cmake --preset=coverage && cmake --build --preset=coverage && ctest --preset=coverage
+
+# Benchmarks
+cmake --preset=bench && cmake --build --preset=bench
+./build-bench/benchmark/kalshi_bench --benchmark_time_unit=us
 ```
 
-## Benchmark
+### Code quality
 
 ```bash
-cmake --preset=bench
-cmake --build --preset=bench
-./build-bench/benchmark/benchmark
-```
-
-## Code Formatting
-
-```bash
-# Check formatting
-cmake --build build -t format-check
-
-# Fix formatting
+# Auto-fix clang-format
 cmake --build build -t format-fix
+
+# Check formatting (what CI runs)
+cmake --build build -t format-check
 ```
 
-## Project Structure
+The pre-commit hook runs clang-format and clang-tidy automatically on every `git commit`. Install it once with `bash scripts/install-hooks.sh`.
+
+### Project structure
 
 ```
-cpp-starter/
-├── source/                  # Header-only library
-│   ├── CMakeLists.txt
-│   └── add.hpp              # Replace with your headers
-├── test/                    # Unit tests (Google Test)
-│   ├── CMakeLists.txt
-│   └── source/
-│       └── add_test.cpp
-├── benchmark/               # Benchmarks
-│   ├── CMakeLists.txt
-│   └── source/
-│       └── benchmark.cpp
-├── cmake/                   # CMake modules
-│   ├── dev-mode.cmake
-│   ├── gtest.cmake
-│   └── lint-targets.cmake
-├── .clang-tidy
-├── .clang-format
+kalshi-market-maker/
+├── source/                  # Library + main entry point
+│   ├── types.hpp            # Order, Fill, Market, Orderbook structs
+│   ├── auth.hpp/cpp         # RSA-SHA256 signing
+│   ├── rest_client.hpp/cpp  # HTTP REST API client
+│   ├── websocket_client.hpp/cpp  # WS orderbook + fill feed
+│   ├── order_manager.hpp/cpp     # Order lifecycle + PnL tracking
+│   ├── risk_manager.hpp/cpp      # Constraint bitset, position limits
+│   ├── fair_value.hpp/cpp        # FairValueEngine (strategy pattern)
+│   ├── pricing_model.hpp/cpp     # IPricingModel + HeuristicModel
+│   ├── theo_grid.hpp/cpp         # Bilinear interpolation grid
+│   ├── quoter.hpp/cpp            # Two-sided quoting logic
+│   ├── adverse_selection.hpp/cpp # Rolling-window fill-rate guard
+│   ├── logger.hpp/cpp            # spdlog wrapper (get/set_logger)
+│   ├── config.hpp/cpp            # JSON config loader
+│   ├── paper_transport.hpp/cpp   # Simulated REST for paper trading
+│   └── main.cpp
+├── test/
+│   ├── source/              # Unit tests (one file per component)
+│   ├── replay/              # Replay tests against recorded fixtures
+│   ├── fuzz/                # libFuzzer fuzz targets
+│   └── fixtures/            # Recorded WS + REST message sequences
+├── benchmark/               # Google Benchmark microbenchmarks
+├── cmake/                   # FetchContent modules for dependencies
+├── scripts/                 # pre-commit hook + installer
+├── config.example.json
 ├── CMakeLists.txt
-└── CMakePresets.json        # dev, asan, tsan, bench presets
+└── CMakePresets.json
 ```
+
+## CI
+
+GitHub Actions runs four jobs on every push to `main`:
+
+| Job | What it checks |
+|---|---|
+| Build & Test | `cmake --preset dev`, all 195 unit + replay tests |
+| AddressSanitizer | Same tests under ASAN |
+| Coverage | Line coverage via lcov + llvm-cov; report uploaded as artifact |
+| Benchmark | Builds and runs the benchmark binary |
