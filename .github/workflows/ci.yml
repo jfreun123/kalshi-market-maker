@@ -82,11 +82,11 @@ jobs:
                --directory build-coverage \
                --output-file coverage.info \
                --gcov-tool /tmp/llvm-gcov.sh \
-               --ignore-errors mismatch,empty
+               --ignore-errors mismatch,empty,inconsistent
           lcov --remove coverage.info \
                '*/test/*' '*/_deps/*' '/usr/*' \
                --output-file coverage_filtered.info \
-               --ignore-errors unused
+               --ignore-errors unused,inconsistent
           lcov --list coverage_filtered.info
 
       - name: Upload coverage report
