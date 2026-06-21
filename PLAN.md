@@ -1727,12 +1727,92 @@ Expected maker fee at price P: γ_maker × P × (1 − P). At P = 0.52 (typical 
 
 ---
 
-### 9. Checklist Additions
+---
 
-The following items are added to the phase checklist:
+## Phase 31 — Ticker Scanner (find best markets to quote)
 
-- [ ] Phase 29 — Price-Range Gate (`min_quote_price_cents` / `max_quote_price_cents` in QuoterConfig)
-- [ ] Phase 30 — Maker Fee Integration (post-April 2025 fee regime in cost model)
+**Goal:** Before subscribing to any WebSocket feed or posting any quotes, scan the REST `/markets` endpoint, score every active market, and return a ranked list so the operator can pick a small number of high-quality tickers to run against.
+
+**What makes a ticker desirable** (derived from Bürgi et al. 2026 and Palumbo 2026):
+
+| Signal | Direction | Reason |
+|---|---|---|
+| Volume (total $) | Higher = better | More Taker flow = more fills for our passive orders |
+| Mid price in 15–85c | Prefer mid-range | <15c: even Makers lose; >85c: complement is a longshot |
+| Current bid-ask spread | 3–8c sweet spot | <3c: no room for our edge; >10c: illiquid, wide adverse selection |
+| Days to close | 1–10 days | Same-day: price already resolved; far out: low volume |
+| Category | Financials > Economics > Crypto >> Politics/Entertainment | Table 8: ψ coefficient largest for Financials, Crypto, Economics |
+| Flow balance (where observable) | More balanced = better | One-sided flow → adverse selection (Palumbo 2026) |
+
+**Design:**
+
+```cpp
+struct ScannerConfig {
+  int min_price_cents{15};       // skip longshot/deep-fav markets
+  int max_price_cents{85};
+  int min_spread_cents{3};       // below this our edge is too thin
+  int max_spread_cents{10};      // above this liquidity is too poor
+  double min_volume_usd{5000.0}; // ignore micro-markets
+  int min_days_to_close{1};
+  int max_days_to_close{10};
+};
+
+struct MarketScore {
+  std::string ticker;
+  std::string title;
+  std::string category;
+  int mid_price_cents;
+  int spread_cents;
+  double volume_usd;
+  double days_to_close;
+  double score;                  // higher = more desirable
+};
+
+class TickerScanner {
+public:
+  explicit TickerScanner(RestClient &rest, ScannerConfig config = {});
+
+  // Fetches active markets via REST, scores and ranks them.
+  // Returns up to top_n results sorted by score descending.
+  [[nodiscard]] std::vector<MarketScore> scan(int top_n = 20) const;
+
+private:
+  [[nodiscard]] double score(const MarketScore &candidate) const;
+  RestClient &rest_;
+  ScannerConfig config_;
+};
+```
+
+**Scoring function** (simple additive, all terms normalized to [0, 1]):
+
+```
+score = w_vol   × log(volume_usd) / log(max_observed_volume)
+      + w_price × (1 - |mid_cents - 50| / 35)   // peaks at 50c, zero at 15c/85c
+      + w_spread× (1 - |spread_cents - 5| / 5)   // peaks at 5c, zero at 0c/10c
+      + w_ttc   × (1 - days_to_close / 10)        // prefer closer to resolution
+      + w_cat   × category_bonus                  // Financials=1.0, Econ=0.8, Crypto=0.7, other=0.5
+```
+
+Default weights: w_vol=0.35, w_price=0.25, w_spread=0.20, w_ttc=0.10, w_cat=0.10. Tunable via `ScannerConfig`.
+
+**Integration point:** `main.cpp` calls `TickerScanner::scan()` at startup (before connecting to WebSocket) and logs the top results. Operator picks tickers from the ranked list and adds them to `config.json`. A future enhancement (Phase 32) could auto-subscribe to top-N without operator intervention.
+
+```mermaid
+graph TD
+    MAIN[main.cpp startup] --> SCAN[TickerScanner::scan]
+    SCAN --> REST[GET /markets]
+    REST --> FILTER[Filter by ScannerConfig]
+    FILTER --> SCORE[Score each market]
+    SCORE --> RANK[Sort descending]
+    RANK --> LOG[Log top-20 to stdout]
+    LOG --> OP[Operator picks tickers]
+    OP --> CFG[config.json tickers list]
+    CFG --> WS[WebSocketClient::subscribe]
+    style SCAN fill:#6af,color:#000
+    style OP fill:#fa6,color:#000
+```
+
+**Files:** `source/ticker_scanner.hpp`, `source/ticker_scanner.cpp`, `test/source/ticker_scanner_test.cpp`
 
 ---
 
@@ -1774,13 +1854,20 @@ The following items are added to the phase checklist:
 - [x] Phase 18 — Replay & Fuzz Testing
 - [x] Phase 19 — Paper Trading Mode
 - [x] Phase 20 — Documentation
+**Immediate next steps (pricing quality on a small set of tickers):**
+
+- [ ] UAT Blocker — get demo account, generate RSA key pair, verify REST/WS field shapes live
+- [ ] Phase 31 — Ticker Scanner (`TickerScanner`: score markets by volume/price/spread/category/TTC)
+- [ ] Phase 29 — Price-Range Gate (`min_quote_price_cents=15`, `max_quote_price_cents=85` in QuoterConfig)
+- [ ] Phase 27 — Minimum Spread Floor & E_win Tracking
+- [ ] Phase 26 — Flow Imbalance Signal (FlowImbalanceGuard)
+- [ ] Phase 28 — View-Based Pricing Model (with β=0.09 debiasing)
+- [ ] Phase 30 — Maker Fee Integration (post-April 2025 fee regime)
+
+**Deferred (Scaling — revisit when running >5 tickers):**
+
 - [ ] Phase 21 — Async HTTP Order Dispatch
 - [ ] Phase 22 — Per-Series WS + Thread-per-Series Dispatch
 - [ ] Phase 23 — Incremental RiskManager Update
 - [ ] Phase 24 — PortfolioModel (No-Arbitrage Consistency)
 - [ ] Phase 25 — Cross-Ticker Portfolio Risk & Delta Hedging
-- [ ] Phase 26 — Flow Imbalance Signal (FlowImbalanceGuard)
-- [ ] Phase 27 — Minimum Spread Floor & E_win Tracking
-- [ ] Phase 28 — View-Based Pricing Model (with β=0.09 debiasing)
-- [ ] Phase 29 — Price-Range Gate (min/max_quote_price_cents in QuoterConfig)
-- [ ] Phase 30 — Maker Fee Integration (post-April 2025 fee regime)
