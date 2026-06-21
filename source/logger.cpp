@@ -9,7 +9,10 @@ namespace kalshi {
 
 namespace {
 
-std::mutex g_logger_mutex;
+// NOLINT(cppcoreguidelines-avoid-non-const-global-variables) — mutable by
+// design: set_logger() is the only mutation path.
+std::mutex
+    g_logger_mutex; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 std::shared_ptr<spdlog::logger>
     g_logger; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 

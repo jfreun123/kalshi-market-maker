@@ -64,13 +64,13 @@ void RiskManager::update(const OrderManager &order_mgr,
 }
 
 void RiskManager::set(Constraint bit) {
-  const std::size_t idx = static_cast<std::size_t>(bit);
+  const auto idx = static_cast<std::size_t>(bit);
   constraints_.set(idx);
   get_logger()->warn("constraint set name={}", kConstraintNames.at(idx));
 }
 
 void RiskManager::clear(Constraint bit) {
-  const std::size_t idx = static_cast<std::size_t>(bit);
+  const auto idx = static_cast<std::size_t>(bit);
   constraints_.reset(idx);
   get_logger()->info("constraint cleared name={}", kConstraintNames.at(idx));
 }
