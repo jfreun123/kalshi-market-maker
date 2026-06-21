@@ -22,4 +22,6 @@ target_link_libraries(
     OpenSSL::SSL
     httplib::httplib
     nlohmann_json::nlohmann_json
+    PRIVATE
+    ixwebsocket
 )

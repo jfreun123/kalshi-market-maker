@@ -2,51 +2,101 @@
 #include "auth.hpp"
 #include "types.hpp"
 
+#include <ixwebsocket/IXWebSocket.h>
 #include <nlohmann/json.hpp>
 
 #include <chrono>
+#include <condition_variable>
 #include <ctime>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <thread>
 
 namespace kalshi {
 
-// ---- IxWebSocket (production stub — full impl deferred to Phase 10) ----
+// ---- IxWebSocket — delegates to ix::WebSocket ----
 
-struct IxWebSocket::Impl {};
+struct IxWebSocket::Impl {
+  ix::WebSocket ws;
+  MessageHandler on_message_cb;
+  ConnectHandler on_connect_cb;
+  DisconnectHandler on_disconnect_cb;
+  std::mutex run_mtx;
+  std::condition_variable run_cv;
+  bool done{false};
+};
 
-IxWebSocket::IxWebSocket() : impl_{std::make_unique<Impl>()} {}
+IxWebSocket::IxWebSocket() : impl_{std::make_unique<Impl>()} {
+  impl_->ws.setOnMessageCallback([this](const ix::WebSocketMessagePtr &msg) {
+    switch (msg->type) {
+    case ix::WebSocketMessageType::Open:
+      if (impl_->on_connect_cb) {
+        impl_->on_connect_cb();
+      }
+      break;
+    case ix::WebSocketMessageType::Close:
+    case ix::WebSocketMessageType::Error:
+      if (impl_->on_disconnect_cb) {
+        impl_->on_disconnect_cb();
+      }
+      {
+        std::lock_guard<std::mutex> lock(impl_->run_mtx);
+        impl_->done = true;
+      }
+      impl_->run_cv.notify_one();
+      break;
+    case ix::WebSocketMessageType::Message:
+      if (impl_->on_message_cb) {
+        impl_->on_message_cb(msg->str);
+      }
+      break;
+    default:
+      break;
+    }
+  });
+}
+
 IxWebSocket::~IxWebSocket() = default;
 
-void IxWebSocket::connect(
-    std::string_view /*url*/,
-    const std::map<std::string, std::string> & /*headers*/) {
-  throw std::runtime_error("IxWebSocket: not yet implemented");
+void IxWebSocket::connect(std::string_view url,
+                          const std::map<std::string, std::string> &headers) {
+  impl_->ws.setUrl(std::string(url));
+  const ix::WebSocketHttpHeaders ix_headers(headers.begin(), headers.end());
+  impl_->ws.setExtraHeaders(ix_headers);
 }
 
-void IxWebSocket::send(const std::string & /*message*/) {
-  throw std::runtime_error("IxWebSocket: not yet implemented");
+void IxWebSocket::send(const std::string &message) { impl_->ws.send(message); }
+
+void IxWebSocket::on_message(MessageHandler handler) {
+  impl_->on_message_cb = std::move(handler);
 }
 
-void IxWebSocket::on_message(MessageHandler /*handler*/) {
-  throw std::runtime_error("IxWebSocket: not yet implemented");
+void IxWebSocket::on_connect(ConnectHandler handler) {
+  impl_->on_connect_cb = std::move(handler);
 }
 
-void IxWebSocket::on_connect(ConnectHandler /*handler*/) {
-  throw std::runtime_error("IxWebSocket: not yet implemented");
-}
-
-void IxWebSocket::on_disconnect(DisconnectHandler /*handler*/) {
-  throw std::runtime_error("IxWebSocket: not yet implemented");
+void IxWebSocket::on_disconnect(DisconnectHandler handler) {
+  impl_->on_disconnect_cb = std::move(handler);
 }
 
 void IxWebSocket::run() {
-  throw std::runtime_error("IxWebSocket: not yet implemented");
+  {
+    std::lock_guard<std::mutex> lock(impl_->run_mtx);
+    impl_->done = false;
+  }
+  impl_->ws.start();
+  std::unique_lock<std::mutex> lock(impl_->run_mtx);
+  impl_->run_cv.wait(lock, [this] { return impl_->done; });
 }
 
 void IxWebSocket::stop() {
-  throw std::runtime_error("IxWebSocket: not yet implemented");
+  impl_->ws.stop();
+  {
+    std::lock_guard<std::mutex> lock(impl_->run_mtx);
+    impl_->done = true;
+  }
+  impl_->run_cv.notify_one();
 }
 
 // ---- WebSocketClient helpers ----
