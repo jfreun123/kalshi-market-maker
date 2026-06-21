@@ -1,5 +1,7 @@
 #include "risk_manager.hpp"
 
+#include "logger.hpp"
+
 #include <array>
 #include <cstdlib>
 #include <string>
@@ -62,11 +64,15 @@ void RiskManager::update(const OrderManager &order_mgr,
 }
 
 void RiskManager::set(Constraint bit) {
-  constraints_.set(static_cast<std::size_t>(bit));
+  const std::size_t idx = static_cast<std::size_t>(bit);
+  constraints_.set(idx);
+  get_logger()->warn("constraint set name={}", kConstraintNames.at(idx));
 }
 
 void RiskManager::clear(Constraint bit) {
-  constraints_.reset(static_cast<std::size_t>(bit));
+  const std::size_t idx = static_cast<std::size_t>(bit);
+  constraints_.reset(idx);
+  get_logger()->info("constraint cleared name={}", kConstraintNames.at(idx));
 }
 
 bool RiskManager::is_set(Constraint bit) const {

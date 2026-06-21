@@ -1,5 +1,7 @@
 #include "order_manager.hpp"
 
+#include "logger.hpp"
+
 #include <algorithm>
 #include <string>
 #include <string_view>
@@ -17,12 +19,16 @@ Order OrderManager::place(std::string_view ticker, Side side, int price_cents,
                           int quantity) {
   Order order = rest_client_.place_order(ticker, side, price_cents, quantity,
                                          OrderType::Limit);
+  get_logger()->info("place ticker={} side={} price={} qty={} order_id={}",
+                     ticker, (side == Side::Yes) ? "yes" : "no", price_cents,
+                     quantity, order.id);
   open_orders_[order.id] = order;
   return order;
 }
 
 bool OrderManager::cancel(std::string_view order_id) {
   bool success = rest_client_.cancel_order(order_id);
+  get_logger()->info("cancel order_id={} success={}", order_id, success);
   if (success) {
     open_orders_.erase(std::string{order_id});
   }
@@ -50,6 +56,10 @@ void OrderManager::record_fill(const Fill &fill) {
   if (!seen_fills_.insert(fill_key(fill)).second) {
     return; // Duplicate fill; ignore.
   }
+  get_logger()->info("fill ticker={} order_id={} side={} price={} qty={}",
+                     fill.market_ticker, fill.order_id,
+                     (fill.side == Side::Yes) ? "yes" : "no", fill.price_cents,
+                     fill.quantity);
 
   std::deque<Lot> &opposing_inventory = (fill.side == Side::Yes)
                                             ? no_lots_[fill.market_ticker]

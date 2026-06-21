@@ -1,5 +1,6 @@
 #include "websocket_client.hpp"
 #include "auth.hpp"
+#include "logger.hpp"
 #include "types.hpp"
 
 #include <ixwebsocket/IXWebSocket.h>
@@ -199,6 +200,7 @@ void WebSocketClient::send_subscribe(const std::string &ticker) {
 }
 
 void WebSocketClient::handle_connect() {
+  get_logger()->info("websocket connected url={}", ws_url_);
   for (const auto &ticker : subscribed_tickers_) {
     send_subscribe(ticker);
   }
@@ -270,7 +272,9 @@ void WebSocketClient::run() {
 
   ws_->on_connect([this]() { handle_connect(); });
   ws_->on_message([this](const std::string &raw) { handle_message(raw); });
-  ws_->on_disconnect([]() {});
+  ws_->on_disconnect([this]() {
+    get_logger()->warn("websocket disconnected url={}", ws_url_);
+  });
 
   while (running_) {
     ws_->connect(ws_url_, auth_headers());

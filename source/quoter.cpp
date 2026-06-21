@@ -1,5 +1,7 @@
 #include "quoter.hpp"
 
+#include "logger.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <string>
@@ -111,6 +113,9 @@ void Quoter::update(std::string_view ticker, const LocalOrderbook &book) {
 
   const auto [desired_bid, desired_ask] =
       compute_quotes(fair_val, half_spread, inventory_skew);
+
+  get_logger()->debug("reprice ticker={} mid={:.1f} fv={:.2f} bid={} ask={}",
+                      ticker, mid, fair_val, desired_bid, desired_ask);
 
   refresh_bid(ticker_str, desired_bid);
   refresh_ask(ticker_str, desired_ask);

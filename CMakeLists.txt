@@ -24,6 +24,7 @@ find_package(OpenSSL REQUIRED)
 include(cmake/json.cmake)
 include(cmake/httplib.cmake)
 include(cmake/ixwebsocket.cmake)
+include(cmake/spdlog.cmake)
 
 # ---- Build source ----
 
