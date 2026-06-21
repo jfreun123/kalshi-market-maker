@@ -18,9 +18,10 @@ bool AdverseSelectionGuard::record_fill(
       std::chrono::duration_cast<std::chrono::system_clock::duration>(
           std::chrono::duration<double>{config_.window_seconds});
   const auto cutoff = timestamp - window;
-  times.erase(std::remove_if(times.begin(), times.end(),
-                             [cutoff](const auto &tp) { return tp < cutoff; }),
-              times.end());
+  times.erase(
+      std::remove_if(times.begin(), times.end(),
+                     [cutoff](const auto &entry) { return entry < cutoff; }),
+      times.end());
 
   times.push_back(timestamp);
   return static_cast<int>(times.size()) >= config_.fill_threshold;
