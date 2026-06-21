@@ -29,6 +29,14 @@ constexpr int kHttpUnauthorized = 401;
 constexpr int kHttpNotFound = 404;
 constexpr int kHttpInternalError = 500;
 
+// V2 minimal create-order response.
+constexpr std::string_view kPlaceOrderResponse =
+    R"({"order_id":"order-abc","fill_count":"0.00","remaining_count":"10.00","ts_ms":1718000000000})";
+
+// V2 GET order with a partial fill (fill_count_fp > 0, still resting).
+constexpr std::string_view kPartialOrderJson =
+    R"({"order_id":"order-abc","ticker":"KXBTCD","outcome_side":"yes","type":"limit","yes_price_dollars":"0.5200","no_price_dollars":"0.4800","initial_count_fp":"10.00","fill_count_fp":"2.00","status":"resting","created_time":"2025-01-01T00:00:00Z"})";
+
 std::string generate_test_private_key() {
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-cstyle-cast) — OpenSSL C API
   EVP_PKEY *pkey = EVP_RSA_gen(static_cast<unsigned int>(kRsaKeyBits));
@@ -83,6 +91,8 @@ TEST_F(RestClientTest, GetMarketsCallsGetWithMarketsUrl) {
 TEST_F(RestClientTest, GetMarketsParsesSingleMarket) {
   auto transport = std::make_unique<FakeTransport>();
   FakeTransport *const transport_raw = transport.get();
+  // fee_rate_bps is no longer in the Kalshi API schema but we keep it in the
+  // fixture to verify value_or() still reads it when present.
   transport_raw->enqueue(
       {kHttpOk,
        R"({"markets":[{"ticker":"KXBTCD","title":"Bitcoin above $30k?","close_time":"2025-12-25T00:00:00Z","fee_rate_bps":7}],"cursor":""})"});
@@ -96,6 +106,20 @@ TEST_F(RestClientTest, GetMarketsParsesSingleMarket) {
   EXPECT_EQ(markets[0].fee_rate_bps, kTestFeeRateBps);
   EXPECT_NE(markets[0].close_time,
             std::chrono::system_clock::time_point{}); // non-default
+}
+
+TEST_F(RestClientTest, GetMarketsWithMissingFeeRateBpsDefaultsToZero) {
+  auto transport = std::make_unique<FakeTransport>();
+  FakeTransport *const transport_raw = transport.get();
+  transport_raw->enqueue(
+      {kHttpOk,
+       R"({"markets":[{"ticker":"KXBTCD","title":"Test","close_time":"2025-12-25T00:00:00Z"}],"cursor":""})"});
+  auto client = make_client(std::move(transport));
+
+  auto markets = client.get_markets();
+
+  ASSERT_EQ(markets.size(), kOneResult);
+  EXPECT_EQ(markets[0].fee_rate_bps, 0);
 }
 
 TEST_F(RestClientTest, GetMarketsReturnsEmptyVectorForEmptyList) {
@@ -137,7 +161,8 @@ TEST_F(RestClientTest, GetOrderbookCallsCorrectUrl) {
   auto transport = std::make_unique<FakeTransport>();
   FakeTransport *const transport_raw = transport.get();
   transport_raw->enqueue(
-      {kHttpOk, R"({"orderbook":{"yes":[[52,100]],"no":[[48,150]]}})"});
+      {kHttpOk,
+       R"({"orderbook_fp":{"yes_dollars":[["0.5200","100.00"]],"no_dollars":[["0.4800","150.00"]]}})"});
   auto client = make_client(std::move(transport));
 
   client.get_orderbook(kTestTicker);
@@ -152,7 +177,7 @@ TEST_F(RestClientTest, GetOrderbookParsesYesAndNoLevels) {
   FakeTransport *const transport_raw = transport.get();
   transport_raw->enqueue(
       {kHttpOk,
-       R"({"orderbook":{"yes":[[55,200],[52,100]],"no":[[45,150],[43,300]]}})"});
+       R"({"orderbook_fp":{"yes_dollars":[["0.5500","200.00"],["0.5200","100.00"]],"no_dollars":[["0.4500","150.00"],["0.4300","300.00"]]}})"});
   auto client = make_client(std::move(transport));
 
   auto orderbook = client.get_orderbook(kTestTicker);
@@ -170,7 +195,8 @@ TEST_F(RestClientTest, GetOrderbookParsesYesAndNoLevels) {
 TEST_F(RestClientTest, GetOrderbookSetsTicker) {
   auto transport = std::make_unique<FakeTransport>();
   FakeTransport *const transport_raw = transport.get();
-  transport_raw->enqueue({kHttpOk, R"({"orderbook":{"yes":[],"no":[]}})"});
+  transport_raw->enqueue(
+      {kHttpOk, R"({"orderbook_fp":{"yes_dollars":[],"no_dollars":[]}})"});
   auto client = make_client(std::move(transport));
 
   auto orderbook = client.get_orderbook(kTestTicker);
@@ -189,60 +215,54 @@ TEST_F(RestClientTest, GetOrderbookThrowsOnHttpError) {
 
 // ---- place_order ----
 
-TEST_F(RestClientTest, PlaceOrderSendsPostToOrdersUrl) {
+TEST_F(RestClientTest, PlaceOrderSendsPostToEventsOrdersUrl) {
   auto transport = std::make_unique<FakeTransport>();
   FakeTransport *const transport_raw = transport.get();
-  transport_raw->enqueue(
-      {kHttpOk,
-       R"({"order":{"order_id":"order-abc","ticker":"KXBTCD","side":"yes","type":"limit","yes_price":52,"count":10,"filled_count":0,"status":"resting","created_time":"2025-01-01T00:00:00Z"}})"});
+  transport_raw->enqueue({kHttpOk, std::string(kPlaceOrderResponse)});
   auto client = make_client(std::move(transport));
 
   client.place_order(kTestTicker, kalshi::Side::Yes, kTestYesPrice,
                      kTestQuantity, kalshi::OrderType::Limit);
 
   EXPECT_EQ(transport_raw->last_request().method, "POST");
-  EXPECT_NE(transport_raw->last_request().url.find("/portfolio/orders"),
+  EXPECT_NE(transport_raw->last_request().url.find("/portfolio/events/orders"),
             std::string::npos);
 }
 
-TEST_F(RestClientTest, PlaceOrderYesSideUsesYesPriceInBody) {
+TEST_F(RestClientTest, PlaceOrderYesSideUsesBidWithYesPrice) {
   auto transport = std::make_unique<FakeTransport>();
   FakeTransport *const transport_raw = transport.get();
-  transport_raw->enqueue(
-      {kHttpOk,
-       R"({"order":{"order_id":"order-abc","ticker":"KXBTCD","side":"yes","type":"limit","yes_price":52,"count":10,"filled_count":0,"status":"resting","created_time":"2025-01-01T00:00:00Z"}})"});
+  transport_raw->enqueue({kHttpOk, std::string(kPlaceOrderResponse)});
   auto client = make_client(std::move(transport));
 
   client.place_order(kTestTicker, kalshi::Side::Yes, kTestYesPrice,
                      kTestQuantity, kalshi::OrderType::Limit);
 
   const auto &body = transport_raw->last_request().body;
-  EXPECT_NE(body.find(R"("side":"yes")"), std::string::npos);
-  EXPECT_NE(body.find(R"("yes_price":52)"), std::string::npos);
+  EXPECT_NE(body.find(R"("side":"bid")"), std::string::npos);
+  EXPECT_NE(body.find(R"("price":"0.5200")"), std::string::npos);
 }
 
-TEST_F(RestClientTest, PlaceOrderNoSideUsesNoPriceInBody) {
+TEST_F(RestClientTest, PlaceOrderNoSideUsesAskWithComplementPrice) {
+  // Buying NO at 48 cents = selling YES at 52 cents (the YES complement).
   auto transport = std::make_unique<FakeTransport>();
   FakeTransport *const transport_raw = transport.get();
-  transport_raw->enqueue(
-      {kHttpOk,
-       R"({"order":{"order_id":"order-abc","ticker":"KXBTCD","side":"no","type":"limit","no_price":48,"count":10,"filled_count":0,"status":"resting","created_time":"2025-01-01T00:00:00Z"}})"});
+  transport_raw->enqueue({kHttpOk, std::string(kPlaceOrderResponse)});
   auto client = make_client(std::move(transport));
 
   client.place_order(kTestTicker, kalshi::Side::No, kTestNoPrice, kTestQuantity,
                      kalshi::OrderType::Limit);
 
   const auto &body = transport_raw->last_request().body;
-  EXPECT_NE(body.find(R"("side":"no")"), std::string::npos);
-  EXPECT_NE(body.find(R"("no_price":48)"), std::string::npos);
+  EXPECT_NE(body.find(R"("side":"ask")"), std::string::npos);
+  // YES price = 100 - 48 = 52 cents = "0.5200"
+  EXPECT_NE(body.find(R"("price":"0.5200")"), std::string::npos);
 }
 
 TEST_F(RestClientTest, PlaceOrderParsesResponseIntoOrder) {
   auto transport = std::make_unique<FakeTransport>();
   FakeTransport *const transport_raw = transport.get();
-  transport_raw->enqueue(
-      {kHttpOk,
-       R"({"order":{"order_id":"order-abc","ticker":"KXBTCD","side":"yes","type":"limit","yes_price":52,"count":10,"filled_count":0,"status":"resting","created_time":"2025-01-01T00:00:00Z"}})"});
+  transport_raw->enqueue({kHttpOk, std::string(kPlaceOrderResponse)});
   auto client = make_client(std::move(transport));
 
   auto order = client.place_order(kTestTicker, kalshi::Side::Yes, kTestYesPrice,
@@ -312,9 +332,9 @@ TEST_F(RestClientTest, GetOpenOrdersCallsGetWithOrdersUrl) {
 TEST_F(RestClientTest, GetOpenOrdersParsesOrdersList) {
   auto transport = std::make_unique<FakeTransport>();
   FakeTransport *const transport_raw = transport.get();
-  transport_raw->enqueue(
-      {kHttpOk,
-       R"({"orders":[{"order_id":"order-abc","ticker":"KXBTCD","side":"yes","type":"limit","yes_price":52,"count":10,"filled_count":2,"status":"resting","created_time":"2025-01-01T00:00:00Z"}],"cursor":""})"});
+  transport_raw->enqueue({kHttpOk, R"({"orders":[)" +
+                                       std::string(kPartialOrderJson) +
+                                       R"(],"cursor":""})"});
   auto client = make_client(std::move(transport));
 
   auto orders = client.get_open_orders();

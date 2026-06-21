@@ -27,27 +27,19 @@ constexpr int kNoBid53 = 45; // mid = (51+55)/2 = 53
 constexpr int kYesBid55 = 51;
 constexpr int kNoBid55 = 41; // mid = (51+59)/2 = 55
 
-// Expected prices at mid=52, default config (spread=4, pos=0).
-// fv≈52, half_spread=2, skew=0 → bid=50, ask=54, NO ask=46
-constexpr int kExpectedBidMid52 = 50;
-constexpr int kExpectedNoAskMid52 = 46;
-
-// Expected prices at mid=55 (bid=53, ask=57, NO ask=43)
-constexpr int kExpectedBidMid55 = 53;
-constexpr int kExpectedAskMid55 = 57;
-
-// mid=52 with long/short 20: inv_skew=±1.0 → bid shifts by ±1
+// Inventory skew positions (20 = one skew unit, 1000 = extreme clamp).
 constexpr int kInventoryPosition = 20;
-constexpr int kExpectedBidMid52Long20 = 49;  // 50 - 1
-constexpr int kExpectedAskMid52Long20 = 53;  // 54 - 1, NO=47
-constexpr int kExpectedBidMid52Short20 = 51; // 50 + 1
-constexpr int kExpectedAskMid52Short20 = 55; // 54 + 1, NO=45
-
-// Extreme long position: inv_skew=50 → bid=0→clamp(1), ask=4→NO=96
 constexpr int kExtremeLongPosition = 1'000;
-constexpr int kExpectedBidExtremeClamp = 1;
-constexpr int kExpectedNoAskExtremeClamp =
-    96; // ask=4, NO=96; ask(4) > bid(1) ✓
+
+// V2 request body expected price strings (YES dimension, "price":"X.XXXX").
+constexpr std::string_view kBidPriceMid52 = R"("price":"0.5000")";
+constexpr std::string_view kAskPriceMid52 =
+    R"("price":"0.5400")"; // YES=100-46=54
+constexpr std::string_view kBidPriceMid52Long20 = R"("price":"0.4900")";
+constexpr std::string_view kBidPriceMid52Short20 = R"("price":"0.5100")";
+constexpr std::string_view kBidPriceExtremeClamp = R"("price":"0.0100")";
+constexpr std::string_view kAskPriceExtremeClamp =
+    R"("price":"0.0400")"; // YES=100-96=4
 
 constexpr int kObLevelQty = 100;
 constexpr int kFillPrice = 52;
@@ -82,19 +74,13 @@ std::string generate_rsa_pem() {
   return pem;
 }
 
-// Builds the JSON response body that RestClient expects for a placed order.
-// NOLINTBEGIN(bugprone-easily-swappable-parameters)
-std::string order_json(const std::string &order_id, const std::string &ticker,
-                       const std::string &side, int price_cents, int qty) {
-  const std::string price_field =
-      (side == "yes") ? "\"yes_price\"" : "\"no_price\"";
-  return R"({"order":{"order_id":")" + order_id + R"(","ticker":")" + ticker +
-         R"(","side":")" + side + R"(",)" + price_field + R"(:)" +
-         std::to_string(price_cents) + R"(,"count":)" + std::to_string(qty) +
-         R"(,"filled_count":0,"status":"resting","type":"limit",)"
-         R"("created_time":"2025-01-01T00:00:00Z"}})";
+// Builds the V2 minimal response body that RestClient expects for a placed
+// order.
+std::string order_json(const std::string &order_id, int qty) {
+  return R"({"order_id":")" + order_id +
+         R"(","fill_count":"0.00","remaining_count":")" + std::to_string(qty) +
+         R"(.00","ts_ms":1718000000000})";
 }
-// NOLINTEND(bugprone-easily-swappable-parameters)
 
 // Builds a LocalOrderbook with the given YES and NO bid levels.
 // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
@@ -138,11 +124,11 @@ TEST_F(QuoterTest, PlacesBidAndAskOnFirstUpdate) {
   auto transport_ptr = std::make_unique<FakeTransport>();
   FakeTransport &transport = *transport_ptr;
   transport.enqueue(
-      {kHttpOk, order_json(kOrderId1, kTicker, "yes", kExpectedBidMid52,
-                           kalshi::QuoterConfig::kDefaultQuoteSize)});
+      {kHttpOk,
+       order_json(kOrderId1, kalshi::QuoterConfig::kDefaultQuoteSize)});
   transport.enqueue(
-      {kHttpOk, order_json(kOrderId2, kTicker, "no", kExpectedNoAskMid52,
-                           kalshi::QuoterConfig::kDefaultQuoteSize)});
+      {kHttpOk,
+       order_json(kOrderId2, kalshi::QuoterConfig::kDefaultQuoteSize)});
   kalshi::RestClient rest{kalshi::Auth{kApiKey, kPemPrivateKey},
                           std::move(transport_ptr), kBaseUrl};
   kalshi::OrderManager order_mgr{rest};
@@ -160,11 +146,11 @@ TEST_F(QuoterTest, BidPriceCalculatedFromMidAndSpread) {
   auto transport_ptr = std::make_unique<FakeTransport>();
   FakeTransport &transport = *transport_ptr;
   transport.enqueue(
-      {kHttpOk, order_json(kOrderId1, kTicker, "yes", kExpectedBidMid52,
-                           kalshi::QuoterConfig::kDefaultQuoteSize)});
+      {kHttpOk,
+       order_json(kOrderId1, kalshi::QuoterConfig::kDefaultQuoteSize)});
   transport.enqueue(
-      {kHttpOk, order_json(kOrderId2, kTicker, "no", kExpectedNoAskMid52,
-                           kalshi::QuoterConfig::kDefaultQuoteSize)});
+      {kHttpOk,
+       order_json(kOrderId2, kalshi::QuoterConfig::kDefaultQuoteSize)});
   kalshi::RestClient rest{kalshi::Auth{kApiKey, kPemPrivateKey},
                           std::move(transport_ptr), kBaseUrl};
   kalshi::OrderManager order_mgr{rest};
@@ -173,21 +159,23 @@ TEST_F(QuoterTest, BidPriceCalculatedFromMidAndSpread) {
 
   quoter.update(kTicker, make_ob(kYesBid52, kNoBid52));
 
+  // kExpectedBidMid52 = 50 → "0.5000" in YES dimension.
   const std::string &bid_body = transport.recorded_requests().at(0).body;
-  EXPECT_NE(bid_body.find("\"yes_price\":" + std::to_string(kExpectedBidMid52)),
-            std::string::npos);
+  EXPECT_NE(bid_body.find("\"side\":\"bid\""), std::string::npos);
+  EXPECT_NE(bid_body.find(std::string(kBidPriceMid52)), std::string::npos);
 }
 
 TEST_F(QuoterTest, AskNoPriceCalculatedFromMidAndSpread) {
-  // mid=52, spread=4, ask=54, NO price = 100-54 = 46.
+  // mid=52, spread=4, ask=54, NO price = 100-54 = 46 → YES price = 54 =
+  // "0.5400".
   auto transport_ptr = std::make_unique<FakeTransport>();
   FakeTransport &transport = *transport_ptr;
   transport.enqueue(
-      {kHttpOk, order_json(kOrderId1, kTicker, "yes", kExpectedBidMid52,
-                           kalshi::QuoterConfig::kDefaultQuoteSize)});
+      {kHttpOk,
+       order_json(kOrderId1, kalshi::QuoterConfig::kDefaultQuoteSize)});
   transport.enqueue(
-      {kHttpOk, order_json(kOrderId2, kTicker, "no", kExpectedNoAskMid52,
-                           kalshi::QuoterConfig::kDefaultQuoteSize)});
+      {kHttpOk,
+       order_json(kOrderId2, kalshi::QuoterConfig::kDefaultQuoteSize)});
   kalshi::RestClient rest{kalshi::Auth{kApiKey, kPemPrivateKey},
                           std::move(transport_ptr), kBaseUrl};
   kalshi::OrderManager order_mgr{rest};
@@ -196,10 +184,10 @@ TEST_F(QuoterTest, AskNoPriceCalculatedFromMidAndSpread) {
 
   quoter.update(kTicker, make_ob(kYesBid52, kNoBid52));
 
+  // kExpectedNoAskMid52 = 46 → YES complement = 54 = "0.5400".
   const std::string &ask_body = transport.recorded_requests().at(1).body;
-  EXPECT_NE(
-      ask_body.find("\"no_price\":" + std::to_string(kExpectedNoAskMid52)),
-      std::string::npos);
+  EXPECT_NE(ask_body.find("\"side\":\"ask\""), std::string::npos);
+  EXPECT_NE(ask_body.find(std::string(kAskPriceMid52)), std::string::npos);
 }
 
 TEST_F(QuoterTest, NoOrdersPlacedWhenObHasNoBbo) {
@@ -239,11 +227,11 @@ TEST_F(QuoterTest, QuoteNotReplacedWithinRepriceThreshold) {
   auto transport_ptr = std::make_unique<FakeTransport>();
   FakeTransport &transport = *transport_ptr;
   transport.enqueue(
-      {kHttpOk, order_json(kOrderId1, kTicker, "yes", kExpectedBidMid52,
-                           kalshi::QuoterConfig::kDefaultQuoteSize)});
+      {kHttpOk,
+       order_json(kOrderId1, kalshi::QuoterConfig::kDefaultQuoteSize)});
   transport.enqueue(
-      {kHttpOk, order_json(kOrderId2, kTicker, "no", kExpectedNoAskMid52,
-                           kalshi::QuoterConfig::kDefaultQuoteSize)});
+      {kHttpOk,
+       order_json(kOrderId2, kalshi::QuoterConfig::kDefaultQuoteSize)});
   kalshi::RestClient rest{kalshi::Auth{kApiKey, kPemPrivateKey},
                           std::move(transport_ptr), kBaseUrl};
   kalshi::OrderManager order_mgr{rest};
@@ -262,21 +250,20 @@ TEST_F(QuoterTest, QuoteReplacedWhenExceedingRepriceThreshold) {
   auto transport_ptr = std::make_unique<FakeTransport>();
   FakeTransport &transport = *transport_ptr;
   transport.enqueue(
-      {kHttpOk, order_json(kOrderId1, kTicker, "yes", kExpectedBidMid52,
-                           kalshi::QuoterConfig::kDefaultQuoteSize)});
+      {kHttpOk,
+       order_json(kOrderId1, kalshi::QuoterConfig::kDefaultQuoteSize)});
   transport.enqueue(
-      {kHttpOk, order_json(kOrderId2, kTicker, "no", kExpectedNoAskMid52,
-                           kalshi::QuoterConfig::kDefaultQuoteSize)});
+      {kHttpOk,
+       order_json(kOrderId2, kalshi::QuoterConfig::kDefaultQuoteSize)});
   // Second update sequence: DELETE bid1, POST bid2, DELETE ask1, POST ask2.
   transport.enqueue({kHttpOk, "{}"}); // DELETE bid1 — cancel_order ignores body
   transport.enqueue(
-      {kHttpOk, order_json(kOrderId3, kTicker, "yes", kExpectedBidMid55,
-                           kalshi::QuoterConfig::kDefaultQuoteSize)});
+      {kHttpOk,
+       order_json(kOrderId3, kalshi::QuoterConfig::kDefaultQuoteSize)});
   transport.enqueue({kHttpOk, "{}"}); // DELETE ask1 — cancel_order ignores body
   transport.enqueue(
-      {kHttpOk, order_json(kOrderId4, kTicker, "no",
-                           kalshi::complement_price(kExpectedAskMid55),
-                           kalshi::QuoterConfig::kDefaultQuoteSize)});
+      {kHttpOk,
+       order_json(kOrderId4, kalshi::QuoterConfig::kDefaultQuoteSize)});
   kalshi::RestClient rest{kalshi::Auth{kApiKey, kPemPrivateKey},
                           std::move(transport_ptr), kBaseUrl};
   kalshi::OrderManager order_mgr{rest};
@@ -295,12 +282,11 @@ TEST_F(QuoterTest, LongPositionShiftsBidDown) {
   auto transport_ptr = std::make_unique<FakeTransport>();
   FakeTransport &transport = *transport_ptr;
   transport.enqueue(
-      {kHttpOk, order_json(kOrderId1, kTicker, "yes", kExpectedBidMid52Long20,
-                           kalshi::QuoterConfig::kDefaultQuoteSize)});
+      {kHttpOk,
+       order_json(kOrderId1, kalshi::QuoterConfig::kDefaultQuoteSize)});
   transport.enqueue(
-      {kHttpOk, order_json(kOrderId2, kTicker, "no",
-                           kalshi::complement_price(kExpectedAskMid52Long20),
-                           kalshi::QuoterConfig::kDefaultQuoteSize)});
+      {kHttpOk,
+       order_json(kOrderId2, kalshi::QuoterConfig::kDefaultQuoteSize)});
   kalshi::RestClient rest{kalshi::Auth{kApiKey, kPemPrivateKey},
                           std::move(transport_ptr), kBaseUrl};
   kalshi::OrderManager order_mgr{rest};
@@ -312,10 +298,11 @@ TEST_F(QuoterTest, LongPositionShiftsBidDown) {
 
   quoter.update(kTicker, make_ob(kYesBid52, kNoBid52));
 
+  // kExpectedBidMid52Long20 = 49 → "0.4900" in YES dimension.
   const std::string &bid_body = transport.recorded_requests().at(0).body;
-  EXPECT_NE(
-      bid_body.find("\"yes_price\":" + std::to_string(kExpectedBidMid52Long20)),
-      std::string::npos);
+  EXPECT_NE(bid_body.find("\"side\":\"bid\""), std::string::npos);
+  EXPECT_NE(bid_body.find(std::string(kBidPriceMid52Long20)),
+            std::string::npos);
 }
 
 TEST_F(QuoterTest, ShortPositionShiftsBidUp) {
@@ -324,12 +311,11 @@ TEST_F(QuoterTest, ShortPositionShiftsBidUp) {
   auto transport_ptr = std::make_unique<FakeTransport>();
   FakeTransport &transport = *transport_ptr;
   transport.enqueue(
-      {kHttpOk, order_json(kOrderId1, kTicker, "yes", kExpectedBidMid52Short20,
-                           kalshi::QuoterConfig::kDefaultQuoteSize)});
+      {kHttpOk,
+       order_json(kOrderId1, kalshi::QuoterConfig::kDefaultQuoteSize)});
   transport.enqueue(
-      {kHttpOk, order_json(kOrderId2, kTicker, "no",
-                           kalshi::complement_price(kExpectedAskMid52Short20),
-                           kalshi::QuoterConfig::kDefaultQuoteSize)});
+      {kHttpOk,
+       order_json(kOrderId2, kalshi::QuoterConfig::kDefaultQuoteSize)});
   kalshi::RestClient rest{kalshi::Auth{kApiKey, kPemPrivateKey},
                           std::move(transport_ptr), kBaseUrl};
   kalshi::OrderManager order_mgr{rest};
@@ -341,9 +327,10 @@ TEST_F(QuoterTest, ShortPositionShiftsBidUp) {
 
   quoter.update(kTicker, make_ob(kYesBid52, kNoBid52));
 
+  // kExpectedBidMid52Short20 = 51 → "0.5100" in YES dimension.
   const std::string &bid_body = transport.recorded_requests().at(0).body;
-  EXPECT_NE(bid_body.find("\"yes_price\":" +
-                          std::to_string(kExpectedBidMid52Short20)),
+  EXPECT_NE(bid_body.find("\"side\":\"bid\""), std::string::npos);
+  EXPECT_NE(bid_body.find(std::string(kBidPriceMid52Short20)),
             std::string::npos);
 }
 
@@ -353,11 +340,11 @@ TEST_F(QuoterTest, AskAlwaysHigherThanBidWithExtremeInventory) {
   auto transport_ptr = std::make_unique<FakeTransport>();
   FakeTransport &transport = *transport_ptr;
   transport.enqueue(
-      {kHttpOk, order_json(kOrderId1, kTicker, "yes", kExpectedBidExtremeClamp,
-                           kalshi::QuoterConfig::kDefaultQuoteSize)});
+      {kHttpOk,
+       order_json(kOrderId1, kalshi::QuoterConfig::kDefaultQuoteSize)});
   transport.enqueue(
-      {kHttpOk, order_json(kOrderId2, kTicker, "no", kExpectedNoAskExtremeClamp,
-                           kalshi::QuoterConfig::kDefaultQuoteSize)});
+      {kHttpOk,
+       order_json(kOrderId2, kalshi::QuoterConfig::kDefaultQuoteSize)});
   kalshi::RestClient rest{kalshi::Auth{kApiKey, kPemPrivateKey},
                           std::move(transport_ptr), kBaseUrl};
   kalshi::OrderManager order_mgr{rest};
@@ -369,12 +356,14 @@ TEST_F(QuoterTest, AskAlwaysHigherThanBidWithExtremeInventory) {
   quoter.update(kTicker, make_ob(kYesBid52, kNoBid52));
 
   ASSERT_EQ(transport.recorded_requests().size(), 2U);
+  // kExpectedBidExtremeClamp = 1 → "0.0100".
   const std::string &bid_body = transport.recorded_requests().at(0).body;
-  const std::string &ask_body = transport.recorded_requests().at(1).body;
-  EXPECT_NE(bid_body.find("\"yes_price\":" +
-                          std::to_string(kExpectedBidExtremeClamp)),
+  EXPECT_NE(bid_body.find("\"side\":\"bid\""), std::string::npos);
+  EXPECT_NE(bid_body.find(std::string(kBidPriceExtremeClamp)),
             std::string::npos);
-  EXPECT_NE(ask_body.find("\"no_price\":" +
-                          std::to_string(kExpectedNoAskExtremeClamp)),
+  // kExpectedNoAskExtremeClamp = 96 → YES complement = 4 → "0.0400".
+  const std::string &ask_body = transport.recorded_requests().at(1).body;
+  EXPECT_NE(ask_body.find("\"side\":\"ask\""), std::string::npos);
+  EXPECT_NE(ask_body.find(std::string(kAskPriceExtremeClamp)),
             std::string::npos);
 }

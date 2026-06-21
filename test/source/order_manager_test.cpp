@@ -62,19 +62,12 @@ std::string generate_rsa_pem() {
   return pem;
 }
 
-// Builds the JSON a RestClient expects for a placed order.
-std::string order_response_json(const std::string &order_id,
-                                const std::string &ticker,
-                                const std::string &side, int price_cents,
-                                int qty, int filled_qty = 0,
-                                const std::string &status = "resting") {
-  const std::string price_field =
-      (side == "yes") ? "\"yes_price\"" : "\"no_price\"";
-  return R"({"order":{"order_id":")" + order_id + R"(","ticker":")" + ticker +
-         R"(","side":")" + side + R"(",)" + price_field + R"(:)" +
-         std::to_string(price_cents) + R"(,"count":)" + std::to_string(qty) +
-         R"(,"filled_count":)" + std::to_string(filled_qty) + R"(,"status":")" +
-         status + R"(","type":"limit","created_time":"2025-01-01T00:00:00Z"}})";
+// Builds the V2 minimal response body that RestClient expects for a placed
+// order.
+std::string order_response_json(const std::string &order_id, int qty) {
+  return R"({"order_id":")" + order_id +
+         R"(","fill_count":"0.00","remaining_count":")" + std::to_string(qty) +
+         R"(.00","ts_ms":1718000000000})";
 }
 
 // NOLINTBEGIN(bugprone-easily-swappable-parameters)
@@ -141,8 +134,7 @@ TEST_F(OrderManagerTest, RealizedPnlDefaultsToZero) {
 
 TEST_F(OrderManagerTest, PlaceAddsOrderToOpenOrders) {
   auto transport = std::make_unique<FakeTransport>();
-  transport->enqueue({kHttpOk, order_response_json(kOrderId, kTicker, "yes",
-                                                   kYesBidPrice, kOrderQty)});
+  transport->enqueue({kHttpOk, order_response_json(kOrderId, kOrderQty)});
 
   auto rest_client = make_rest_client(std::move(transport));
   kalshi::OrderManager mgr{rest_client};
@@ -154,8 +146,7 @@ TEST_F(OrderManagerTest, PlaceAddsOrderToOpenOrders) {
 
 TEST_F(OrderManagerTest, PlaceReturnsOrderWithCorrectTicker) {
   auto transport = std::make_unique<FakeTransport>();
-  transport->enqueue({kHttpOk, order_response_json(kOrderId, kTicker, "yes",
-                                                   kYesBidPrice, kOrderQty)});
+  transport->enqueue({kHttpOk, order_response_json(kOrderId, kOrderQty)});
 
   auto rest_client = make_rest_client(std::move(transport));
   kalshi::OrderManager mgr{rest_client};
@@ -172,8 +163,7 @@ TEST_F(OrderManagerTest, PlaceReturnsOrderWithCorrectTicker) {
 
 TEST_F(OrderManagerTest, CancelRemovesOrderFromOpenOrders) {
   auto transport = std::make_unique<FakeTransport>();
-  transport->enqueue({kHttpOk, order_response_json(kOrderId, kTicker, "yes",
-                                                   kYesBidPrice, kOrderQty)});
+  transport->enqueue({kHttpOk, order_response_json(kOrderId, kOrderQty)});
   transport->enqueue({kHttpOk, "{}"}); // cancel response
 
   auto rest_client = make_rest_client(std::move(transport));
@@ -188,8 +178,7 @@ TEST_F(OrderManagerTest, CancelRemovesOrderFromOpenOrders) {
 
 TEST_F(OrderManagerTest, CancelReturnsFalseWhenApiRejects) {
   auto transport = std::make_unique<FakeTransport>();
-  transport->enqueue({kHttpOk, order_response_json(kOrderId, kTicker, "yes",
-                                                   kYesBidPrice, kOrderQty)});
+  transport->enqueue({kHttpOk, order_response_json(kOrderId, kOrderQty)});
   transport->enqueue({kHttpNotFound, "{}"}); // cancel rejected
 
   auto rest_client = make_rest_client(std::move(transport));
@@ -205,11 +194,8 @@ TEST_F(OrderManagerTest, CancelReturnsFalseWhenApiRejects) {
 TEST_F(OrderManagerTest, CancelAllCancelsAllOrdersForTicker) {
   auto transport = std::make_unique<FakeTransport>();
   // Place 2 orders on kTicker, 1 on kOtherTicker.
-  transport->enqueue({kHttpOk, order_response_json(kOrderId, kTicker, "yes",
-                                                   kYesBidPrice, kOrderQty)});
-  transport->enqueue(
-      {kHttpOk, order_response_json(kOrderId2, kOtherTicker, "no", kNoBidPrice,
-                                    kOrderQty)});
+  transport->enqueue({kHttpOk, order_response_json(kOrderId, kOrderQty)});
+  transport->enqueue({kHttpOk, order_response_json(kOrderId2, kOrderQty)});
   transport->enqueue({kHttpOk, "{}"}); // cancel kTicker order
 
   auto rest_client = make_rest_client(std::move(transport));
@@ -273,8 +259,7 @@ TEST_F(OrderManagerTest, DuplicateFillIsIdempotent) {
 
 TEST_F(OrderManagerTest, FilledCountUpdatedOnPartialFill) {
   auto transport = std::make_unique<FakeTransport>();
-  transport->enqueue({kHttpOk, order_response_json(kOrderId, kTicker, "yes",
-                                                   kYesBidPrice, kOrderQty)});
+  transport->enqueue({kHttpOk, order_response_json(kOrderId, kOrderQty)});
   auto rest_client = make_rest_client(std::move(transport));
   kalshi::OrderManager mgr{rest_client};
   mgr.place(kTicker, kalshi::Side::Yes, kYesBidPrice, kOrderQty);
@@ -292,8 +277,7 @@ TEST_F(OrderManagerTest, FilledCountUpdatedOnPartialFill) {
 
 TEST_F(OrderManagerTest, FullyFilledOrderRemovedFromOpenOrders) {
   auto transport = std::make_unique<FakeTransport>();
-  transport->enqueue({kHttpOk, order_response_json(kOrderId, kTicker, "yes",
-                                                   kYesBidPrice, kOrderQty)});
+  transport->enqueue({kHttpOk, order_response_json(kOrderId, kOrderQty)});
   auto rest_client = make_rest_client(std::move(transport));
   kalshi::OrderManager mgr{rest_client};
   mgr.place(kTicker, kalshi::Side::Yes, kYesBidPrice, kOrderQty);
@@ -306,8 +290,7 @@ TEST_F(OrderManagerTest, FullyFilledOrderRemovedFromOpenOrders) {
 
 TEST_F(OrderManagerTest, CancelFilledOrderHandledGracefully) {
   auto transport = std::make_unique<FakeTransport>();
-  transport->enqueue({kHttpOk, order_response_json(kOrderId, kTicker, "yes",
-                                                   kYesBidPrice, kOrderQty)});
+  transport->enqueue({kHttpOk, order_response_json(kOrderId, kOrderQty)});
   transport->enqueue({kHttpOk, "{}"}); // cancel response
   auto rest_client = make_rest_client(std::move(transport));
   kalshi::OrderManager mgr{rest_client};

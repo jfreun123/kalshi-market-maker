@@ -67,14 +67,10 @@ std::string generate_rsa_pem() {
   return pem;
 }
 
-std::string order_response_json(const std::string &order_id,
-                                const std::string &ticker, int price_cents,
-                                int qty) {
-  return R"({"order":{"order_id":")" + order_id + R"(","ticker":")" + ticker +
-         R"(","side":"yes","yes_price":)" + std::to_string(price_cents) +
-         R"(,"count":)" + std::to_string(qty) +
-         R"(,"filled_count":0,"status":"resting","type":"limit",)"
-         R"("created_time":"2025-01-01T00:00:00Z"}})";
+std::string order_response_json(const std::string &order_id, int qty) {
+  return R"({"order_id":")" + order_id +
+         R"(","fill_count":"0.00","remaining_count":")" + std::to_string(qty) +
+         R"(.00","ts_ms":1718000000000})";
 }
 
 // NOLINTBEGIN(bugprone-easily-swappable-parameters)
@@ -197,14 +193,10 @@ TEST_F(RiskManagerTest, AccumulatedPositionAllowsReducingOrders) {
 TEST_F(RiskManagerTest, RejectsOrderWhenAtOpenOrderLimit) {
   // Fill the open order limit (4); one more order must be rejected.
   auto transport = std::make_unique<FakeTransport>();
-  transport->enqueue({kHttpOk, order_response_json(kOrderId1, kTicker,
-                                                   kValidPrice, kSmallQty)});
-  transport->enqueue({kHttpOk, order_response_json(kOrderId2, kTicker,
-                                                   kValidPrice, kSmallQty)});
-  transport->enqueue({kHttpOk, order_response_json(kOrderId3, kTicker,
-                                                   kValidPrice, kSmallQty)});
-  transport->enqueue({kHttpOk, order_response_json(kOrderId4, kTicker,
-                                                   kValidPrice, kSmallQty)});
+  transport->enqueue({kHttpOk, order_response_json(kOrderId1, kSmallQty)});
+  transport->enqueue({kHttpOk, order_response_json(kOrderId2, kSmallQty)});
+  transport->enqueue({kHttpOk, order_response_json(kOrderId3, kSmallQty)});
+  transport->enqueue({kHttpOk, order_response_json(kOrderId4, kSmallQty)});
   auto rest = make_rest_client(std::move(transport));
   kalshi::OrderManager order_mgr{rest};
   order_mgr.place(kTicker, kalshi::Side::Yes, kValidPrice, kSmallQty);
@@ -222,12 +214,9 @@ TEST_F(RiskManagerTest, RejectsOrderWhenAtOpenOrderLimit) {
 TEST_F(RiskManagerTest, AcceptsOrderWhenBelowOpenOrderLimit) {
   // 3 open orders < limit of 4; another order is allowed.
   auto transport = std::make_unique<FakeTransport>();
-  transport->enqueue({kHttpOk, order_response_json(kOrderId1, kTicker,
-                                                   kValidPrice, kSmallQty)});
-  transport->enqueue({kHttpOk, order_response_json(kOrderId2, kTicker,
-                                                   kValidPrice, kSmallQty)});
-  transport->enqueue({kHttpOk, order_response_json(kOrderId3, kTicker,
-                                                   kValidPrice, kSmallQty)});
+  transport->enqueue({kHttpOk, order_response_json(kOrderId1, kSmallQty)});
+  transport->enqueue({kHttpOk, order_response_json(kOrderId2, kSmallQty)});
+  transport->enqueue({kHttpOk, order_response_json(kOrderId3, kSmallQty)});
   auto rest = make_rest_client(std::move(transport));
   kalshi::OrderManager order_mgr{rest};
   order_mgr.place(kTicker, kalshi::Side::Yes, kValidPrice, kSmallQty);

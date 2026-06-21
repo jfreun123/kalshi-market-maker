@@ -27,10 +27,6 @@ constexpr int kYesBid = 51;
 constexpr int kNoBid = 47;
 constexpr int kObQty = 100;
 
-// Expected quotes at mid=52, default config (spread=4, pos=0):
-// fv≈52, half_spread=2, skew=0 → bid=50, ask=54, NO ask=46
-constexpr int kExpectedBid = 50;
-constexpr int kExpectedNoAsk = 46;
 constexpr int kDefaultQuoteSize = kalshi::QuoterConfig::kDefaultQuoteSize;
 
 // Delta below best bid — does not change BBO or mid.
@@ -106,15 +102,12 @@ std::string fill_msg(const std::string &order_id, const std::string &ticker,
   return msg.dump();
 }
 
-std::string order_json(const std::string &order_id, const std::string &ticker,
-                       const std::string &side, int price_cents, int qty) {
-  const std::string price_field =
-      (side == "yes") ? "\"yes_price\"" : "\"no_price\"";
-  return R"({"order":{"order_id":")" + order_id + R"(","ticker":")" + ticker +
-         R"(","side":")" + side + R"(",)" + price_field + R"(:)" +
-         std::to_string(price_cents) + R"(,"count":)" + std::to_string(qty) +
-         R"(,"filled_count":0,"status":"resting","type":"limit",)"
-         R"("created_time":"2025-01-01T00:00:00Z"}})";
+// Builds the V2 minimal response body that RestClient expects for a placed
+// order.
+std::string order_json(const std::string &order_id, int qty) {
+  return R"({"order_id":")" + order_id +
+         R"(","fill_count":"0.00","remaining_count":")" + std::to_string(qty) +
+         R"(.00","ts_ms":1718000000000})";
 }
 
 // NOLINTEND(bugprone-easily-swappable-parameters)
@@ -135,10 +128,8 @@ public:
 TEST_F(MainLoopTest, SnapshotPlusDeltaPlacesQuotes) {
   auto transport_ptr = std::make_unique<FakeTransport>();
   FakeTransport &transport = *transport_ptr;
-  transport.enqueue({kHttpOk, order_json(kOrderId1, kTicker, "yes",
-                                         kExpectedBid, kDefaultQuoteSize)});
-  transport.enqueue({kHttpOk, order_json(kOrderId2, kTicker, "no",
-                                         kExpectedNoAsk, kDefaultQuoteSize)});
+  transport.enqueue({kHttpOk, order_json(kOrderId1, kDefaultQuoteSize)});
+  transport.enqueue({kHttpOk, order_json(kOrderId2, kDefaultQuoteSize)});
 
   auto fake_ws = std::make_unique<kalshi::FakeWebSocket>();
   kalshi::FakeWebSocket *ws_ptr = fake_ws.get();
