@@ -1,27 +1,24 @@
 #pragma once
 
-#include <optional>
+#include "pricing_model.hpp"
+
+#include <memory>
 
 namespace kalshi {
 
-struct FairValueInput {
-  double mid_cents;           // orderbook mid-price in cents [1, 99]
-  double time_to_close_hours; // hours until market resolves (must be >= 0)
-  int net_position;           // net YES contracts held (negative = net NO)
-  std::optional<double>
-      external_prob; // external probability estimate in [0, 1]
-};
-
-// Estimates the fair value of a YES contract in cents [1, 99].
+// Delegates fair-value estimation to an injected IPricingModel.
+// Constructed with a concrete model; estimate() simply forwards to it.
 //
-// Model layers applied in order:
-//   v1 (baseline):  start from orderbook mid-price
-//   v2 (time-decay): fade extreme prices toward 50 as close approaches
-//   v3 (inventory):  shade down when long YES, up when short YES
-//   v4 (external):   blend an external probability signal if provided
+// Quoter creates FairValueEngine{std::make_unique<HeuristicModel>()} by
+// default. Swap in a different model (calibrated, ML, RL) without touching
+// Quoter.
 class FairValueEngine {
 public:
-  [[nodiscard]] static double estimate(const FairValueInput &input);
+  explicit FairValueEngine(std::unique_ptr<IPricingModel> model);
+  [[nodiscard]] double estimate(const FairValueInput &input) const;
+
+private:
+  std::unique_ptr<IPricingModel> model_;
 };
 
 } // namespace kalshi

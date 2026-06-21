@@ -17,7 +17,14 @@ constexpr int kHalfSpreadMin = 1;
 
 Quoter::Quoter(QuoterConfig config, OrderManager &order_mgr,
                RiskManager &risk_mgr)
-    : config_{config}, order_mgr_{order_mgr}, risk_mgr_{risk_mgr} {}
+    : Quoter(std::move(config),
+             FairValueEngine{std::make_unique<HeuristicModel>()}, order_mgr,
+             risk_mgr) {}
+
+Quoter::Quoter(QuoterConfig config, FairValueEngine fv_engine,
+               OrderManager &order_mgr, RiskManager &risk_mgr)
+    : config_{std::move(config)}, fv_engine_{std::move(fv_engine)},
+      order_mgr_{order_mgr}, risk_mgr_{risk_mgr} {}
 
 std::pair<int, int> Quoter::compute_quotes(double fv_cents, int half_spread,
                                            double inventory_skew_cents) {
@@ -93,8 +100,8 @@ void Quoter::update(std::string_view ticker, const LocalOrderbook &book) {
 
   const std::string ticker_str{ticker};
   const double mid = book.mid_price_cents();
-  const double fair_val = FairValueEngine::estimate(
-      FairValueInput{mid, kDefaultTimeToCloseHours, 0, {}});
+  const double fair_val =
+      fv_engine_.estimate(FairValueInput{mid, kDefaultTimeToCloseHours, 0, {}});
 
   const int half_spread =
       std::max(kHalfSpreadMin, config_.target_spread_cents / 2);

@@ -82,10 +82,11 @@ BENCHMARK(BM_BestBid)->Arg(kSmallLevelCount)->Arg(kLargeLevelCount);
 // ---- FairValueEngine benchmarks ----
 
 static void BM_FairValueEstimate(benchmark::State &state) {
+  kalshi::FairValueEngine engine{std::make_unique<kalshi::HeuristicModel>()};
   const kalshi::FairValueInput input{kMidCents, kMediumTimeHours, 0,
                                      std::nullopt};
   for ([[maybe_unused]] auto iter : state) {
-    double fair_value = kalshi::FairValueEngine::estimate(input);
+    double fair_value = engine.estimate(input);
     benchmark::DoNotOptimize(fair_value);
   }
 }
@@ -94,10 +95,11 @@ BENCHMARK(BM_FairValueEstimate);
 // NOLINTEND(cppcoreguidelines-avoid-non-const-global-variables,cppcoreguidelines-owning-memory)
 
 static void BM_FairValueEstimateWithInventory(benchmark::State &state) {
+  kalshi::FairValueEngine engine{std::make_unique<kalshi::HeuristicModel>()};
   const kalshi::FairValueInput input{kHighMidCents, kShortTimeHours,
                                      kLargeInventory, std::nullopt};
   for ([[maybe_unused]] auto iter : state) {
-    double fair_value = kalshi::FairValueEngine::estimate(input);
+    double fair_value = engine.estimate(input);
     benchmark::DoNotOptimize(fair_value);
   }
 }

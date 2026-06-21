@@ -31,7 +31,12 @@ struct QuoterConfig {
 // when its price drifts by more than reprice_threshold_cents to avoid churn.
 class Quoter {
 public:
+  // Default pricing: HeuristicModel.
   Quoter(QuoterConfig config, OrderManager &order_mgr, RiskManager &risk_mgr);
+
+  // Custom pricing: inject any IPricingModel via a FairValueEngine.
+  Quoter(QuoterConfig config, FairValueEngine fv_engine,
+         OrderManager &order_mgr, RiskManager &risk_mgr);
 
   void update(std::string_view ticker, const LocalOrderbook &book);
 
@@ -53,6 +58,7 @@ private:
   void refresh_ask(const std::string &ticker, int desired_ask);
 
   QuoterConfig config_;
+  FairValueEngine fv_engine_;
   OrderManager &order_mgr_;
   RiskManager &risk_mgr_;
   std::unordered_map<std::string, LiveQuote> live_quotes_;
