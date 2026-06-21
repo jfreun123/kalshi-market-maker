@@ -1478,67 +1478,261 @@ private:
 
 ## Empirical Evidence (Bürgi, Deng, Whelan 2026)
 
-*Source: "Makers or Takers: The Economics of the Kalshi Prediction Market", GWU Working Paper 2026-001. Transaction-level data, 46,282 Yes contracts, 313,972 total prices, 2021–April 2025.*
+*Source: "Makers or Takers: The Economics of the Kalshi Prediction Market", GWU Working Paper 2026-001, February 2026. University College Dublin. Transaction-level data, 46,282 Yes contracts, 313,972 total prices (Yes + No), 12,403 events, Kalshi inception (2021) through April 2025. Contracts with total volume ≥$1,000 and final bid-ask spread ≤20c only. Excludes sub-24-hour (hourly crypto/index) markets.*
 
-### Core findings
+---
 
-**Favorite-Longshot Bias (FLB)** — present across all market categories, all years, all volume quintiles:
+### 1. Market Structure
 
-| Price range | Avg return (all traders) |
+Kalshi is a **quote-driven market** with integer prices from 1c to 99c. Every trade pairs a Maker (passive limit order) with a Taker (immediate execution). The Kalshi API records which side was Maker and which was Taker directly — no Lee-Ready algorithm needed.
+
+**Four actions a trader can take for any contract (Yes or No):**
+1. **Take Yes** — buy Yes immediately at the best ask (P_Y). Definite execution.
+2. **Make Yes** — post a limit order to buy Yes at a lower price (1 − P_N). Risk of non-execution but better price if matched.
+3. **Take No** — buy No immediately at the best ask (P_N). Definite execution.
+4. **Make No** — post a limit order to buy No at a lower price (1 − P_Y). Risk of non-execution.
+
+**Spread example** (CPI market, May 7 2025, "Above 0.3%" contract):
+- Best Yes ask: 32c (Taker pays 32c + fee to buy Yes)
+- Best Yes bid: 28c (Taker pays 72c + fee to buy No; Maker who posted 28c bid gets Yes at 28c if matched)
+- Last trade: 28c (someone accepted the 28c bid for Yes → Taker bought No at 72c)
+- Spread: 4 cents
+
+**Fee structure (pre-April 2025):**
+- Takers pay: γ × P × (1 − P) per contract, where γ = 0.07, rounded up to nearest cent per 100-contract lot
+- Makers pay: **nothing**
+- At P = 0.50: fee = 0.07 × 0.50 × 0.50 = 1.75c per contract
+- At P = 0.10: fee = 0.07 × 0.10 × 0.90 = 0.63c per contract
+- At P = 0.05: fee = 0.07 × 0.05 × 0.95 = 0.33c per contract (small absolute, but 6.7% of price)
+- **After April 2025**: Kalshi charges both Makers and Takers. γ for Makers TBD. All calibrated parameters below apply to the pre-April 2025 regime.
+
+---
+
+### 2. Volume Distribution
+
+Two-thirds of all trades are at extreme prices — these dominate the average return:
+
+| Price range | Count | % of total |
+|---|---|---|
+| 1–10c | 106,209 | 33.8% |
+| 11–20c | 20,395 | 6.5% |
+| 21–30c | 12,558 | 4.0% |
+| 31–40c | 10,049 | 3.2% |
+| 41–50c | 7,199 | 2.3% |
+| 50–59c | 8,351 | 2.7% |
+| 60–69c | 10,049 | 3.2% |
+| 70–79c | 12,558 | 4.0% |
+| 80–89c | 20,395 | 6.5% |
+| 90–99c | 106,209 | 33.8% |
+
+Median total volume per contract: **$8,982**. Mean transaction size: $100. Median transaction: $35. Top-decile markets average $526,245 total — tiny by any financial market standard.
+
+---
+
+### 3. Favorite-Longshot Bias (FLB)
+
+**Observed win rates vs. price** (Figure 3): Win fraction rises with price (good calibration overall) but systematically falls below the 45° line at low prices and rises above it at high prices. FLB is statistically significant across the full price range.
+
+**Returns by price band** (Figure 5, incorporating Taker fees):
+
+| Price range | Avg return |
 |---|---|
-| 1–10c (longshots) | **-60%+** (massive underperformance) |
-| 11–49c | Improving, but still negative |
-| 50–99c | Small positive return |
-| All contracts average | **-20%** pre-fee |
+| 1–10c | **−60% to −75%** |
+| 11–20c | **−30% to −40%** |
+| 20–40c | **−10% to −20%** |
+| 40–60c | ~0% |
+| 60–80c | **+5% to +10%** (small positive, stat. sig. above 70c) |
+| 80–99c | **+5% to +15%** (stat. sig. positive) |
+| All contracts avg | **−20%** pre-fee |
 
-**Maker vs Taker returns** (post-fee):
+The asymmetry is purely mechanical: a 5c contract that wins only 3% of the time loses 40% pre-fee. A 95c contract that wins 98% earns only 3.1% pre-fee. Yet because 2/3 of trades are at extremes, the average contract return is −20%.
 
-| Role | Avg return |
+**Mincer-Zarnowitz regression** (Y_ij − P_ij = α + ψP_ij): null of unbiased prices (α=ψ=0) rejected at p<0.001 for every sub-sample tested:
+- All contract types (single, mutually exclusive numerical, mutually exclusive other, non-exclusive)
+- Every day from closing day back to 10 days prior
+- Every volume quintile
+- Every transaction-size quintile
+- Every market category (Financials, Climate/Weather, Crypto, Politics, Entertainment, Economics, Other)
+- Every year 2021–2025 (weakening in 2025: ψ=0.021 vs 0.048 in 2024, still significant)
+
+Key coefficients (full sample): α = −1.736, ψ = 0.034. Prices are too high for longshots, too low for favorites.
+
+---
+
+### 4. Maker vs. Taker Evidence
+
+**Maker share by price range** (Table 10):
+
+| Price range | Maker share |
 |---|---|
-| Makers | **-9.64%** (no fee pre-April 2025) |
-| Takers | **-31.46%** (pay γP(1-P) fee) |
-| Makers ≥50c | **+2.6%** (statistically significant) |
+| 1–10c | 43.5% (Takers dominate longshots) |
+| 50–59c | 50.4% |
+| 90–99c | 56.5% (Makers dominate heavy favorites) |
 
-Two-thirds of all trades occur at <10c or >90c, so the average is dragged by deep longshot losses.
+Takers disproportionately buy cheap contracts — the worst-performing bucket.
 
-**Post-April 2025 fee change**: Kalshi now charges Makers too. The calibrated parameters below assume pre-April 2025 Taker-only fees. Maker profitability on ≥50c contracts likely somewhat reduced.
+**Return breakdown** (Figure 6):
 
-### Microstructure model (calibrated)
+| Role | Avg return (post-fee) | ≥50c return |
+|---|---|---|
+| All contracts | −20% | small positive |
+| Takers | **−31.46%** | ~0% |
+| Makers | **−9.64%** | **+2.6%** (stat. sig.) |
 
-Agents sort by belief π into 5 groups from very pessimistic (Take No) to very optimistic (Take Yes), with Makers in the middle accepting execution risk for a better price. Takers have more extreme beliefs and are willing to pay up for certainty.
+Both Makers and Takers show FLB, but Taker losses are much larger at all price levels. The gap is due to: (1) Makers get better execution prices; (2) Takers pay fees. Both effects hit cheap-contract Takers hardest because the fee formula γP(1-P) is highest as a fraction of price when P is small, and the bid-ask spread is widest as a fraction of price at extreme prices.
 
-**Best-fit parameters:**
-- **β = 0.09** — probability overweighting (agents shift beliefs ~9% toward 50%)
-- **θ = 0.60** — Maker match rate
-- **σ = 0.107** — belief dispersion
+**Loss pattern for Makers on cheap contracts** (closing-day data):
+Even Makers lose heavily on <10c contracts — statistically significant negative return for 5 of 6 days shown. This is the "Yogi Berra effect" (over-optimism about losing outcomes near resolution). Implication: **do not quote contracts below ~15c regardless of role**.
 
-β is tightly identified (range 0.06–0.12 across all good-fitting parameter combinations). Without β>0, the model cannot reproduce FLB for Makers — it would predict Maker returns highest for *cheap* contracts (opposite of data).
+---
 
-### Debiasing formula for ViewBasedModel (Phase 28)
+### 5. Microstructure Model
 
-Belief bias model: µ(π*) = π* + β(0.5 - π*)
+Adapted from Whelan (2025) (betting exchanges). One-shot game. Agents have heterogeneous beliefs π ~ N(µ(π*), σ²) about Yes probability. They pick the action maximizing subjective expected profit.
 
-If the observed market price P ≈ mean belief µ, the debiased true probability is:
+**Decision rules:**
+
+Agent buys Yes as Taker if: π ≥ π_Y^T = (P_Y + f(P_Y) − θ_Y(1 − P_N)) / (1 − θ_Y)
+
+Agent buys No as Taker if: π ≤ π_N^T = 1 − (P_N + f(P_N) − θ_N(1 − P_Y)) / (1 − θ_N)
+
+Between these thresholds, agents Make. This produces **5 distinct groups** as π goes from 0 to 1:
+1. Take No at P_N (very pessimistic)
+2. Make No by posting at (1 − P_Y) (somewhat pessimistic)
+3. Make both sides (neutral / undecided)
+4. Make Yes by posting at (1 − P_N) (somewhat optimistic)
+5. Take Yes at P_Y (very optimistic)
+
+**Matching rates** (random matching within Maker pool):
+- θ_N = mass(Take Yes) / mass(Make No) = (1 − F(π_Y^T)) / (F(P_Y) − F(π_N^T))
+- θ_Y = mass(Take No) / mass(Make Yes) = F(π_N^T) / (F(π_Y^T) − F(1 − P_N))
+
+System has multiple equilibria (thick/thin markets). Model is solved with exogenous θ = θ_Y = θ_N.
+
+**Belief bias model** (linear shrinkage toward 0.5):
+```
+µ(π*) = π* + β(0.5 − π*)
+```
+β=0: unbiased. β>0: agents overweight small probabilities (Kahneman-Tversky 1979). Symmetric: µ(π*) + µ(1−π*) = 1.
+
+**Why β=0 fails**: Without belief bias, the model predicts Maker returns are *highest for cheap contracts* (Takers with extreme π pay a few cents too much, which is a large fraction of the Maker's cheap entry price). This is the opposite of the data. β>0 introduces the FLB for Makers by making the crowd systematically overprice longshots.
+
+**Calibrated parameters** (fit to Figure 6 Maker/Taker return curves, weighted by volume):
+
+| Parameter | Value | Identification |
+|---|---|---|
+| β (probability overweighting) | **0.09** | Tightly identified; range 0.06–0.12 across top-5% fits |
+| θ (Maker match rate) | **0.60** | Correlated with σ (r=0.80); chosen for moderate liquidity |
+| σ (belief dispersion, std dev) | **0.107** | Correlated with θ |
+
+---
+
+### 6. Debiasing Formula (for Phase 28 ViewBasedModel)
+
+Given the calibrated β = 0.09, when the market price P reflects average belief µ, the true probability π* is:
 
 ```
-π* = (P - β×0.5) / (1 - β) = (P - 0.045) / 0.91
+π* = (P − 0.045) / 0.91
 ```
 
-Examples (with β=0.09):
-- Market at 5c  → true prob ≈ 0.5%  (market massively overpricing longshot)
-- Market at 20c → true prob ≈ 17%
-- Market at 50c → true prob ≈ 50%   (unbiased at midpoint)
-- Market at 80c → true prob ≈ 83%
-- Market at 95c → true prob ≈ 99.5% (market underpricing heavy favorite)
+Derivation: µ = π* + 0.09(0.5 − π*) = 0.91π* + 0.045 → π* = (µ − 0.045) / 0.91
 
-`ViewBasedModel::estimate()` should apply this correction when using market mid as the prior: `debiased_prob = (market_mid_cents/100.0 - 0.045) / 0.91`.
+| Market price P | Debiased true prob π* |
+|---|---|
+| 2c | −2.7% → clamp to ≈ 0% (don't quote) |
+| 5c | 0.5% (market overprices by 10×) |
+| 10c | 6% |
+| 20c | 17% |
+| 30c | 28% |
+| 50c | 50% (fixed point — unbiased) |
+| 70c | 72% |
+| 80c | 83% |
+| 90c | 94% |
+| 95c | 99.5% |
 
-### Design implications
+`ViewBasedModel::estimate()` when using market mid as prior:
+```cpp
+const double debiased_prob = (market_mid / 100.0 - 0.045) / 0.91;
+// clamp to [0.01, 0.99] before using as fair value
+```
 
-1. **`post_only=true`** already set — correctly positions us as Makers. Keep.
-2. **Price-range filter in Quoter**: Add `min_quote_price_cents` / `max_quote_price_cents` config to skip longshot (<10c) and deep-favorite (>90c) contracts where even Makers lose heavily. Default: quote only 15c–85c range.
-3. **`min_spread_cents`** (Phase 27): The natural equilibrium spread at θ=0.60 is 3–5 cents at mid-range prices. Floor of 3 cents is justified by this calibration.
-4. **Taker fee now charged to Makers**: Post-April 2025, fee = γP(1-P) per contract for both sides (γ exact value TBD). Factor into `RestClient::place_order` cost model when computing expected PnL.
+---
+
+### 7. Why Biases Persist (Section 6 of Paper)
+
+Three reasons the +2.6% Maker edge on ≥50c contracts has not been arbitraged away:
+
+1. **Small volumes**: Top-decile market total volume averages only $526K. Order books are thin. A large Maker posting at better prices would push the queue and reduce their own fill rate and price.
+2. **High variance**: Std dev of Maker returns on ≥50c contracts = **33%**. Even with positive EV, Samuelson's "Fallacy of Large Numbers" applies — rational risk-averse investors may correctly pass.
+3. **Lack of information**: The FLB pattern was not previously documented for Kalshi. Now that it is (and now that we are building against it), the anomaly may shrink over time (consistent with Table 9 showing 2025 weakening).
+
+---
+
+### 8. Design Implications for This Codebase
+
+#### Already implemented
+- `post_only = true` — correctly positions every order as a Maker. Confirmed optimal by empirical data.
+- `cancel_order_on_pause = true` — prevents stranded exposure during halt events.
+- `is_taker` field in `Fill` struct — tracks whether we crossed or were passively filled.
+
+#### Phase 27 additions (confirmed by this paper)
+- **`min_spread_cents` floor** — calibrated equilibrium spread at θ=0.60 is 3–5 cents at mid-range. Floor of 3 cents minimum; consider 4 cents at P near 50c where fee extraction from Takers is highest.
+- **`ExposureDecomposition`** — tracks E_win (directional underwriting exposure) separately from spread capture C_a/C_b.
+
+#### Phase 28 additions (ViewBasedModel)
+- Apply the β=0.09 debiasing correction when bootstrapping fair value from market mid.
+- Update view probability via `update_view()` when exogenous signal arrives (e.g., sports model, external aggregator).
+
+#### New: Phase 29 — Price-Range Gate
+
+Add `min_quote_price_cents` and `max_quote_price_cents` to `QuoterConfig`. Quoter skips any market where the mid price falls outside this range. Prevents entering deep-longshot (<10c) markets where even Makers lose >35%.
+
+```cpp
+// In QuoterConfig:
+int min_quote_price_cents{15};  // skip contracts with mid below 15c
+int max_quote_price_cents{85};  // skip contracts with mid above 85c (complement is below 15c)
+
+// In Quoter::update():
+const auto mid_opt = ob.mid_price();
+if (!mid_opt) { return; }
+const int mid = *mid_opt;
+if (mid < config_.min_quote_price_cents || mid > config_.max_quote_price_cents) {
+  cancel_all(ticker);  // or just skip placing new quotes
+  return;
+}
+```
+
+Default range 15–85c corresponds to roughly 6% debiased true probability floor, safely above the −35% Maker loss zone at <10c. This is a new phase because it requires a test (`PriceRangeGateTest`), a `cancel_all()` helper on Quoter, and QuoterConfig changes.
+
+```mermaid
+graph TD
+    U[Quoter::update called] --> MID{mid in range?}
+    MID -->|no: mid < min or > max| SKIP[cancel_all + return]
+    MID -->|yes| QUOTE[compute and place quotes]
+    style SKIP fill:#c44,color:#fff
+    style MID fill:#6af,color:#000
+    style QUOTE fill:#555,color:#fff
+```
+
+**Files:** `source/quoter.hpp`, `source/quoter.cpp`, `test/source/quoter_test.cpp` (new PriceRangeGate tests)
+
+#### Fee model update (post-April 2025)
+
+After April 2025, Kalshi charges Makers too. Need to:
+1. Confirm γ_maker from current Kalshi fee schedule (check docs or API).
+2. Add `maker_fee_rate` field to `Config`.
+3. In `Quoter::compute_quotes()`, subtract expected maker fee from target half-spread so that net-of-fee edge remains positive.
+
+Expected maker fee at price P: γ_maker × P × (1 − P). At P = 0.52 (typical mid), fee ≈ 0.07 × 0.52 × 0.48 ≈ 1.75c/contract (if same γ=0.07 as Taker). This reduces the +2.6% Maker edge but does not eliminate it, because Takers pay the same fee, widening the effective spread we observe.
+
+---
+
+### 9. Checklist Additions
+
+The following items are added to the phase checklist:
+
+- [ ] Phase 29 — Price-Range Gate (`min_quote_price_cents` / `max_quote_price_cents` in QuoterConfig)
+- [ ] Phase 30 — Maker Fee Integration (post-April 2025 fee regime in cost model)
 
 ---
 
@@ -1587,4 +1781,6 @@ Examples (with β=0.09):
 - [ ] Phase 25 — Cross-Ticker Portfolio Risk & Delta Hedging
 - [ ] Phase 26 — Flow Imbalance Signal (FlowImbalanceGuard)
 - [ ] Phase 27 — Minimum Spread Floor & E_win Tracking
-- [ ] Phase 28 — View-Based Pricing Model
+- [ ] Phase 28 — View-Based Pricing Model (with β=0.09 debiasing)
+- [ ] Phase 29 — Price-Range Gate (min/max_quote_price_cents in QuoterConfig)
+- [ ] Phase 30 — Maker Fee Integration (post-April 2025 fee regime)
