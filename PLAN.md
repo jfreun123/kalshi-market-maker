@@ -1158,6 +1158,202 @@ graph TD
 
 ---
 
+## Scaling & Multi-Ticker Architecture
+
+### Current single-process model
+
+One process handles all tickers in `target_tickers`. The main loop is:
+
+```
+WS delta → apply_delta → quoter.update (per ticker) → place/cancel via REST
+Fill     → record_fill  → risk.update  (all tickers)
+```
+
+This works fine for 2–10 tickers with slow underlyings. The bottlenecks that appear as you scale are documented below alongside the planned fix for each.
+
+---
+
+### Bottleneck map
+
+| Scale | Bottleneck | Root cause | Fix |
+|---|---|---|---|
+| ~5 tickers | REST latency on reprice | `place_order` blocks ~50–200ms | Phase 21: async HTTP dispatch |
+| ~10 tickers | TTCs are constants | Main loop passes `ttc=1000h` hardcoded | Wire `get_markets()` at startup to load real `close_time` per ticker |
+| ~20 tickers | Single WS thread serialises all repricing | One goroutine drains the WS message queue | Phase 22: per-series WS connection with a thread-per-series dispatcher |
+| ~50 tickers | `RiskManager::update()` scans all tickers on every fill | O(n) scan on the hot fill path | Phase 23: incremental update — only touch the filled ticker |
+| ~100 tickers | `HeuristicModel::estimate()` called per delta per ticker | Full model evaluation on every tick | Phase 12 (TheoGrid) is built — wire it into `Quoter::update()` to replace model calls on the hot path |
+| ~200+ tickers | Single process, single API key, single rate limit | Exchange caps requests/second per key | Horizontal split by event series (one process per series) |
+
+---
+
+### Natural scaling unit: the event series
+
+Kalshi organises markets into *event series* (e.g. all BTC price-tier markets in one series, all Fed rate markets in another). Within a series:
+
+- All tickers share **one underlying** (BTC spot price, Fed funds rate, etc.)
+- One `TheoGrid` per series maps `(underlying_value, time_to_close) → fair_prob` and drives all tickers with a single lookup
+- One WS connection subscribes to all tickers in the series
+- One `RiskManager` enforces portfolio-level constraints across the series
+
+Across series, separate processes run independently with separate API connections, risk limits, and models.
+
+```mermaid
+graph TD
+    CFG["config.json\nseries definitions"]
+
+    subgraph ProcA["Process: BTC series"]
+        WSA["WebSocketClient\nBTC tickers"]
+        TGA["TheoGrid\nBTC spot → prob"]
+        QA["Quoter × N\nBTC-B90k, BTC-B95k, ..."]
+        RMA["RiskManager\nBTC portfolio limits"]
+    end
+
+    subgraph ProcB["Process: Fed series"]
+        WSB["WebSocketClient\nFed tickers"]
+        TGB["TheoGrid\nFed rate → prob"]
+        QB["Quoter × N\nFED-25DEC-B450, ..."]
+        RMB["RiskManager\nFed portfolio limits"]
+    end
+
+    CFG --> ProcA
+    CFG --> ProcB
+    WSA --> TGA --> QA --> RMA
+    WSB --> TGB --> QB --> RMB
+```
+
+---
+
+### Cross-ticker correlation and portfolio hedging
+
+Within a series, the tickers are *mutually exclusive and exhaustive*: exactly one of `BTC > $90k`, `BTC > $95k`, `BTC > $99k` resolves YES. This creates a hard portfolio constraint — the fair probabilities must be monotone and must not sum above 1.
+
+**Consistency enforcement (Phase 24)**
+
+A `PortfolioModel` layer sits above the individual `IPricingModel` instances. After each model estimates an individual fair value, `PortfolioModel` projects the full vector onto the probability simplex:
+
+```
+raw probs: [p_90k, p_95k, p_99k]  ← from individual model calls
+→ enforce monotonicity: p_90k ≥ p_95k ≥ p_99k
+→ enforce no-arbitrage: each consecutive spread ≥ 0
+→ output: consistent prob vector used for quoting all three tickers
+```
+
+This prevents the system from simultaneously quoting prices that imply a risk-free arbitrage across tiers.
+
+**Delta hedging across tiers (Phase 25)**
+
+Net position across a mutually-exclusive series has a natural hedge: a long position in `BTC > $90k` is partially offset by a short in `BTC > $95k` (because $95k resolving YES implies $90k also resolved YES). The inventory skew in `Quoter` currently treats each ticker independently. A cross-tier `PortfolioRiskManager` computes net exposure in underlying-space and applies a unified skew:
+
+```
+underlying_delta = Σ (position[i] × ∂prob[i]/∂underlying)
+skew_cents       = underlying_delta × skew_per_unit_underlying
+```
+
+All tickers in the series then receive a shared skew adjustment rather than independent ones. This prevents skewing opposing positions in the same direction.
+
+**Position limits in portfolio space (Phase 25)**
+
+The existing `RiskManager` enforces `max_position_per_market` per ticker independently. A portfolio-level limit enforces:
+- Max net directional exposure in underlying-space (e.g. max $500 effective BTC exposure)
+- Max gross notional across the series
+- Correlation-adjusted VaR as a kill switch (`kPortfolioVaR` constraint bit)
+
+---
+
+### Phase 21 — Async HTTP Order Dispatch
+
+**Problem:** `place_order` and `cancel_order` currently block the quoting thread for the full REST round-trip (~50–200ms). With 5+ tickers firing reprices simultaneously, the WS queue backs up and quotes become stale.
+
+**Fix:** A dedicated `OrderDispatcher` thread owns the HTTP connection. The quoting thread posts `PlaceOrder`/`CancelOrder` requests onto a lock-free queue and returns immediately. The dispatcher drains the queue, sends the HTTP request, and posts the result back (fill confirmation, error). The `OrderManager` is updated from the dispatcher thread.
+
+```cpp
+struct OrderRequest {
+    enum class Kind { Place, Cancel } kind;
+    std::string ticker;
+    Side side;
+    int price_cents;
+    int quantity;
+    std::string order_id;  // for Cancel
+};
+
+class OrderDispatcher {
+public:
+    void post(OrderRequest req);   // called from quoting thread — non-blocking
+    void run();                    // blocks in dispatcher thread
+private:
+    moodycamel::ConcurrentQueue<OrderRequest> queue_;
+    RestClient &rest_;
+};
+```
+
+The quoting callback drops from `O(REST RTT)` to `O(queue push)` — effectively zero cost on the hot path.
+
+---
+
+### Phase 22 — Per-Series WS + Thread-per-Series Dispatch
+
+**Problem:** All tickers share one WS connection and one message-handler thread. A slow callback on one ticker (e.g. REST reprice blocking) stalls message processing for all others.
+
+**Fix:** One `WebSocketClient` per event series. Each series runs its own `ws_thread` + `OrderDispatcher`. The main thread just monitors `g_shutdown` and coordinates clean shutdown.
+
+```mermaid
+graph TD
+    MAIN["main()\nshutdown monitor"]
+    SDA["SeriesDispatcher A\nBTC: ws_thread + order_thread"]
+    SDB["SeriesDispatcher B\nFed: ws_thread + order_thread"]
+    API["Kalshi API"]
+
+    MAIN --> SDA
+    MAIN --> SDB
+    SDA <-->|WS + REST| API
+    SDB <-->|WS + REST| API
+```
+
+Each `SeriesDispatcher` owns: `WebSocketClient`, `OrderDispatcher`, `Quoter` map (one per ticker), `RiskManager`, `TheoGrid`.
+
+---
+
+### Phase 23 — Incremental RiskManager Update
+
+**Problem:** `RiskManager::update()` currently clears and rebuilds all cached positions and PnL by iterating every ticker and every open order on every fill. At 50+ tickers this becomes an O(n) scan on the latency-critical fill callback.
+
+**Fix:** Make `update()` incremental — accept a `const Fill&` and update only the affected ticker's position and PnL delta:
+
+```cpp
+void RiskManager::on_fill(const Fill &fill, const OrderManager &order_mgr);
+```
+
+Full rebuild is reserved for startup and periodic reconciliation.
+
+---
+
+### Phase 24 — PortfolioModel (Consistency Across Correlated Tickers)
+
+**Implements:** No-arbitrage projection across mutually-exclusive series tickers.
+
+New class `PortfolioModel` wraps a vector of `IPricingModel` instances (one per ticker). On each reprice cycle it:
+1. Calls each model's `estimate()` to get raw fair values
+2. Projects the vector onto the monotone-consistent simplex
+3. Returns the adjusted fair values to each `Quoter`
+
+**Test surface:**
+- Raw probs violating monotonicity → projected correctly
+- Raw probs summing > 1 → scaled down proportionally
+- Already-consistent probs → unchanged
+
+---
+
+### Phase 25 — Cross-Ticker Portfolio Risk and Delta Hedging
+
+**Implements:** Unified inventory skew and portfolio-space position limits across a series.
+
+A `PortfolioRiskManager` computes:
+- `underlying_delta` = Σ positions × `∂prob/∂underlying` (from `TheoGrid` gradient)
+- Shared `skew_cents` broadcast to all `Quoter` instances in the series
+- Portfolio VaR kill switch: if gross underlying exposure exceeds limit, sets `kPortfolioVaR` constraint on all tickers in the series simultaneously
+
+---
+
 ## Dependency Summary
 
 | Library | Purpose | How to add |
@@ -1196,3 +1392,8 @@ graph TD
 - [x] Phase 18 — Replay & Fuzz Testing
 - [x] Phase 19 — Paper Trading Mode
 - [x] Phase 20 — Documentation
+- [ ] Phase 21 — Async HTTP Order Dispatch
+- [ ] Phase 22 — Per-Series WS + Thread-per-Series Dispatch
+- [ ] Phase 23 — Incremental RiskManager Update
+- [ ] Phase 24 — PortfolioModel (No-Arbitrage Consistency)
+- [ ] Phase 25 — Cross-Ticker Portfolio Risk & Delta Hedging
