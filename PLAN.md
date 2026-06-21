@@ -1354,6 +1354,194 @@ A `PortfolioRiskManager` computes:
 
 ---
 
+## Microstructure Research Notes (Palumbo 2026)
+
+*Source: "A Microstructure Perspective on Prediction Markets", Palumbo (2026). NFL Kalshi data, 18 weeks, 135+ games.*
+
+### Core finding: we are underwriting, not market making
+
+Passive liquidity providers on Kalshi accumulate net directional exposure that persists through resolution. LP aggregate profit ≈ $29M but with significant weekly drawdowns. The return profile resembles underwriting (outcome-dependent risk), not classical bid-ask spread capture (inventory-neutral intermediation).
+
+**Why:** Event contracts have no underlying spot asset → no mechanical hedge exists. Contracts are created dynamically through limit order matching (not pre-existing issuance), so LPs cannot recycle supply — they originate it.
+
+### Terminal exposure decomposition
+
+```
+Terminal Asset/Liability = C_a + C_b + E_win
+
+C_a   = net cashflow on Team A contracts  (spread capture leg A)
+C_b   = net cashflow on Team B contracts  (spread capture leg B)
+E_win = net passive contracts on the realized winning outcome  (directional exposure)
+```
+
+A neutral intermediary would have E_win ≈ 0. Empirically, E_win dominates — LPs end up long the winner in most games. **This is the risk term we actually hold.**
+
+### Regression: what drives terminal exposure (R² = 0.59)
+
+| Variable | Asset coeff | Liability coeff | Interpretation |
+|---|---|---|---|
+| `log(winning_trade_volume)` | +1.02*** | +1.14*** | More volume → bigger exposure either way |
+| `log(winner_to_loser_volume_ratio)` | **-3.13***  | **+2.63***  | Flow imbalance is the dominant driver |
+| `avg_winner_price` | +3.58*** | -5.89*** | Pricing discipline: high prices protect assets, hurt liabilities |
+
+Flow imbalance (`winner_to_loser_volume_ratio`) is the single largest predictor. Fill rate alone (what `AdverseSelectionGuard` tracks today) is insufficient — we need volume-side imbalance.
+
+### Architectural implications
+
+These findings drive three additions beyond Phases 21–25:
+
+#### Phase 26 — Flow Imbalance Signal
+
+**Problem:** `AdverseSelectionGuard` only tracks fill *rate* (fills per unit time). It does not distinguish whether fills are concentrated on one side (adverse) or balanced (noise). Palumbo shows side imbalance is the dominant predictor of terminal exposure.
+
+**Design:**
+
+```cpp
+class FlowImbalanceGuard {
+public:
+  // Call on every fill (passive execution)
+  void record_fill(const std::string &ticker, Side side, int quantity,
+                   TimePoint tp = Clock::now());
+
+  // Returns ratio in (0, ∞): 1.0 = balanced, >2.0 = heavily one-sided
+  [[nodiscard]] double imbalance_ratio(const std::string &ticker) const;
+
+  // True when imbalance exceeds threshold — caller should widen spread
+  [[nodiscard]] bool is_imbalanced(const std::string &ticker) const;
+
+  void reset(const std::string &ticker);
+};
+```
+
+`Quoter::update()` calls `is_imbalanced()` and adds an extra `imbalance_spread_cents` on top of `target_spread_cents` when triggered. `imbalance_spread_cents` is a `QuoterConfig` field.
+
+```mermaid
+graph TD
+    F[Fill event] --> FIG[FlowImbalanceGuard]
+    FIG -->|imbalance_ratio| Q[Quoter::update]
+    Q -->|widen spread| Bid[refresh_bid]
+    Q -->|widen spread| Ask[refresh_ask]
+    style FIG fill:#6af,color:#000
+    style Q fill:#555,color:#fff
+    style Bid fill:#555,color:#fff
+    style Ask fill:#555,color:#fff
+```
+
+**Files:** `source/flow_imbalance.hpp`, `source/flow_imbalance.cpp`, `test/source/flow_imbalance_test.cpp`
+
+#### Phase 27 — Minimum Spread Floor & E_win Tracking
+
+**Minimum spread floor:** Add `min_spread_cents` to `QuoterConfig`. In `Quoter::compute_quotes()`, enforce:
+```cpp
+half_spread = std::max({kHalfSpreadMin, config_.target_spread_cents / 2,
+                        config_.min_spread_cents / 2});
+```
+This prevents race-to-zero spread compression in illiquid markets. Default: `min_spread_cents = 2`.
+
+**E_win tracking:** Add a decomposition struct to `OrderManager`:
+
+```cpp
+struct ExposureDecomposition {
+  double c_a_cents{};   // net cashflow on Yes contracts (spread capture)
+  double c_b_cents{};   // net cashflow on No contracts  (spread capture)
+  double e_win_cents{}; // net passive contracts on winning outcome (directional)
+};
+[[nodiscard]] ExposureDecomposition exposure(const std::string &ticker) const;
+```
+
+`e_win_cents` is updated at resolution via `on_settlement(ticker, winning_side)`. This makes the underwriting component visible in logs and feeds the `kPortfolioVaR` kill switch in Phase 25.
+
+**Files:** `QuoterConfig` update in `config.hpp`, `ExposureDecomposition` in `order_manager.hpp`
+
+#### Phase 28 — View-Based Pricing (Replace HeuristicModel)
+
+**Problem:** `HeuristicModel` tracks mid price and applies a small time-decay + inventory skew. This gives zero pricing edge. The paper shows LPs accumulate E_win exposure — if our fair value equals the market's fair value, we are purely underwriting at consensus price with no ability to select advantageous inventory.
+
+**Design:** Replace or extend `HeuristicModel` with a `ViewBasedModel` that takes an exogenous probability estimate (e.g., from a sports model, prediction market aggregator, or ML signal) and adjusts quotes toward that view rather than tracking mid. Interface unchanged — `ViewBasedModel` implements `IPricingModel`.
+
+```cpp
+class ViewBasedModel : public IPricingModel {
+public:
+  explicit ViewBasedModel(double view_probability); // 0.0–1.0
+  void update_view(double new_probability);
+  [[nodiscard]] double estimate(const FairValueInput &input) const override;
+private:
+  double view_probability_; // exogenous prior
+};
+```
+
+`FairValueEngine` accepts any `IPricingModel`, so swapping in `ViewBasedModel` requires no changes to `Quoter`.
+
+**Files:** `source/pricing_model.hpp/cpp` extension, `test/source/view_based_model_test.cpp`
+
+---
+
+## Empirical Evidence (Bürgi, Deng, Whelan 2026)
+
+*Source: "Makers or Takers: The Economics of the Kalshi Prediction Market", GWU Working Paper 2026-001. Transaction-level data, 46,282 Yes contracts, 313,972 total prices, 2021–April 2025.*
+
+### Core findings
+
+**Favorite-Longshot Bias (FLB)** — present across all market categories, all years, all volume quintiles:
+
+| Price range | Avg return (all traders) |
+|---|---|
+| 1–10c (longshots) | **-60%+** (massive underperformance) |
+| 11–49c | Improving, but still negative |
+| 50–99c | Small positive return |
+| All contracts average | **-20%** pre-fee |
+
+**Maker vs Taker returns** (post-fee):
+
+| Role | Avg return |
+|---|---|
+| Makers | **-9.64%** (no fee pre-April 2025) |
+| Takers | **-31.46%** (pay γP(1-P) fee) |
+| Makers ≥50c | **+2.6%** (statistically significant) |
+
+Two-thirds of all trades occur at <10c or >90c, so the average is dragged by deep longshot losses.
+
+**Post-April 2025 fee change**: Kalshi now charges Makers too. The calibrated parameters below assume pre-April 2025 Taker-only fees. Maker profitability on ≥50c contracts likely somewhat reduced.
+
+### Microstructure model (calibrated)
+
+Agents sort by belief π into 5 groups from very pessimistic (Take No) to very optimistic (Take Yes), with Makers in the middle accepting execution risk for a better price. Takers have more extreme beliefs and are willing to pay up for certainty.
+
+**Best-fit parameters:**
+- **β = 0.09** — probability overweighting (agents shift beliefs ~9% toward 50%)
+- **θ = 0.60** — Maker match rate
+- **σ = 0.107** — belief dispersion
+
+β is tightly identified (range 0.06–0.12 across all good-fitting parameter combinations). Without β>0, the model cannot reproduce FLB for Makers — it would predict Maker returns highest for *cheap* contracts (opposite of data).
+
+### Debiasing formula for ViewBasedModel (Phase 28)
+
+Belief bias model: µ(π*) = π* + β(0.5 - π*)
+
+If the observed market price P ≈ mean belief µ, the debiased true probability is:
+
+```
+π* = (P - β×0.5) / (1 - β) = (P - 0.045) / 0.91
+```
+
+Examples (with β=0.09):
+- Market at 5c  → true prob ≈ 0.5%  (market massively overpricing longshot)
+- Market at 20c → true prob ≈ 17%
+- Market at 50c → true prob ≈ 50%   (unbiased at midpoint)
+- Market at 80c → true prob ≈ 83%
+- Market at 95c → true prob ≈ 99.5% (market underpricing heavy favorite)
+
+`ViewBasedModel::estimate()` should apply this correction when using market mid as the prior: `debiased_prob = (market_mid_cents/100.0 - 0.045) / 0.91`.
+
+### Design implications
+
+1. **`post_only=true`** already set — correctly positions us as Makers. Keep.
+2. **Price-range filter in Quoter**: Add `min_quote_price_cents` / `max_quote_price_cents` config to skip longshot (<10c) and deep-favorite (>90c) contracts where even Makers lose heavily. Default: quote only 15c–85c range.
+3. **`min_spread_cents`** (Phase 27): The natural equilibrium spread at θ=0.60 is 3–5 cents at mid-range prices. Floor of 3 cents is justified by this calibration.
+4. **Taker fee now charged to Makers**: Post-April 2025, fee = γP(1-P) per contract for both sides (γ exact value TBD). Factor into `RestClient::place_order` cost model when computing expected PnL.
+
+---
+
 ## Dependency Summary
 
 | Library | Purpose | How to add |
@@ -1397,3 +1585,6 @@ A `PortfolioRiskManager` computes:
 - [ ] Phase 23 — Incremental RiskManager Update
 - [ ] Phase 24 — PortfolioModel (No-Arbitrage Consistency)
 - [ ] Phase 25 — Cross-Ticker Portfolio Risk & Delta Hedging
+- [ ] Phase 26 — Flow Imbalance Signal (FlowImbalanceGuard)
+- [ ] Phase 27 — Minimum Spread Floor & E_win Tracking
+- [ ] Phase 28 — View-Based Pricing Model
