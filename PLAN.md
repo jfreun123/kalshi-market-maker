@@ -298,15 +298,17 @@ Cron entry (checks every 5 minutes):
 
 ---
 
-## Deferred — Scaling (revisit when >5 tickers)
+## Deferred — Scaling (revisit after consistent profit on ≤5 tickers)
 
-| Phase | Component |
-|---|---|
-| 21 | Async HTTP Order Dispatch |
-| 22 | Per-Series WS + Thread-per-Series Dispatch |
-| 23 | Incremental RiskManager Update |
-| 24 | PortfolioModel (No-Arbitrage Consistency) |
-| 25 | Cross-Ticker Portfolio Risk & Delta Hedging |
+Scalability is a goal, but the bottlenecks below only matter once pricing is working and generating edge. Expand to these only after the small-ticker setup is demonstrably profitable.
+
+| Phase | Component | Bottleneck it solves |
+|---|---|---|
+| 21 | Async HTTP Order Dispatch | REST blocks reprice at ~5 tickers |
+| 22 | Per-Series WS + Thread-per-Series | Single WS thread serializes all repricing |
+| 23 | Incremental RiskManager Update | O(n) scan on every fill |
+| 24 | PortfolioModel (No-Arbitrage Consistency) | Correlated markets drift apart |
+| 25 | Cross-Ticker Delta Hedging | Unhedged directional exposure across series |
 
 ---
 
@@ -380,7 +382,7 @@ LPs accumulate net directional exposure (`E_win`) that dominates terminal P&L. T
 - [ ] Phase 28 — View-Based Pricing (β=0.09 debiasing)
 - [ ] Phase 30 — Maker Fee Integration
 
-**Deferred (scaling — >5 tickers):**
+**Deferred (scaling — after consistent profit on ≤5 tickers):**
 - [ ] Phase 21 — Async HTTP Order Dispatch
 - [ ] Phase 22 — Per-Series WS + Thread-per-Series Dispatch
 - [ ] Phase 23 — Incremental RiskManager Update
