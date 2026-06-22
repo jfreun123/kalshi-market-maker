@@ -298,9 +298,24 @@ Cron entry (checks every 5 minutes):
 
 ---
 
+## Rate Limiting
+
+Kalshi Basic tier: **200 read tokens/s**, **100 write tokens/s**. Each REST request costs 10 tokens; batch cancels cost **2 tokens** each. Basic tier has no burst (1-second bucket only).
+
+**At ≤5 tickers on slow prediction markets:** safe. A reprice = 1 cancel (2 tokens) + 1 place (10 tokens) × 2 sides = ~24 write tokens. Need >4 reprices/second/ticker to blow the budget — won't happen on event contracts.
+
+**Risk points:**
+- Startup: seeding N orderbooks = N GETs simultaneously. Fine at ≤5.
+- Fast-moving market (e.g. Fed day): if BBO ticks every second, the `reprice_threshold_cents` config is the main protection — don't reprice unless BBO has moved ≥1c. Already implemented.
+- If 429 responses appear: log them, add a per-ticker cooldown timer (skip reprice for 500ms after a 429).
+
+**When scaling beyond Basic:** target the Advanced tier (300/300) or use the `POST /portfolio/orders/batches` endpoint for bulk placement when Phase 21 (async dispatch) is implemented.
+
+---
+
 ## Deferred — Scaling (revisit after consistent profit on ≤5 tickers)
 
-Scalability is a goal, but the bottlenecks below only matter once pricing is working and generating edge. Expand to these only after the small-ticker setup is demonstrably profitable.
+Scalability is a goal, but the bottlenecks below only matter once pricing is working and generating edge. Expand to these only after the small-ticker setup is demonstrably profitable. Long-term, the same architecture can extend to **Polymarket and other prediction market exchanges** — the `IHttpTransport` and `IWebSocket` interfaces are designed for exactly this: swap in a Polymarket REST/WS implementation behind the same interfaces, reuse `OrderManager`, `RiskManager`, and `Quoter` unchanged.
 
 | Phase | Component | Bottleneck it solves |
 |---|---|---|
@@ -309,6 +324,7 @@ Scalability is a goal, but the bottlenecks below only matter once pricing is wor
 | 23 | Incremental RiskManager Update | O(n) scan on every fill |
 | 24 | PortfolioModel (No-Arbitrage Consistency) | Correlated markets drift apart |
 | 25 | Cross-Ticker Delta Hedging | Unhedged directional exposure across series |
+| 26+ | Multi-Exchange Support (Polymarket, etc.) | New exchange adapters behind existing interfaces |
 
 ---
 
