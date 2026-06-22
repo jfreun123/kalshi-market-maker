@@ -67,7 +67,7 @@ graph TD
 | 19 | Paper Trading Mode | `--paper` flag |
 | 20 | Documentation | `docs/`, `docs/adr/` |
 
-197 tests passing. Build clean.
+216 tests passing. Build clean.
 
 ---
 
@@ -391,7 +391,7 @@ LPs accumulate net directional exposure (`E_win`) that dominates terminal P&L. T
 - [ ] UAT Blocker — verify live REST/WS field shapes against demo account
 - [ ] Pre-live fixes — logging, WS staleness, cancel-on-disconnect, PnL persistence
 - [ ] Phase 32 — Operational hardening (systemd, logrotate, Telegram alert script)
-- [ ] Phase 31 — Ticker Scanner
+- [x] Phase 31 — Ticker Scanner
 - [ ] Phase 29 — Price-Range Gate
 - [ ] Phase 27 — Spread Floor & E_win Tracking
 - [ ] Phase 26 — Flow Imbalance Signal

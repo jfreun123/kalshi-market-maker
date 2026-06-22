@@ -67,7 +67,12 @@ struct Fill {
 struct Market {
   std::string ticker;
   std::string title;
+  std::string category;
+  std::string status;
   int fee_rate_bps{0};
+  int yes_bid_cents{0};
+  int yes_ask_cents{0};
+  double volume_usd{0.0};
   std::chrono::system_clock::time_point close_time;
 };
 

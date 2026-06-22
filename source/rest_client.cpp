@@ -121,11 +121,20 @@ OrderType parse_order_type(const std::string &type_str) {
 // --- JSON struct parsers ---
 
 Market parse_market(const nlohmann::json &market_json) {
+  const int yes_bid = parse_dollars_to_cents(
+      market_json.value("yes_bid_dollars", std::string{"0.0000"}));
+  const int yes_ask = parse_dollars_to_cents(
+      market_json.value("yes_ask_dollars", std::string{"0.0000"}));
   return Market{
       .ticker = market_json.at("ticker").get<std::string>(),
       .title = market_json.value("title", std::string{}),
+      .category = market_json.value("category", std::string{}),
+      .status = market_json.value("status", std::string{}),
       // fee_rate_bps was removed from the Kalshi API schema; use if present.
       .fee_rate_bps = market_json.value("fee_rate_bps", 0),
+      .yes_bid_cents = yes_bid,
+      .yes_ask_cents = yes_ask,
+      .volume_usd = market_json.value("volume", 0.0),
       .close_time =
           parse_iso8601(market_json.at("close_time").get<std::string>()),
   };

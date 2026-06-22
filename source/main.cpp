@@ -8,6 +8,7 @@
 #include "quoter.hpp"
 #include "rest_client.hpp"
 #include "risk_manager.hpp"
+#include "ticker_scanner.hpp"
 #include "websocket_client.hpp"
 
 #include <nlohmann/json.hpp>
@@ -112,6 +113,30 @@ log_status_snapshot(const std::vector<std::string> &tickers,
   }
 }
 
+// ---- Scanner mode ----
+
+static int run_scan_mode(kalshi::RestClient &rest,
+                         std::shared_ptr<spdlog::logger> &log) {
+  constexpr int kScanTopN = 20;
+  log->info("scanner mode — scanning active markets");
+  kalshi::TickerScanner scanner{rest};
+  const auto results = scanner.scan(kScanTopN);
+  if (results.empty()) {
+    log->warn("no markets passed scanner filters");
+    return 0;
+  }
+  log->info("scanner results (top {}):", results.size());
+  for (std::size_t rank = 0U; rank < results.size(); ++rank) {
+    const auto &market = results[rank];
+    log->info("  {:>2}. ticker={} mid={}c spread={}c vol=${:.0f} days={:.1f} "
+              "score={:.3f} cat={} \"{}\"",
+              rank + 1U, market.ticker, market.mid_price_cents,
+              market.spread_cents, market.volume_usd, market.days_to_close,
+              market.score, market.category, market.title);
+  }
+  return 0;
+}
+
 // ---- PnL persistence ----
 
 static std::unordered_map<std::string, double>
@@ -144,24 +169,39 @@ static void save_pnl(const std::filesystem::path &path,
   }
 }
 
+// ---- Arg parsing ----
+
+struct CliArgs {
+  bool paper_mode{false};
+  bool scan_mode{false};
+  std::filesystem::path config_path{"config.json"};
+};
+
+static CliArgs parse_args(std::span<char *> args) {
+  CliArgs result;
+  for (std::size_t idx = 1U; idx < args.size(); ++idx) {
+    const std::string_view arg{args[idx]};
+    if (arg == "--paper") {
+      result.paper_mode = true;
+    } else if (arg == "--scan") {
+      result.scan_mode = true;
+    } else {
+      result.config_path = std::filesystem::path{args[idx]};
+    }
+  }
+  return result;
+}
+
 // ---- Entry point ----
 
 int main(int argc, char *argv[]) {
   try {
-    const auto args = std::span<char *>(argv, static_cast<std::size_t>(argc));
+    const auto cli =
+        parse_args(std::span<char *>(argv, static_cast<std::size_t>(argc)));
+    const bool paper_mode = cli.paper_mode;
+    const bool scan_mode = cli.scan_mode;
 
-    bool paper_mode = false;
-    std::filesystem::path config_path{"config.json"};
-    for (std::size_t idx = 1U; idx < static_cast<std::size_t>(argc); ++idx) {
-      const std::string_view arg{args[idx]};
-      if (arg == "--paper") {
-        paper_mode = true;
-      } else {
-        config_path = std::filesystem::path{args[idx]};
-      }
-    }
-
-    const kalshi::AppConfig app_config = kalshi::load_config(config_path);
+    const kalshi::AppConfig app_config = kalshi::load_config(cli.config_path);
 
     setup_logger(std::filesystem::path{app_config.log_dir});
     auto log = kalshi::get_logger();
@@ -197,6 +237,11 @@ int main(int argc, char *argv[]) {
 
     kalshi::RestClient rest{auth, std::move(http_transport),
                             app_config.base_url};
+
+    if (scan_mode) {
+      return run_scan_mode(rest, log);
+    }
+
     kalshi::WebSocketClient ws_client{
         auth, std::make_unique<kalshi::IxWebSocket>(), app_config.ws_url};
 
