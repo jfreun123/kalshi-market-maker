@@ -119,6 +119,7 @@ static int run_scan_mode(kalshi::RestClient &rest,
                          std::shared_ptr<spdlog::logger> &log) {
   constexpr int kScanTopN = 20;
   log->info("scanner mode — scanning active markets");
+
   kalshi::TickerScanner scanner{rest};
   const auto results = scanner.scan(kScanTopN);
   if (results.empty()) {
