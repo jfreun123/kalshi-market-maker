@@ -117,22 +117,24 @@ TEST(ConfigTest, ThrowsOnMissingPrivateKeyPath) {
   std::filesystem::remove(path);
 }
 
-TEST(ConfigTest, ThrowsOnMissingTargetTickers) {
+TEST(ConfigTest, MissingTargetTickersFieldDefaultsToEmpty) {
   const nlohmann::json config_json = {{"api_key", "key"},
                                       {"private_key_path", "/key.pem"}};
   const auto path = write_temp_config(config_json);
-  EXPECT_THROW(kalshi::load_config(path), std::runtime_error);
+  const auto config = kalshi::load_config(path);
   std::filesystem::remove(path);
+  EXPECT_TRUE(config.target_tickers.empty());
 }
 
-TEST(ConfigTest, ThrowsOnEmptyTargetTickers) {
+TEST(ConfigTest, EmptyTargetTickersLoadsSuccessfully) {
   const nlohmann::json config_json = {
       {"api_key", "key"},
       {"private_key_path", "/key.pem"},
       {"target_tickers", nlohmann::json::array()}};
   const auto path = write_temp_config(config_json);
-  EXPECT_THROW(kalshi::load_config(path), std::runtime_error);
+  const auto config = kalshi::load_config(path);
   std::filesystem::remove(path);
+  EXPECT_TRUE(config.target_tickers.empty());
 }
 
 TEST(ConfigTest, ThrowsOnNonexistentFile) {

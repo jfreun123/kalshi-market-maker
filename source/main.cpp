@@ -242,6 +242,12 @@ int main(int argc, char *argv[]) {
       return run_scan_mode(rest, log);
     }
 
+    if (app_config.target_tickers.empty()) {
+      log->critical(
+          "target_tickers is empty — add tickers to config or use --scan");
+      return 1;
+    }
+
     kalshi::WebSocketClient ws_client{
         auth, std::make_unique<kalshi::IxWebSocket>(), app_config.ws_url};
 

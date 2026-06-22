@@ -40,11 +40,7 @@ AppConfig load_config(const std::filesystem::path &path) {
   config.ws_url = json_data.value("ws_url", std::string{kDefaultWsUrl});
   config.log_dir = json_data.value("log_dir", std::string{"logs"});
   config.target_tickers =
-      require_field<std::vector<std::string>>(json_data, "target_tickers");
-
-  if (config.target_tickers.empty()) {
-    throw std::runtime_error{"Config 'target_tickers' must not be empty"};
-  }
+      json_data.value("target_tickers", std::vector<std::string>{});
 
   if (json_data.contains("quoter")) {
     const auto &quoter_json = json_data.at("quoter");
