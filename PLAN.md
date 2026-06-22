@@ -203,6 +203,101 @@ After April 2025, Kalshi charges Makers. Confirm γ_maker from current fee sched
 
 ---
 
+## Pre-Live Fixes (before first real-money session)
+
+### Code gaps
+
+| Gap | Fix |
+|---|---|
+| `main.cpp` has no log calls — process runs blind | Add spdlog calls: every fill, every quote update, every risk state change |
+| WS thread can silently stall (no data, no disconnect) | Track `last_ws_message_time`; set `kStaleBook` if > 30s; log at `critical` |
+| Cancel-all not triggered on WS disconnect | Wire `on_disconnect` callback to `order_mgr.cancel_all()` per ticker |
+| Daily loss limit resets on restart (in-memory only) | Write realized PnL to a small JSON file on every fill; read it back on startup |
+
+### Missing tests
+
+| Gap | Fix |
+|---|---|
+| No contract tests against real API responses | Record one real UAT session; save orderbook + fill JSON to `test/fixtures/`; add parser assertion tests |
+| No integration tests written (framework exists) | Add `GET /markets` + `GET /orderbook` integration tests in `test/integration/` |
+| Replay fixture is hand-crafted, not from live Kalshi | Replace `session_synthetic.jsonl` with a recorded real session after first UAT run |
+
+### Operational hardening (Phase 32)
+
+Deploy as a `systemd` service with auto-restart, add WS staleness detection, persist PnL across restarts.
+
+**`/etc/systemd/system/kalshi-mm.service`:**
+```ini
+[Unit]
+Description=Kalshi Market Maker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/path/to/kalshi-mm /path/to/config.json
+Restart=on-failure
+RestartSec=10s
+StandardOutput=append:/var/log/kalshi-mm/app.log
+StandardError=append:/var/log/kalshi-mm/app.log
+
+[Install]
+WantedBy=multi-user.target
+```
+
+**`/etc/logrotate.d/kalshi-mm`:**
+```
+/var/log/kalshi-mm/app.log {
+    daily
+    rotate 14
+    compress
+    missingok
+    notifempty
+}
+```
+
+**Files:** `main.cpp` (logging + staleness watchdog + disconnect handler), `source/order_manager.cpp` (PnL persistence), `scripts/install-service.sh`
+
+---
+
+## Monitoring (24/7)
+
+### Minimum viable stack
+
+| Layer | Tool | What it catches |
+|---|---|---|
+| Process watchdog | systemd `Restart=on-failure` | Crash / OOM |
+| Log alerting | cron script → Telegram/email | `[critical]` log lines (risk halt, stale WS) |
+| Stale WS detection | `kStaleBook` constraint (in-process) | Silent WS hang |
+| Position snapshot | Log net position per ticker every 60s | Inventory drift |
+| Daily loss persistence | PnL JSON file | Loss limit surviving restarts |
+
+### Alert triggers to implement
+
+1. **Process not running** — external cron, every 5 minutes, checks `systemctl is-active kalshi-mm`
+2. **Risk halt** — any `is_halted()` logs at `critical` level; alert on that pattern
+3. **WS silent > 30s** — sets `kStaleBook`, logs at `critical`
+4. **Position > 80% of limit** — log at `warn` so you can intervene before halt
+
+### Telegram alert script (simplest path to mobile push)
+
+```python
+#!/usr/bin/env python3
+# scripts/alert.py — called by cron or log monitor
+import subprocess, requests, sys
+BOT_TOKEN = "..."
+CHAT_ID   = "..."
+msg = sys.argv[1] if len(sys.argv) > 1 else "kalshi-mm alert"
+requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+              json={"chat_id": CHAT_ID, "text": msg})
+```
+
+Cron entry (checks every 5 minutes):
+```cron
+*/5 * * * * systemctl is-active --quiet kalshi-mm || python3 /path/scripts/alert.py "kalshi-mm is DOWN"
+```
+
+---
+
 ## Deferred — Scaling (revisit when >5 tickers)
 
 | Phase | Component |
@@ -276,6 +371,8 @@ LPs accumulate net directional exposure (`E_win`) that dominates terminal P&L. T
 
 **Immediate (pricing quality, small ticker set):**
 - [ ] UAT Blocker — verify live REST/WS field shapes against demo account
+- [ ] Pre-live fixes — logging, WS staleness, cancel-on-disconnect, PnL persistence
+- [ ] Phase 32 — Operational hardening (systemd, logrotate, Telegram alert script)
 - [ ] Phase 31 — Ticker Scanner
 - [ ] Phase 29 — Price-Range Gate
 - [ ] Phase 27 — Spread Floor & E_win Tracking
