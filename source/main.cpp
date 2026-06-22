@@ -58,9 +58,61 @@ static void setup_logger(const std::filesystem::path &log_dir) {
   kalshi::set_logger(logger);
 }
 
-// ---- PnL persistence ----
+// ---- Helpers ----
 
 static constexpr double kCentsPerDollar = 100.0;
+
+static const char *side_name(kalshi::Side side) {
+  return side == kalshi::Side::Yes ? "yes" : "no";
+}
+
+static double
+prior_pnl_for(const std::unordered_map<std::string, double> &prior_pnl,
+              const std::string &ticker) {
+  return prior_pnl.contains(ticker) ? prior_pnl.at(ticker) : 0.0;
+}
+
+static void check_ws_staleness(const kalshi::WebSocketClient &ws_client,
+                               kalshi::RiskManager &risk_mgr,
+                               std::shared_ptr<spdlog::logger> &log,
+                               bool &stale_logged) {
+  constexpr auto kStalenessThreshold = std::chrono::seconds{30};
+  const auto since_last =
+      std::chrono::steady_clock::now() - ws_client.last_message_time();
+  if (since_last > kStalenessThreshold) {
+    risk_mgr.set(kalshi::Constraint::kStaleBook);
+    if (!stale_logged) {
+      log->critical(
+          "ws stale — no message in {}s, quoter halted",
+          std::chrono::duration_cast<std::chrono::seconds>(since_last).count());
+      stale_logged = true;
+    }
+  } else if (risk_mgr.is_set(kalshi::Constraint::kStaleBook)) {
+    risk_mgr.clear(kalshi::Constraint::kStaleBook);
+    stale_logged = false;
+    log->info("ws recovered — stale constraint cleared");
+  }
+}
+
+static void
+log_status_snapshot(const std::vector<std::string> &tickers,
+                    const kalshi::OrderManager &order_mgr,
+                    const kalshi::RiskManager &risk_mgr,
+                    const std::unordered_map<std::string, double> &prior_pnl,
+                    std::shared_ptr<spdlog::logger> &log) {
+  for (const auto &ticker : tickers) {
+    const int pos = order_mgr.net_position(ticker);
+    const double session_pnl = order_mgr.realized_pnl(ticker);
+    const double prior = prior_pnl_for(prior_pnl, ticker);
+    log->info("status ticker={} net_pos={} session_pnl_dollars={:.2f} "
+              "total_pnl_dollars={:.2f} halted={} constraints={}",
+              ticker, pos, session_pnl / kCentsPerDollar,
+              (prior + session_pnl) / kCentsPerDollar, risk_mgr.is_halted(),
+              risk_mgr.active_constraints());
+  }
+}
+
+// ---- PnL persistence ----
 
 static std::unordered_map<std::string, double>
 load_pnl(const std::filesystem::path &path) {
@@ -182,11 +234,10 @@ int main(int argc, char *argv[]) {
                                   &log](const std::string &ticker,
                                         kalshi::Side side, int price, int qty) {
       ob_map[ticker].apply_delta(side, price, qty);
-      const double mid = ob_map[ticker].mid_price_cents();
-      const int spread = ob_map[ticker].spread_cents();
       log->debug("delta ticker={} side={} price={} qty={} mid={:.1f} spread={}",
-                 ticker, side == kalshi::Side::Yes ? "yes" : "no", price, qty,
-                 mid, spread);
+                 ticker, side_name(side), price, qty,
+                 ob_map[ticker].mid_price_cents(),
+                 ob_map[ticker].spread_cents());
       quoter.update(ticker, ob_map[ticker]);
     });
 
@@ -196,15 +247,12 @@ int main(int argc, char *argv[]) {
       risk_mgr.update(order_mgr, app_config.target_tickers);
 
       const double session_pnl = order_mgr.realized_pnl(fill.market_ticker);
-      const double prior = prior_pnl.count(fill.market_ticker) != 0U
-                               ? prior_pnl.at(fill.market_ticker)
-                               : 0.0;
-      const double total_pnl = prior + session_pnl;
+      const double total_pnl =
+          prior_pnl_for(prior_pnl, fill.market_ticker) + session_pnl;
 
       log->info("fill ticker={} side={} price={} qty={} is_taker={} "
-                "session_pnl_dollars={:.2f} total_pnl_dollars={:.2f}",
-                fill.market_ticker,
-                fill.side == kalshi::Side::Yes ? "yes" : "no", fill.price_cents,
+                "session_pnl=${:.2f} total_pnl=${:.2f}",
+                fill.market_ticker, side_name(fill.side), fill.price_cents,
                 fill.quantity, fill.is_taker, session_pnl / kCentsPerDollar,
                 total_pnl / kCentsPerDollar);
 
@@ -213,7 +261,6 @@ int main(int argc, char *argv[]) {
                       risk_mgr.active_constraints());
       }
 
-      // Persist total PnL so it survives a restart.
       prior_pnl[fill.market_ticker] = total_pnl;
       save_pnl(pnl_path, prior_pnl);
     });
@@ -233,7 +280,6 @@ int main(int argc, char *argv[]) {
     // ---- Main poll loop ----
 
     constexpr auto kPollInterval = std::chrono::milliseconds{100};
-    constexpr auto kStalenessThreshold = std::chrono::seconds{30};
     constexpr int kPositionLogInterval = 600;    // 600 × 100ms = 60s
     constexpr int kStalenessCheckInterval = 300; // 300 × 100ms = 30s
 
@@ -244,39 +290,12 @@ int main(int argc, char *argv[]) {
       std::this_thread::sleep_for(kPollInterval);
       ++poll_count;
 
-      // Staleness check every 30s.
       if (poll_count % kStalenessCheckInterval == 0) {
-        const auto since_last =
-            std::chrono::steady_clock::now() - ws_client.last_message_time();
-        if (since_last > kStalenessThreshold) {
-          risk_mgr.set(kalshi::Constraint::kStaleBook);
-          if (!stale_logged) {
-            log->critical(
-                "ws stale — no message in {}s, quoter halted",
-                std::chrono::duration_cast<std::chrono::seconds>(since_last)
-                    .count());
-            stale_logged = true;
-          }
-        } else if (risk_mgr.is_set(kalshi::Constraint::kStaleBook)) {
-          risk_mgr.clear(kalshi::Constraint::kStaleBook);
-          stale_logged = false;
-          log->info("ws recovered — stale constraint cleared");
-        }
+        check_ws_staleness(ws_client, risk_mgr, log, stale_logged);
       }
-
-      // Position snapshot every 60s.
       if (poll_count % kPositionLogInterval == 0) {
-        for (const auto &ticker : app_config.target_tickers) {
-          const int pos = order_mgr.net_position(ticker);
-          const double session_pnl = order_mgr.realized_pnl(ticker);
-          const double prior =
-              prior_pnl.count(ticker) != 0U ? prior_pnl.at(ticker) : 0.0;
-          log->info("status ticker={} net_pos={} session_pnl_dollars={:.2f} "
-                    "total_pnl_dollars={:.2f} halted={} constraints={}",
-                    ticker, pos, session_pnl / kCentsPerDollar,
-                    (prior + session_pnl) / kCentsPerDollar,
-                    risk_mgr.is_halted(), risk_mgr.active_constraints());
-        }
+        log_status_snapshot(app_config.target_tickers, order_mgr, risk_mgr,
+                            prior_pnl, log);
       }
     }
 

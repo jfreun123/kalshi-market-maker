@@ -23,5 +23,7 @@ compile_commands.json
 docs/html/
 docs/Doxyfile.configured
 
-# Local config with real API keys — never commit
+# Local config and secrets — never commit
 config.json
+pnl_state.json
+*.pem

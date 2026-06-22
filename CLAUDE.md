@@ -30,6 +30,18 @@ On a fresh clone, install the hook once: `bash scripts/install-hooks.sh`
 
 Only suppress a clang-tidy warning (`// NOLINT(check-name)`) when you have a specific, documented reason it doesn't apply. "It's test code" is not a reason.
 
+## Secrets — Never Commit
+
+**NEVER write secrets to git or GitHub under any circumstances.** This includes:
+- API keys, key IDs, tokens, passwords
+- RSA private keys (`.pem` files or inline PEM strings)
+- `config.json` (contains live credentials)
+- `pnl_state.json` (contains financial state)
+
+These are covered by `.gitignore`. If you are ever unsure whether a file contains a secret, do not add it to a commit. If a secret is accidentally committed, treat it as compromised immediately and rotate it.
+
+Secrets live outside the repo at `/home/jfreun1/kalshi-demo-private-key.pem` (demo) and are referenced by path in `config.json` (gitignored).
+
 ## Commits
 
 - Commit small and often — after each test passes, after each phase completes, after any clean refactor.
