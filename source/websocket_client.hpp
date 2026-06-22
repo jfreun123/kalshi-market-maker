@@ -3,6 +3,7 @@
 #include "auth.hpp"
 #include "types.hpp"
 
+#include <atomic>
 #include <chrono>
 #include <functional>
 #include <map>
@@ -84,6 +85,7 @@ public:
   using DeltaCallback =
       std::function<void(const std::string &ticker, Side, int price, int qty)>;
   using FillCallback = std::function<void(const Fill &)>;
+  using DisconnectCallback = std::function<void()>;
 
   // max_reconnects: number of reconnect attempts after the first disconnect.
   //   -1 = unlimited (production default).
@@ -100,6 +102,11 @@ public:
   void on_orderbook_snapshot(SnapshotCallback callback);
   void on_orderbook_delta(DeltaCallback callback);
   void on_fill(FillCallback callback);
+  void on_disconnect(DisconnectCallback callback);
+
+  // Time of the last message received. Initialized to construction time.
+  // Use this to detect a silently stalled connection.
+  [[nodiscard]] std::chrono::steady_clock::time_point last_message_time() const;
 
   // Blocks until stop() is called or max_reconnects exhausted.
   void run();
@@ -126,6 +133,10 @@ private:
   SnapshotCallback snapshot_callback_;
   DeltaCallback delta_callback_;
   FillCallback fill_callback_;
+  DisconnectCallback disconnect_callback_;
+
+  std::atomic<std::chrono::steady_clock::time_point> last_message_time_{
+      std::chrono::steady_clock::now()};
 };
 
 } // namespace kalshi

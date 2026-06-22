@@ -14,6 +14,7 @@ struct AppConfig {
   std::string private_key_path;
   std::string base_url;
   std::string ws_url;
+  std::string log_dir{"logs"};
   std::vector<std::string> target_tickers;
   QuoterConfig quoter;
   RiskLimits risk;

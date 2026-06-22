@@ -38,6 +38,7 @@ AppConfig load_config(const std::filesystem::path &path) {
       require_field<std::string>(json_data, "private_key_path");
   config.base_url = json_data.value("base_url", std::string{kDefaultRestUrl});
   config.ws_url = json_data.value("ws_url", std::string{kDefaultWsUrl});
+  config.log_dir = json_data.value("log_dir", std::string{"logs"});
   config.target_tickers =
       require_field<std::vector<std::string>>(json_data, "target_tickers");
 

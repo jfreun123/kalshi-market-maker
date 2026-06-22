@@ -514,3 +514,32 @@ TEST_F(WebSocketClientTest, ResubscribesAfterReconnect) {
   // 2 connects × (fill sub + market sub) = 4 messages total.
   EXPECT_EQ(ws_raw->sent_messages().size(), kFourMessages);
 }
+
+TEST_F(WebSocketClientTest, DisconnectCallbackFiredOnDisconnect) {
+  auto fake_ws = std::make_unique<kalshi::FakeWebSocket>();
+  kalshi::FakeWebSocket *ws_raw = fake_ws.get();
+  ws_raw->trigger_disconnect();
+
+  auto client = make_client(std::move(fake_ws));
+  int disconnect_count = 0;
+  client.on_disconnect([&disconnect_count]() { ++disconnect_count; });
+  client.run();
+
+  EXPECT_EQ(disconnect_count, 1);
+}
+
+TEST_F(WebSocketClientTest, LastMessageTimeUpdatesOnMessage) {
+  auto fake_ws = std::make_unique<kalshi::FakeWebSocket>();
+  kalshi::FakeWebSocket *ws_raw = fake_ws.get();
+  ws_raw->enqueue_message(snapshot_message(kTestTicker, kYesBidPrice,
+                                           kYesBidQty, kNoBidPrice, kNoBidQty));
+
+  auto client = make_client(std::move(fake_ws));
+  const auto before = std::chrono::steady_clock::now();
+  client.run();
+  const auto after = std::chrono::steady_clock::now();
+
+  const auto last = client.last_message_time();
+  EXPECT_GE(last, before);
+  EXPECT_LE(last, after);
+}

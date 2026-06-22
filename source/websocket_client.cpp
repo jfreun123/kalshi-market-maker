@@ -188,6 +188,15 @@ void WebSocketClient::on_fill(FillCallback callback) {
   fill_callback_ = std::move(callback);
 }
 
+void WebSocketClient::on_disconnect(DisconnectCallback callback) {
+  disconnect_callback_ = std::move(callback);
+}
+
+std::chrono::steady_clock::time_point
+WebSocketClient::last_message_time() const {
+  return last_message_time_.load();
+}
+
 void WebSocketClient::stop() {
   running_ = false;
   ws_->stop();
@@ -224,6 +233,7 @@ void WebSocketClient::handle_connect() {
 }
 
 void WebSocketClient::handle_message(const std::string &raw) {
+  last_message_time_.store(std::chrono::steady_clock::now());
   nlohmann::json parsed;
   try {
     parsed = nlohmann::json::parse(raw);
@@ -297,6 +307,9 @@ void WebSocketClient::run() {
   ws_->on_message([this](const std::string &raw) { handle_message(raw); });
   ws_->on_disconnect([this]() {
     get_logger()->warn("websocket disconnected url={}", ws_url_);
+    if (disconnect_callback_) {
+      disconnect_callback_();
+    }
   });
 
   while (running_) {

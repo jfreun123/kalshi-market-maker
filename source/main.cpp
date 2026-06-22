@@ -1,6 +1,7 @@
 #include "auth.hpp"
 #include "config.hpp"
 #include "http_transport.hpp"
+#include "logger.hpp"
 #include "order_manager.hpp"
 #include "orderbook.hpp"
 #include "paper_transport.hpp"
@@ -8,6 +9,11 @@
 #include "rest_client.hpp"
 #include "risk_manager.hpp"
 #include "websocket_client.hpp"
+
+#include <nlohmann/json.hpp>
+#include <spdlog/sinks/rotating_file_sink.h>
+#include <spdlog/sinks/stdout_color_sinks.h>
+#include <spdlog/spdlog.h>
 
 #include <atomic>
 #include <chrono>
@@ -28,8 +34,63 @@
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::atomic<bool> g_shutdown{false};
 
-// Signal handler: must be a plain C function (no C++ linkage).
 extern "C" void handle_signal(int /*sig*/) { g_shutdown.store(true); }
+
+// ---- Logger setup ----
+
+static void setup_logger(const std::filesystem::path &log_dir) {
+  std::filesystem::create_directories(log_dir);
+  const auto log_path = log_dir / "app.log";
+
+  constexpr std::size_t kMaxLogBytes = 20UL * 1024UL * 1024UL; // 20 MB
+  constexpr std::size_t kMaxLogFiles = 14U;
+
+  auto file_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
+      log_path.string(), kMaxLogBytes, kMaxLogFiles);
+  auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
+
+  auto logger = std::make_shared<spdlog::logger>(
+      "kalshi", spdlog::sinks_init_list{console_sink, file_sink});
+  logger->set_level(spdlog::level::info);
+  logger->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%l] %v");
+  logger->flush_on(spdlog::level::warn);
+
+  kalshi::set_logger(logger);
+}
+
+// ---- PnL persistence ----
+
+static constexpr double kCentsPerDollar = 100.0;
+
+static std::unordered_map<std::string, double>
+load_pnl(const std::filesystem::path &path) {
+  std::unordered_map<std::string, double> result;
+  if (!std::filesystem::exists(path)) {
+    return result;
+  }
+  try {
+    std::ifstream file{path};
+    const auto json = nlohmann::json::parse(file);
+    for (const auto &[ticker, val] : json.items()) {
+      result[ticker] = val.get<double>();
+    }
+  } catch (...) {
+    kalshi::get_logger()->warn("pnl_state: failed to load {}, starting fresh",
+                               path.string());
+  }
+  return result;
+}
+
+static void save_pnl(const std::filesystem::path &path,
+                     const std::unordered_map<std::string, double> &pnl) {
+  try {
+    nlohmann::json json = pnl;
+    std::ofstream file{path};
+    file << json.dump(2);
+  } catch (...) {
+    kalshi::get_logger()->warn("pnl_state: failed to write {}", path.string());
+  }
+}
 
 // ---- Entry point ----
 
@@ -37,41 +98,47 @@ int main(int argc, char *argv[]) {
   try {
     const auto args = std::span<char *>(argv, static_cast<std::size_t>(argc));
 
-    // Parse CLI flags: [--paper] [config_path]
     bool paper_mode = false;
     std::filesystem::path config_path{"config.json"};
-    for (std::size_t arg_index = 1U; arg_index < static_cast<std::size_t>(argc);
-         ++arg_index) {
-      const std::string_view arg{args[arg_index]};
+    for (std::size_t idx = 1U; idx < static_cast<std::size_t>(argc); ++idx) {
+      const std::string_view arg{args[idx]};
       if (arg == "--paper") {
         paper_mode = true;
       } else {
-        config_path = std::filesystem::path{args[arg_index]};
+        config_path = std::filesystem::path{args[idx]};
       }
     }
 
     const kalshi::AppConfig app_config = kalshi::load_config(config_path);
 
-    // Read private key PEM content from the path in config.
+    setup_logger(std::filesystem::path{app_config.log_dir});
+    auto log = kalshi::get_logger();
+
+    log->info("startup mode={} tickers={} base_url={}",
+              paper_mode ? "paper" : "live", app_config.target_tickers.size(),
+              app_config.base_url);
+    for (const auto &ticker : app_config.target_tickers) {
+      log->info("startup ticker={}", ticker);
+    }
+
     std::ifstream key_file{app_config.private_key_path};
     if (!key_file) {
-      std::cerr << "Cannot open private key: " << app_config.private_key_path
-                << '\n';
+      log->critical("cannot open private key path={}",
+                    app_config.private_key_path);
       return 1;
     }
     const std::string private_key_pem{std::istreambuf_iterator<char>{key_file},
                                       std::istreambuf_iterator<char>{}};
 
-    // Build components — paper mode swaps HttpTransport for PaperTransport.
     kalshi::Auth auth{app_config.api_key, private_key_pem};
 
     std::unique_ptr<kalshi::IHttpTransport> http_transport;
-    kalshi::PaperTransport *paper_transport_ptr = nullptr;
+    kalshi::PaperTransport *paper_ptr = nullptr;
     if (paper_mode) {
       auto paper = std::make_unique<kalshi::PaperTransport>();
-      paper_transport_ptr = paper.get();
+      paper_ptr = paper.get();
       http_transport = std::move(paper);
-      std::cout << "[paper] Running in paper-trading mode — no live orders.\n";
+      log->info("paper trading mode — no live orders will be placed");
     } else {
       http_transport = std::make_unique<kalshi::HttpTransport>();
     }
@@ -86,61 +153,150 @@ int main(int argc, char *argv[]) {
     kalshi::RiskManager risk_mgr{app_config.risk};
     kalshi::Quoter quoter{app_config.quoter, order_mgr, risk_mgr};
 
-    // Seed orderbooks from REST so quotes can fire on the first WS delta.
+    // Load prior-session PnL so the daily loss limit accounts for restarts.
+    const std::filesystem::path pnl_path{"pnl_state.json"};
+    auto prior_pnl = load_pnl(pnl_path);
+    for (const auto &[ticker, cents] : prior_pnl) {
+      log->info("pnl_state loaded ticker={} prior_pnl_dollars={:.2f}", ticker,
+                cents / kCentsPerDollar);
+    }
+
+    // Seed orderbooks from REST snapshot before subscribing to WS.
     for (const auto &ticker : app_config.target_tickers) {
+      log->info("seeding orderbook ticker={}", ticker);
       auto snap = rest.get_orderbook(ticker);
       ob_map[ticker].apply_snapshot(snap);
       ws_client.subscribe(ticker);
     }
 
-    // Wire WebSocket callbacks.
-    ws_client.on_orderbook_snapshot([&ob_map](const kalshi::Orderbook &snap) {
-      ob_map[snap.ticker].apply_snapshot(snap);
-    });
+    // ---- Callbacks ----
 
-    ws_client.on_orderbook_delta([&ob_map, &quoter](const std::string &ticker,
-                                                    kalshi::Side side,
-                                                    int price, int qty) {
+    ws_client.on_orderbook_snapshot(
+        [&ob_map, &log](const kalshi::Orderbook &snap) {
+          ob_map[snap.ticker].apply_snapshot(snap);
+          log->debug("snapshot ticker={} yes_levels={} no_levels={}",
+                     snap.ticker, snap.yes.size(), snap.no.size());
+        });
+
+    ws_client.on_orderbook_delta([&ob_map, &quoter,
+                                  &log](const std::string &ticker,
+                                        kalshi::Side side, int price, int qty) {
       ob_map[ticker].apply_delta(side, price, qty);
+      const double mid = ob_map[ticker].mid_price_cents();
+      const int spread = ob_map[ticker].spread_cents();
+      log->debug("delta ticker={} side={} price={} qty={} mid={:.1f} spread={}",
+                 ticker, side == kalshi::Side::Yes ? "yes" : "no", price, qty,
+                 mid, spread);
       quoter.update(ticker, ob_map[ticker]);
     });
 
-    ws_client.on_fill(
-        [&order_mgr, &risk_mgr, &app_config](const kalshi::Fill &fill) {
-          order_mgr.record_fill(fill);
-          risk_mgr.update(order_mgr, app_config.target_tickers);
-        });
+    ws_client.on_fill([&order_mgr, &risk_mgr, &app_config, &prior_pnl,
+                       &pnl_path, &log](const kalshi::Fill &fill) {
+      order_mgr.record_fill(fill);
+      risk_mgr.update(order_mgr, app_config.target_tickers);
 
-    // Register signal handlers then start WS in a background thread.
+      const double session_pnl = order_mgr.realized_pnl(fill.market_ticker);
+      const double prior = prior_pnl.count(fill.market_ticker) != 0U
+                               ? prior_pnl.at(fill.market_ticker)
+                               : 0.0;
+      const double total_pnl = prior + session_pnl;
+
+      log->info("fill ticker={} side={} price={} qty={} is_taker={} "
+                "session_pnl_dollars={:.2f} total_pnl_dollars={:.2f}",
+                fill.market_ticker,
+                fill.side == kalshi::Side::Yes ? "yes" : "no", fill.price_cents,
+                fill.quantity, fill.is_taker, session_pnl / kCentsPerDollar,
+                total_pnl / kCentsPerDollar);
+
+      if (risk_mgr.is_halted()) {
+        log->critical("risk halted constraints={}",
+                      risk_mgr.active_constraints());
+      }
+
+      // Persist total PnL so it survives a restart.
+      prior_pnl[fill.market_ticker] = total_pnl;
+      save_pnl(pnl_path, prior_pnl);
+    });
+
+    ws_client.on_disconnect([&order_mgr, &app_config, &log]() {
+      log->warn("ws disconnected — cancelling all open orders");
+      for (const auto &ticker : app_config.target_tickers) {
+        order_mgr.cancel_all(ticker);
+      }
+    });
+
     std::signal(SIGINT, handle_signal);
     std::signal(SIGTERM, handle_signal);
 
     std::thread ws_thread([&ws_client]() { ws_client.run(); });
 
-    // Main thread polls the shutdown flag.
-    constexpr auto kShutdownPollInterval = std::chrono::milliseconds{100};
+    // ---- Main poll loop ----
+
+    constexpr auto kPollInterval = std::chrono::milliseconds{100};
+    constexpr auto kStalenessThreshold = std::chrono::seconds{30};
+    constexpr int kPositionLogInterval = 600;    // 600 × 100ms = 60s
+    constexpr int kStalenessCheckInterval = 300; // 300 × 100ms = 30s
+
+    int poll_count = 0;
+    bool stale_logged = false;
+
     while (!g_shutdown.load()) {
-      std::this_thread::sleep_for(kShutdownPollInterval);
+      std::this_thread::sleep_for(kPollInterval);
+      ++poll_count;
+
+      // Staleness check every 30s.
+      if (poll_count % kStalenessCheckInterval == 0) {
+        const auto since_last =
+            std::chrono::steady_clock::now() - ws_client.last_message_time();
+        if (since_last > kStalenessThreshold) {
+          risk_mgr.set(kalshi::Constraint::kStaleBook);
+          if (!stale_logged) {
+            log->critical(
+                "ws stale — no message in {}s, quoter halted",
+                std::chrono::duration_cast<std::chrono::seconds>(since_last)
+                    .count());
+            stale_logged = true;
+          }
+        } else if (risk_mgr.is_set(kalshi::Constraint::kStaleBook)) {
+          risk_mgr.clear(kalshi::Constraint::kStaleBook);
+          stale_logged = false;
+          log->info("ws recovered — stale constraint cleared");
+        }
+      }
+
+      // Position snapshot every 60s.
+      if (poll_count % kPositionLogInterval == 0) {
+        for (const auto &ticker : app_config.target_tickers) {
+          const int pos = order_mgr.net_position(ticker);
+          const double session_pnl = order_mgr.realized_pnl(ticker);
+          const double prior =
+              prior_pnl.count(ticker) != 0U ? prior_pnl.at(ticker) : 0.0;
+          log->info("status ticker={} net_pos={} session_pnl_dollars={:.2f} "
+                    "total_pnl_dollars={:.2f} halted={} constraints={}",
+                    ticker, pos, session_pnl / kCentsPerDollar,
+                    (prior + session_pnl) / kCentsPerDollar,
+                    risk_mgr.is_halted(), risk_mgr.active_constraints());
+        }
+      }
     }
 
+    log->info("shutdown signal received — stopping");
     ws_client.stop();
     ws_thread.join();
 
-    // Cancel all open orders before exiting.
     for (const auto &ticker : app_config.target_tickers) {
       order_mgr.cancel_all(ticker);
     }
 
-    if (paper_mode && paper_transport_ptr != nullptr) {
-      std::cout << "[paper] Simulated fills: "
-                << paper_transport_ptr->fills().size() << '\n';
+    if (paper_mode && paper_ptr != nullptr) {
+      log->info("paper mode: simulated fills={}", paper_ptr->fills().size());
     }
 
-    std::cout << "Shutdown complete.\n";
+    log->info("shutdown complete");
     return 0;
 
   } catch (const std::exception &exception) {
-    std::cerr << "Fatal: " << exception.what() << '\n';
+    std::cerr << "fatal: " << exception.what() << '\n';
     return 1;
   }
 }
