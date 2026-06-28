@@ -193,20 +193,18 @@ RestClient::RestClient(Auth auth, std::unique_ptr<IHttpTransport> transport,
 
 std::vector<Market> RestClient::get_markets(std::string_view event_ticker) {
   const std::string path = path_prefix_ + "/markets";
-  const std::string base_query =
-      event_ticker.empty() ? "" : "?event_ticker=" + std::string(event_ticker);
+  const std::string event_param =
+      event_ticker.empty() ? "" : "event_ticker=" + std::string(event_ticker);
 
   std::vector<Market> all_markets;
   std::string cursor;
 
-  do {
-    std::string url = base_url_ + "/markets";
-    if (!base_query.empty() && cursor.empty()) {
-      url += base_query;
-    } else if (!cursor.empty()) {
-      url += (base_query.empty() ? "?" : base_query + "&");
-      url += "cursor=" + cursor;
+  auto fetch_page = [&]() {
+    std::string url = base_url_ + "/markets?";
+    if (!event_param.empty()) {
+      url += event_param + "&";
     }
+    url += "cursor=" + cursor;
 
     auto headers = auth_.sign("GET", path);
     auto resp = transport_->get(url, headers);
@@ -217,7 +215,12 @@ std::vector<Market> RestClient::get_markets(std::string_view event_ticker) {
       all_markets.push_back(parse_market(market_json));
     }
     cursor = json_data.value("cursor", std::string{});
-  } while (!cursor.empty());
+  };
+
+  fetch_page(); // first page (cursor is empty — server returns from beginning)
+  while (!cursor.empty()) {
+    fetch_page();
+  }
 
   return all_markets;
 }
