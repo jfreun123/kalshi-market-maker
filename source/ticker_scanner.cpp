@@ -32,25 +32,29 @@ double compute_score(const MarketScore &market, double max_volume) {
   return kWeightVolume * vol_term + kWeightSpread * std::max(0.0, spread_term);
 }
 
+std::vector<Market> fetch_markets(RestClient &rest,
+                                  const std::vector<std::string> &series) {
+  if (series.empty()) {
+    return rest.get_markets();
+  }
+  std::vector<Market> all;
+  for (const auto &event : series) {
+    auto batch = rest.get_markets(event);
+    all.insert(all.end(), std::make_move_iterator(batch.begin()),
+               std::make_move_iterator(batch.end()));
+  }
+  return all;
+}
+
 } // namespace
 
 TickerScanner::TickerScanner(RestClient &rest, ScannerConfig config)
-    : rest_{rest}, config_{config} {}
+    : rest_{rest}, config_{std::move(config)} {}
 
 std::vector<MarketScore>
 TickerScanner::scan(int top_n,
                     std::chrono::system_clock::time_point now) const {
-  std::vector<Market> markets;
-  if (config_.event_series.empty()) {
-    markets = rest_.get_markets();
-  } else {
-    for (const auto &series : config_.event_series) {
-      auto series_markets = rest_.get_markets(series);
-      markets.insert(markets.end(),
-                     std::make_move_iterator(series_markets.begin()),
-                     std::make_move_iterator(series_markets.end()));
-    }
-  }
+  const auto markets = fetch_markets(rest_, config_.event_series);
 
   std::vector<MarketScore> candidates;
   candidates.reserve(markets.size());
