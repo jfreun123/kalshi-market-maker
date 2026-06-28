@@ -29,6 +29,10 @@ struct IxWebSocket::Impl {
 };
 
 IxWebSocket::IxWebSocket() : impl_{std::make_unique<Impl>()} {
+  // Let WebSocketClient handle reconnect logic; IxWebSocket's internal
+  // auto-reconnect would reuse stale auth timestamps.
+  impl_->ws.disableAutomaticReconnection();
+
   impl_->ws.setOnMessageCallback([this](const ix::WebSocketMessagePtr &msg) {
     switch (msg->type) {
     case ix::WebSocketMessageType::Open:
@@ -37,7 +41,17 @@ IxWebSocket::IxWebSocket() : impl_{std::make_unique<Impl>()} {
       }
       break;
     case ix::WebSocketMessageType::Close:
+      if (impl_->on_disconnect_cb) {
+        impl_->on_disconnect_cb();
+      }
+      {
+        std::lock_guard<std::mutex> lock(impl_->run_mtx);
+        impl_->done = true;
+      }
+      impl_->run_cv.notify_one();
+      break;
     case ix::WebSocketMessageType::Error:
+      get_logger()->warn("websocket error: {}", msg->errorInfo.reason);
       if (impl_->on_disconnect_cb) {
         impl_->on_disconnect_cb();
       }
@@ -62,6 +76,7 @@ IxWebSocket::~IxWebSocket() = default;
 
 void IxWebSocket::connect(std::string_view url,
                           const std::map<std::string, std::string> &headers) {
+  impl_->ws.stop(); // reset internal state before applying new URL/headers
   impl_->ws.setUrl(std::string(url));
   const ix::WebSocketHttpHeaders ix_headers(headers.begin(), headers.end());
   impl_->ws.setExtraHeaders(ix_headers);

@@ -70,6 +70,9 @@ PaperTransport::get(std::string_view url,
     }
     return {kHttpOk, response_json.dump()};
   }
+  if (url.find("/orderbook") != std::string_view::npos) {
+    return {kHttpOk, R"({"orderbook_fp":{"yes_dollars":[],"no_dollars":[]}})"};
+  }
   return {kHttpOk, "{}"};
 }
 

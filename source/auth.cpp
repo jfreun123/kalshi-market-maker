@@ -4,6 +4,7 @@
 #include <openssl/buffer.h>
 #include <openssl/evp.h>
 #include <openssl/pem.h>
+#include <openssl/rsa.h>
 
 #include <chrono>
 #include <stdexcept>
@@ -36,8 +37,10 @@ std::string base64_encode(const unsigned char *data, size_t len) {
   return result;
 }
 
-std::string rsa_sha256_sign(const std::string &pem_key,
-                            const std::string &message) {
+// Signs message with RSA-PSS (SHA-256, MGF1-SHA256, max salt length).
+// Kalshi's REST and WS API require RSA-PSS — PKCS1v15 is rejected.
+std::string rsa_pss_sha256_sign(const std::string &pem_key,
+                                const std::string &message) {
   BIO *bio = BIO_new_mem_buf(pem_key.data(), static_cast<int>(pem_key.size()));
   EVP_PKEY *pkey = PEM_read_bio_PrivateKey(bio, nullptr, nullptr, nullptr);
   BIO_free(bio);
@@ -46,12 +49,23 @@ std::string rsa_sha256_sign(const std::string &pem_key,
     throw std::runtime_error("auth: failed to load RSA private key from PEM");
   }
 
+  EVP_PKEY_CTX *pctx = nullptr;
   EVP_MD_CTX *ctx = EVP_MD_CTX_new();
 
-  if (EVP_DigestSignInit(ctx, nullptr, EVP_sha256(), nullptr, pkey) != 1) {
+  if (EVP_DigestSignInit(ctx, &pctx, EVP_sha256(), nullptr, pkey) != 1) {
     EVP_MD_CTX_free(ctx);
     EVP_PKEY_free(pkey);
     throw std::runtime_error("auth: EVP_DigestSignInit failed");
+  }
+  if (EVP_PKEY_CTX_set_rsa_padding(pctx, RSA_PKCS1_PSS_PADDING) != 1) {
+    EVP_MD_CTX_free(ctx);
+    EVP_PKEY_free(pkey);
+    throw std::runtime_error("auth: EVP_PKEY_CTX_set_rsa_padding failed");
+  }
+  if (EVP_PKEY_CTX_set_rsa_pss_saltlen(pctx, RSA_PSS_SALTLEN_MAX) != 1) {
+    EVP_MD_CTX_free(ctx);
+    EVP_PKEY_free(pkey);
+    throw std::runtime_error("auth: EVP_PKEY_CTX_set_rsa_pss_saltlen failed");
   }
   if (EVP_DigestSignUpdate(ctx, message.data(), message.size()) != 1) {
     EVP_MD_CTX_free(ctx);
@@ -82,7 +96,7 @@ Auth::sign(std::string_view method, std::string_view path,
 
   std::string ts_str = std::to_string(timestamp_val);
   std::string message = ts_str + std::string(method) + std::string(path);
-  std::string signature = rsa_sha256_sign(pem_private_key_, message);
+  std::string signature = rsa_pss_sha256_sign(pem_private_key_, message);
 
   return {
       {"Kalshi-Access-Key", api_key_},

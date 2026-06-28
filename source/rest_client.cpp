@@ -134,7 +134,10 @@ Market parse_market(const nlohmann::json &market_json) {
       .fee_rate_bps = market_json.value("fee_rate_bps", 0),
       .yes_bid_cents = yes_bid,
       .yes_ask_cents = yes_ask,
-      .volume_usd = market_json.value("volume", 0.0),
+      .volume_usd =
+          market_json.contains("volume_fp")
+              ? std::stod(market_json.at("volume_fp").get<std::string>())
+              : 0.0,
       .close_time =
           parse_iso8601(market_json.at("close_time").get<std::string>()),
   };
@@ -215,7 +218,6 @@ Orderbook RestClient::get_orderbook(std::string_view ticker) {
   auto headers = auth_.sign("GET", path);
   auto resp = transport_->get(url, headers);
   check_response(resp);
-
   auto json_data = nlohmann::json::parse(resp.body);
   // The V2 API wraps the orderbook in "orderbook_fp" with string-valued arrays.
   const auto &orderbook_json = json_data.at("orderbook_fp");

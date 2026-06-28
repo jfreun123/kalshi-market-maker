@@ -36,67 +36,67 @@ constexpr double kCustomMinVolumeUsd = 150000.0;
 constexpr std::string_view kMarketGoodA =
     R"({"ticker":"KXFED-A","title":"Fed holds at 5.25%?","category":"Financials",)"
     R"("status":"active","yes_bid_dollars":"0.4800","yes_ask_dollars":"0.5200",)"
-    R"("volume":200000.0,"close_time":"2026-06-26T00:00:00Z"})";
+    R"("volume_fp":"200000.00","close_time":"2026-06-26T00:00:00Z"})";
 
 // Good market: mid=49.5c, spread=5c, 4 days out, higher volume, Financials
 constexpr std::string_view kMarketGoodB =
     R"({"ticker":"KXCPI-B","title":"CPI above 3%?","category":"Financials",)"
     R"("status":"active","yes_bid_dollars":"0.4700","yes_ask_dollars":"0.5200",)"
-    R"("volume":400000.0,"close_time":"2026-06-25T00:00:00Z"})";
+    R"("volume_fp":"400000.00","close_time":"2026-06-25T00:00:00Z"})";
 
 // Crypto market: mid=50c, spread=4c, 5 days out, mid volume
 constexpr std::string_view kMarketCrypto =
     R"({"ticker":"KXBTCD-C","title":"Bitcoin above $70k?","category":"Crypto",)"
     R"("status":"active","yes_bid_dollars":"0.4800","yes_ask_dollars":"0.5200",)"
-    R"("volume":100000.0,"close_time":"2026-06-26T00:00:00Z"})";
+    R"("volume_fp":"100000.00","close_time":"2026-06-26T00:00:00Z"})";
 
 // Filtered: price too low (mid=7.5c — deep longshot)
 constexpr std::string_view kMarketDeepLongshot =
     R"({"ticker":"KXLONG-D","title":"Longshot event?","category":"Other",)"
     R"("status":"active","yes_bid_dollars":"0.0500","yes_ask_dollars":"0.1000",)"
-    R"("volume":500000.0,"close_time":"2026-06-26T00:00:00Z"})";
+    R"("volume_fp":"500000.00","close_time":"2026-06-26T00:00:00Z"})";
 
 // Filtered: price too high (mid=92.5c)
 constexpr std::string_view kMarketDeepFavorite =
     R"({"ticker":"KXFAV-E","title":"Near-certain event?","category":"Other",)"
     R"("status":"active","yes_bid_dollars":"0.9000","yes_ask_dollars":"0.9500",)"
-    R"("volume":500000.0,"close_time":"2026-06-26T00:00:00Z"})";
+    R"("volume_fp":"500000.00","close_time":"2026-06-26T00:00:00Z"})";
 
 // Filtered: volume too low
 constexpr std::string_view kMarketLowVolume =
     R"({"ticker":"KXLOW-F","title":"Illiquid market?","category":"Financials",)"
     R"("status":"active","yes_bid_dollars":"0.4800","yes_ask_dollars":"0.5200",)"
-    R"("volume":500.0,"close_time":"2026-06-26T00:00:00Z"})";
+    R"("volume_fp":"500.00","close_time":"2026-06-26T00:00:00Z"})";
 
 // Filtered: closes in 40 days (past max_days_to_close=10)
 constexpr std::string_view kMarketTooFarOut =
     R"({"ticker":"KXFAR-G","title":"Far future event?","category":"Financials",)"
     R"("status":"active","yes_bid_dollars":"0.4800","yes_ask_dollars":"0.5200",)"
-    R"("volume":200000.0,"close_time":"2026-07-31T00:00:00Z"})";
+    R"("volume_fp":"200000.00","close_time":"2026-07-31T00:00:00Z"})";
 
 // Filtered: not active
 constexpr std::string_view kMarketClosed =
     R"({"ticker":"KXCLS-H","title":"Already closed?","category":"Financials",)"
     R"("status":"closed","yes_bid_dollars":"0.4800","yes_ask_dollars":"0.5200",)"
-    R"("volume":200000.0,"close_time":"2026-06-22T00:00:00Z"})";
+    R"("volume_fp":"200000.00","close_time":"2026-06-22T00:00:00Z"})";
 
 // Filtered: spread too wide (>10c)
 constexpr std::string_view kMarketWideSpread =
     R"({"ticker":"KXWIDE-I","title":"Wide spread market?","category":"Financials",)"
     R"("status":"active","yes_bid_dollars":"0.4000","yes_ask_dollars":"0.6000",)"
-    R"("volume":200000.0,"close_time":"2026-06-26T00:00:00Z"})";
+    R"("volume_fp":"200000.00","close_time":"2026-06-26T00:00:00Z"})";
 
 // Filtered: spread too narrow (<3c) — indicates locked/crossed book
 constexpr std::string_view kMarketNarrowSpread =
     R"({"ticker":"KXNARR-J","title":"Narrow spread market?","category":"Financials",)"
     R"("status":"active","yes_bid_dollars":"0.4900","yes_ask_dollars":"0.5000",)"
-    R"("volume":200000.0,"close_time":"2026-06-26T00:00:00Z"})";
+    R"("volume_fp":"200000.00","close_time":"2026-06-26T00:00:00Z"})";
 
 // Filtered: closes in 0.3 days (too soon)
 constexpr std::string_view kMarketTooSoon =
     R"({"ticker":"KXSOON-K","title":"Closing today?","category":"Financials",)"
     R"("status":"active","yes_bid_dollars":"0.4800","yes_ask_dollars":"0.5200",)"
-    R"("volume":200000.0,"close_time":"2026-06-21T07:00:00Z"})";
+    R"("volume_fp":"200000.00","close_time":"2026-06-21T07:00:00Z"})";
 
 std::string
 make_markets_response(std::initializer_list<std::string_view> markets) {

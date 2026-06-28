@@ -5,6 +5,7 @@
 #include <openssl/buffer.h>
 #include <openssl/evp.h>
 #include <openssl/pem.h>
+#include <openssl/rsa.h>
 
 #include <chrono>
 #include <string>
@@ -69,7 +70,7 @@ struct VerifyArgs {
 };
 
 // Verifies an RSA-SHA256 signature against a public key PEM.
-bool verify_rsa_sha256(
+bool verify_rsa_pss_sha256(
     VerifyArgs args) { // NOLINT(performance-unnecessary-value-param)
                        // — small struct
   BIO *bio = BIO_new_mem_buf(args.pub_pem.data(),
@@ -82,9 +83,12 @@ bool verify_rsa_sha256(
 
   auto sig_bytes = base64_decode(args.base64_sig);
 
+  EVP_PKEY_CTX *pctx = nullptr;
   EVP_MD_CTX *ctx = EVP_MD_CTX_new();
   bool verified =
-      EVP_DigestVerifyInit(ctx, nullptr, EVP_sha256(), nullptr, pkey) == 1 &&
+      EVP_DigestVerifyInit(ctx, &pctx, EVP_sha256(), nullptr, pkey) == 1 &&
+      EVP_PKEY_CTX_set_rsa_padding(pctx, RSA_PKCS1_PSS_PADDING) == 1 &&
+      EVP_PKEY_CTX_set_rsa_pss_saltlen(pctx, RSA_PSS_SALTLEN_AUTO) == 1 &&
       EVP_DigestVerifyUpdate(ctx, args.message.data(), args.message.size()) ==
           1 &&
       EVP_DigestVerifyFinal(ctx, sig_bytes.data(), sig_bytes.size()) == 1;
@@ -156,7 +160,7 @@ TEST_F(AuthTest, SignatureVerifiesWithPublicKey) {
   std::string message = timestamp + method + path;
   std::string signature = headers.at("Kalshi-Access-Signature");
 
-  EXPECT_TRUE(verify_rsa_sha256({pub_pem_, message, signature}));
+  EXPECT_TRUE(verify_rsa_pss_sha256({pub_pem_, message, signature}));
 }
 
 TEST_F(AuthTest, DifferentMethodsProduceDifferentSignatures) {
