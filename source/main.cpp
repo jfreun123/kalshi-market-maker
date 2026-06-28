@@ -8,6 +8,7 @@
 #include "quoter.hpp"
 #include "rest_client.hpp"
 #include "risk_manager.hpp"
+#include "scan_output.hpp"
 #include "ticker_scanner.hpp"
 #include "websocket_client.hpp"
 
@@ -191,15 +192,18 @@ static void check_ws_staleness(const kalshi::WebSocketClient &ws_client,
 
 // ---- Scanner mode ----
 
+static constexpr auto kScanResultsPath = "scan_results.json";
+
 static int run_scan_mode(kalshi::RestClient &rest,
                          const kalshi::ScannerConfig &scanner_config,
                          std::shared_ptr<spdlog::logger> &log) {
   constexpr int kScanTopN = 20;
-  log->info("scanner mode — scanning all markets "
-            "(price=[{},{}]c spread=[{},{}]c min_vol=${:.0f} max_days={:.0f})",
-            scanner_config.min_price_cents, scanner_config.max_price_cents,
-            scanner_config.min_spread_cents, scanner_config.max_spread_cents,
-            scanner_config.min_volume_usd, scanner_config.max_days_to_close);
+  log->info(
+      "scanner mode — scanning all markets "
+      "(price=[{},{}]c spread=[{},{}]c min_vol_24h={:.0f} max_days={:.0f})",
+      scanner_config.min_price_cents, scanner_config.max_price_cents,
+      scanner_config.min_spread_cents, scanner_config.max_spread_cents,
+      scanner_config.min_volume_24h, scanner_config.max_days_to_close);
 
   const auto now = std::chrono::system_clock::now();
   kalshi::TickerScanner scanner{rest, scanner_config};
@@ -211,11 +215,20 @@ static int run_scan_mode(kalshi::RestClient &rest,
   log->info("scanner results (top {}):", results.size());
   for (std::size_t rank = 0U; rank < results.size(); ++rank) {
     const auto &market = results[rank];
-    log->info("  {:>2}. ticker={} mid={}c spread={}c vol=${:.0f} days={:.1f} "
-              "score={:.3f} cat={} \"{}\"",
-              rank + 1U, market.ticker, market.mid_price_cents,
-              market.spread_cents, market.volume_usd, market.days_to_close,
-              market.score, market.category, market.title);
+    log->info(
+        "  {:>2}. ticker={} mid={}c spread={}c vol_24h={:.0f} days={:.1f} "
+        "score={:.3f} cat={} \"{}\"",
+        rank + 1U, market.ticker, market.mid_price_cents, market.spread_cents,
+        market.volume_24h, market.days_to_close, market.score, market.category,
+        market.title);
+  }
+
+  const std::filesystem::path results_path{kScanResultsPath};
+  if (kalshi::write_scan_results(results_path, results, now)) {
+    log->info("scan results written to {} ({} markets)", results_path.string(),
+              results.size());
+  } else {
+    log->warn("failed to write scan results to {}", results_path.string());
   }
   return 0;
 }

@@ -133,16 +133,28 @@ optional `scanner` section of the config:
   "max_price_cents": 85,
   "min_spread_cents": 3,
   "max_spread_cents": 10,
-  "min_volume_usd": 1000.0,
+  "min_volume_24h": 1000.0,
   "min_days_to_close": 1.0,
   "max_days_to_close": 90.0
 }
 ```
 
-All fields are optional and fall back to the defaults shown above. Loosen
-`min_volume_usd`, the price range, and the spread range for demo (where liquidity
-is thin); tighten them for production. Switching environments is just a matter of
-changing `base_url`/`ws_url` and these thresholds.
+All fields are optional and fall back to the defaults shown above. `min_volume_24h`
+filters on **24-hour** contract volume (live flow), which is also the basis for the
+ranking score. Loosen it, the price range, and the spread range for demo (where
+liquidity is thin); tighten them for production. Switching environments is just a
+matter of changing `base_url`/`ws_url` and these thresholds.
+
+Each scan also writes **`scan_results.json`** in the working directory — a ranked
+JSON document with a top-level `tickers` array (rank order) and a `markets` array
+with full per-market detail. This is the hand-off to the trader: pick the top N
+tickers and put them in `target_tickers`.
+
+```bash
+./build/source/kalshi_mm --scan config.json
+# Top 5 tickers into the config, then trade them:
+jq '.tickers[:5]' scan_results.json
+```
 
 ## Development
 

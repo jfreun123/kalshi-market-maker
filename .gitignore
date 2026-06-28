@@ -30,3 +30,6 @@ pnl_state.json
 
 # Runtime logs
 logs/
+
+# Scan output artifact
+scan_results.json

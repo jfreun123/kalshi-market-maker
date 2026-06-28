@@ -31,6 +31,7 @@ kalshi_add_test(adverse_selection_test source/adverse_selection_test.cpp)
 kalshi_add_test(theo_grid_test source/theo_grid_test.cpp)
 kalshi_add_test(logger_test source/logger_test.cpp)
 kalshi_add_test(ticker_scanner_test source/ticker_scanner_test.cpp)
+kalshi_add_test(scan_output_test source/scan_output_test.cpp)
 
 # ---- Replay tests ----
 
