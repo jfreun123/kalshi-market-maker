@@ -192,22 +192,34 @@ RestClient::RestClient(Auth auth, std::unique_ptr<IHttpTransport> transport,
       path_prefix_{extract_path_prefix(base_url_)} {}
 
 std::vector<Market> RestClient::get_markets(std::string_view event_ticker) {
-  std::string path = path_prefix_ + "/markets";
-  std::string url = base_url_ + "/markets";
-  if (!event_ticker.empty()) {
-    url += "?event_ticker=" + std::string(event_ticker);
-  }
+  const std::string path = path_prefix_ + "/markets";
+  const std::string base_query =
+      event_ticker.empty() ? "" : "?event_ticker=" + std::string(event_ticker);
 
-  auto headers = auth_.sign("GET", path);
-  auto resp = transport_->get(url, headers);
-  check_response(resp);
+  std::vector<Market> all_markets;
+  std::string cursor;
 
-  auto json_data = nlohmann::json::parse(resp.body);
-  std::vector<Market> markets;
-  for (const auto &market_json : json_data.at("markets")) {
-    markets.push_back(parse_market(market_json));
-  }
-  return markets;
+  do {
+    std::string url = base_url_ + "/markets";
+    if (!base_query.empty() && cursor.empty()) {
+      url += base_query;
+    } else if (!cursor.empty()) {
+      url += (base_query.empty() ? "?" : base_query + "&");
+      url += "cursor=" + cursor;
+    }
+
+    auto headers = auth_.sign("GET", path);
+    auto resp = transport_->get(url, headers);
+    check_response(resp);
+
+    auto json_data = nlohmann::json::parse(resp.body);
+    for (const auto &market_json : json_data.at("markets")) {
+      all_markets.push_back(parse_market(market_json));
+    }
+    cursor = json_data.value("cursor", std::string{});
+  } while (!cursor.empty());
+
+  return all_markets;
 }
 
 Orderbook RestClient::get_orderbook(std::string_view ticker) {

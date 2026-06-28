@@ -145,6 +145,26 @@ TEST_F(RestClientTest, GetMarketsWithEventTickerAppendsQueryParam) {
             std::string::npos);
 }
 
+TEST_F(RestClientTest, GetMarketsFollowsCursorToFetchAllPages) {
+  // First page returns one market and a non-empty cursor; second page returns
+  // a second market and an empty cursor, signalling end of results.
+  auto transport = std::make_unique<FakeTransport>();
+  FakeTransport *const transport_raw = transport.get();
+  transport_raw->enqueue(
+      {kHttpOk,
+       R"({"markets":[{"ticker":"KXBTCD","title":"Page1","close_time":"2025-12-25T00:00:00Z"}],"cursor":"page2token"})"});
+  transport_raw->enqueue(
+      {kHttpOk,
+       R"({"markets":[{"ticker":"KXETH","title":"Page2","close_time":"2025-12-25T00:00:00Z"}],"cursor":""})"});
+  auto client = make_client(std::move(transport));
+
+  auto markets = client.get_markets();
+
+  ASSERT_EQ(markets.size(), kTwoResults);
+  EXPECT_EQ(markets[0].ticker, "KXBTCD");
+  EXPECT_EQ(markets[1].ticker, "KXETH");
+}
+
 TEST_F(RestClientTest, GetMarketsThrowsOnHttpError) {
   auto transport = std::make_unique<FakeTransport>();
   FakeTransport *const transport_raw = transport.get();
