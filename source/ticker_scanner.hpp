@@ -17,6 +17,9 @@ struct ScannerConfig {
   double min_volume_usd{1000.0};
   double min_days_to_close{1.0};
   double max_days_to_close{90.0};
+  // When non-empty, scan fetches each event series separately instead of
+  // using the global /markets listing (which returns zero-volume junk).
+  std::vector<std::string> event_series{};
 };
 
 struct MarketScore {

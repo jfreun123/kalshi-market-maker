@@ -40,7 +40,17 @@ TickerScanner::TickerScanner(RestClient &rest, ScannerConfig config)
 std::vector<MarketScore>
 TickerScanner::scan(int top_n,
                     std::chrono::system_clock::time_point now) const {
-  const auto markets = rest_.get_markets();
+  std::vector<Market> markets;
+  if (config_.event_series.empty()) {
+    markets = rest_.get_markets();
+  } else {
+    for (const auto &series : config_.event_series) {
+      auto series_markets = rest_.get_markets(series);
+      markets.insert(markets.end(),
+                     std::make_move_iterator(series_markets.begin()),
+                     std::make_move_iterator(series_markets.end()));
+    }
+  }
 
   std::vector<MarketScore> candidates;
   candidates.reserve(markets.size());

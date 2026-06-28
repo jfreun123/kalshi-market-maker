@@ -429,6 +429,21 @@ TEST_F(TickerScannerTest, ScanAcceptsMediumTermMarkets) {
   EXPECT_EQ(results[0].ticker, "KXMED-M");
 }
 
+TEST_F(TickerScannerTest, ScanSearchesAllEventSeries) {
+  // When event_series is set, the scanner fetches markets for each series
+  // separately and merges the results before filtering and scoring.
+  auto [client, transport] = make_client_with_transport();
+  transport->enqueue({kHttpOk, make_markets_response({kMarketGoodA})});
+  transport->enqueue({kHttpOk, make_markets_response({kMarketCrypto})});
+
+  kalshi::ScannerConfig config;
+  config.event_series = {"KXCPI-26AUG", "KXCPI-26SEP"};
+  kalshi::TickerScanner scanner{client, config};
+  auto results = scanner.scan(kScanTopN, kTestNow);
+
+  EXPECT_EQ(results.size(), 2U);
+}
+
 TEST_F(TickerScannerTest, ScanDoesNotPenalizeHighProbabilityMarkets) {
   // A market at 75c mid and a market at 50c mid with identical volume, spread,
   // and category should receive equal scores. A market maker earns the same

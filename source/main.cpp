@@ -16,6 +16,7 @@
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <csignal>
@@ -191,13 +192,56 @@ static void check_ws_staleness(const kalshi::WebSocketClient &ws_client,
 
 // ---- Scanner mode ----
 
+// Generates the known Kalshi economic event series for the next six months.
+// Format: KXCPI-YYMMx (monthly CPI) and KXFED-YYMMx (FOMC meeting months).
+static std::vector<std::string>
+generate_upcoming_series(std::chrono::system_clock::time_point now) {
+  constexpr int kMonthsAhead = 6;
+
+  // FOMC typically meets in Jan, Mar, May, Jun, Jul, Sep, Nov, Dec.
+  // Approximate by including all months — the scanner filter handles empty
+  // results from series that don't exist yet.
+  const std::time_t now_tt = std::chrono::system_clock::to_time_t(now);
+  std::tm tm_now{};
+  gmtime_r(&now_tt, &tm_now);
+
+  std::vector<std::string> series;
+  series.reserve(static_cast<std::size_t>(kMonthsAhead) * 2U);
+
+  for (int offset = 0; offset < kMonthsAhead; ++offset) {
+    const int month = ((tm_now.tm_mon + offset) % 12) + 1;
+    const int year = (tm_now.tm_year + 1900) +
+                     (tm_now.tm_mon + offset) / 12; // NOLINT(*-magic-numbers)
+    constexpr int kYearModulo = 100;
+    const int year_2digit = year % kYearModulo;
+
+    std::array<char, 16> buf{}; // NOLINT(*-magic-numbers)
+    // Month letter: A=Jan, B=Feb, ..., L=Dec
+    const char month_letter = static_cast<char>('A' + month - 1);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg)
+    std::snprintf(buf.data(), buf.size(), "%02d%c", year_2digit, month_letter);
+    const std::string suffix{buf.data()};
+
+    series.push_back("KXCPI-" + suffix);
+    series.push_back("KXFED-" + suffix);
+  }
+  return series;
+}
+
 static int run_scan_mode(kalshi::RestClient &rest,
                          std::shared_ptr<spdlog::logger> &log) {
   constexpr int kScanTopN = 20;
   log->info("scanner mode — scanning active markets");
 
-  kalshi::TickerScanner scanner{rest};
-  const auto results = scanner.scan(kScanTopN);
+  const auto now = std::chrono::system_clock::now();
+  kalshi::ScannerConfig config;
+  config.event_series = generate_upcoming_series(now);
+  for (const auto &series : config.event_series) {
+    log->info("scanner searching series={}", series);
+  }
+
+  kalshi::TickerScanner scanner{rest, config};
+  const auto results = scanner.scan(kScanTopN, now);
   if (results.empty()) {
     log->warn("no markets passed scanner filters");
     return 0;

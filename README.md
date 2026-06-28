@@ -69,8 +69,8 @@ cp config.example.json config.json
 {
   "api_key": "YOUR_KALSHI_API_KEY",
   "private_key_path": "/path/to/kalshi-private-key.pem",
-  "base_url": "https://trading-api.kalshi.com/trade-api/v2",
-  "ws_url": "wss://trading-api.kalshi.com/trade-api/ws/v2",
+  "base_url": "https://api.elections.kalshi.com/trade-api/v2",
+  "ws_url": "wss://api.elections.kalshi.com/trade-api/ws/v2",
   "target_tickers": ["KXBTCD-25DEC31-B90000"],
   "quoter": {
     "target_spread_cents": 4,
