@@ -26,6 +26,10 @@ constexpr int kYesBid53 = 51;
 constexpr int kNoBid53 = 45; // mid = (51+55)/2 = 53
 constexpr int kYesBid55 = 51;
 constexpr int kNoBid55 = 41; // mid = (51+59)/2 = 55
+// mid=70: desired bid=68, desired ask=72. After update(52), current_ask=54.
+// 68 >= 54 → bid would cross own ask — guard should suppress bid.
+constexpr int kYesBid70 = 67;
+constexpr int kNoBid70 = 27; // mid = (67+73)/2 = 70
 
 // Inventory skew positions (20 = one skew unit, 1000 = extreme clamp).
 constexpr int kInventoryPosition = 20;
@@ -332,6 +336,48 @@ TEST_F(QuoterTest, ShortPositionShiftsBidUp) {
   EXPECT_NE(bid_body.find("\"side\":\"bid\""), std::string::npos);
   EXPECT_NE(bid_body.find(std::string(kBidPriceMid52Short20)),
             std::string::npos);
+}
+
+TEST_F(QuoterTest, SelfCrossGuardSkipsBidWhenItWouldCrossOwnAsk) {
+  // First update (mid=52): bid=50, ask=54 (current_ask_cents=54).
+  // Second update (mid=70): desired bid=68 >= current_ask 54 → bid suppressed.
+  // Only ask is repriced: DELETE ask, POST ask@72. Bid stays cancelled.
+  // Expected requests: POST bid, POST ask, DELETE bid, DELETE ask, POST ask
+  // = 5.
+  auto transport_ptr = std::make_unique<FakeTransport>();
+  FakeTransport &transport = *transport_ptr;
+  // Initial: POST bid order-001, POST ask order-002.
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId1, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId2, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  // Reprice: DELETE bid order-001.
+  transport.enqueue(
+      {kHttpOk, R"({"order_id":"order-001","reduced_by":"5.00","ts_ms":0})"});
+  // Bid suppressed — no POST bid here.
+  // Ask reprice: DELETE ask order-002, POST ask order-003.
+  transport.enqueue(
+      {kHttpOk, R"({"order_id":"order-002","reduced_by":"5.00","ts_ms":0})"});
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId3, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  kalshi::RestClient rest{kalshi::Auth{kApiKey, kPemPrivateKey},
+                          std::move(transport_ptr), kBaseUrl};
+  kalshi::OrderManager order_mgr{rest};
+  kalshi::RiskManager risk_mgr{kalshi::RiskLimits{}};
+  kalshi::Quoter quoter{kalshi::QuoterConfig{}, order_mgr, risk_mgr};
+
+  quoter.update(kTicker, make_ob(kYesBid52, kNoBid52)); // bid=50, ask=54
+  quoter.update(kTicker,
+                make_ob(kYesBid70, kNoBid70)); // desired bid=68 crosses ask
+
+  // POST bid + POST ask + DELETE bid + DELETE ask + POST ask = 5
+  EXPECT_EQ(transport.recorded_requests().size(), 5U);
+  // The last POST should be an ask (side=ask), not a bid.
+  const std::string &last_body = transport.recorded_requests().back().body;
+  EXPECT_NE(last_body.find("\"side\":\"ask\""), std::string::npos);
 }
 
 TEST_F(QuoterTest, AskAlwaysHigherThanBidWithExtremeInventory) {

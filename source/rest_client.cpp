@@ -304,8 +304,8 @@ Order RestClient::place_order(std::string_view ticker, Side side,
 
 bool RestClient::cancel_order(std::string_view order_id) {
   std::string order_id_str{order_id};
-  std::string path = path_prefix_ + "/portfolio/orders/" + order_id_str;
-  std::string url = base_url_ + "/portfolio/orders/" + order_id_str;
+  std::string path = path_prefix_ + "/portfolio/events/orders/" + order_id_str;
+  std::string url = base_url_ + "/portfolio/events/orders/" + order_id_str;
 
   auto headers = auth_.sign("DELETE", path);
   auto resp = transport_->delete_(url, headers);

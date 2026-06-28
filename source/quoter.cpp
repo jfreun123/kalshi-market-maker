@@ -40,6 +40,10 @@ std::pair<int, int> Quoter::compute_quotes(double fv_cents, int half_spread,
 void Quoter::refresh_bid(const std::string &ticker, int desired_bid) {
   auto &live = live_quotes_[ticker];
   if (live.bid_order_id.empty()) {
+    // Self-cross guard: don't place bid if it would match our own resting ask.
+    if (!live.ask_order_id.empty() && desired_bid >= live.current_ask_cents) {
+      return;
+    }
     if (!risk_mgr_.check_order(ticker, Side::Yes, desired_bid,
                                config_.quote_size)) {
       return;
@@ -54,6 +58,10 @@ void Quoter::refresh_bid(const std::string &ticker, int desired_bid) {
       return;
     }
     live.bid_order_id.clear();
+    // Self-cross guard: after cancelling, don't re-enter if new bid ≥ ask.
+    if (!live.ask_order_id.empty() && desired_bid >= live.current_ask_cents) {
+      return;
+    }
     if (!risk_mgr_.check_order(ticker, Side::Yes, desired_bid,
                                config_.quote_size)) {
       return;
@@ -69,6 +77,10 @@ void Quoter::refresh_ask(const std::string &ticker, int desired_ask) {
   const int no_price = complement_price(desired_ask);
   auto &live = live_quotes_[ticker];
   if (live.ask_order_id.empty()) {
+    // Self-cross guard: don't place ask if it would match our own resting bid.
+    if (!live.bid_order_id.empty() && desired_ask <= live.current_bid_cents) {
+      return;
+    }
     if (!risk_mgr_.check_order(ticker, Side::No, no_price,
                                config_.quote_size)) {
       return;
@@ -83,6 +95,10 @@ void Quoter::refresh_ask(const std::string &ticker, int desired_ask) {
       return;
     }
     live.ask_order_id.clear();
+    // Self-cross guard: after cancelling, don't re-enter if new ask ≤ bid.
+    if (!live.bid_order_id.empty() && desired_ask <= live.current_bid_cents) {
+      return;
+    }
     if (!risk_mgr_.check_order(ticker, Side::No, no_price,
                                config_.quote_size)) {
       return;

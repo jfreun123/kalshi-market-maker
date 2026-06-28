@@ -265,12 +265,13 @@ int main(int argc, char *argv[]) {
                 cents / kCentsPerDollar);
     }
 
-    // Seed orderbooks from REST snapshot before subscribing to WS.
+    // Seed orderbooks from REST snapshot and place initial quotes before WS.
     for (const auto &ticker : app_config.target_tickers) {
       log->info("seeding orderbook ticker={}", ticker);
       auto snap = rest.get_orderbook(ticker);
       ob_map[ticker].apply_snapshot(snap);
       ws_client.subscribe(ticker);
+      quoter.update(ticker, ob_map[ticker]);
     }
 
     // ---- Callbacks ----
@@ -278,8 +279,9 @@ int main(int argc, char *argv[]) {
     ws_client.on_orderbook_snapshot(
         [&ob_map, &log](const kalshi::Orderbook &snap) {
           ob_map[snap.ticker].apply_snapshot(snap);
-          log->debug("snapshot ticker={} yes_levels={} no_levels={}",
-                     snap.ticker, snap.yes.size(), snap.no.size());
+          log->info("snapshot ticker={} yes_levels={} no_levels={}",
+                    snap.ticker, snap.yes.size(), snap.no.size());
+          // WS snapshot refreshes book state; repricing is driven by deltas.
         });
 
     ws_client.on_orderbook_delta([&ob_map, &quoter,
@@ -290,7 +292,11 @@ int main(int argc, char *argv[]) {
                  ticker, side_name(side), price, qty,
                  ob_map[ticker].mid_price_cents(),
                  ob_map[ticker].spread_cents());
-      quoter.update(ticker, ob_map[ticker]);
+      try {
+        quoter.update(ticker, ob_map[ticker]);
+      } catch (const std::exception &ex) {
+        log->error("quoter error on delta ticker={}: {}", ticker, ex.what());
+      }
     });
 
     ws_client.on_fill([&order_mgr, &risk_mgr, &app_config, &prior_pnl,
