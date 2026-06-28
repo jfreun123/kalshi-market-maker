@@ -1,5 +1,7 @@
 #include "rest_client.hpp"
 
+#include "logger.hpp"
+
 #include <nlohmann/json.hpp>
 
 #include <chrono>
@@ -205,8 +207,12 @@ std::vector<Market> RestClient::get_markets(std::string_view event_ticker) {
     base_query += "&event_ticker=" + std::string(event_ticker);
   }
 
+  // Log progress every N pages so a long full-listing scan doesn't look hung.
+  constexpr int kProgressEveryPages = 10;
+
   std::vector<Market> all_markets;
   std::string cursor;
+  int pages = 0;
 
   auto fetch_page = [&]() {
     std::string url = base_url_ + "/markets?" + base_query;
@@ -223,6 +229,11 @@ std::vector<Market> RestClient::get_markets(std::string_view event_ticker) {
       all_markets.push_back(parse_market(market_json));
     }
     cursor = json_data.value("cursor", std::string{});
+    ++pages;
+    if (pages % kProgressEveryPages == 0) {
+      get_logger()->info("get_markets progress: {} pages, {} markets fetched",
+                         pages, all_markets.size());
+    }
   };
 
   fetch_page(); // first page (cursor is empty — server returns from beginning)
