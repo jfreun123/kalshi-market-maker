@@ -37,6 +37,21 @@ double category_bonus(const std::string &category) {
   return kCategoryBonusDefault;
 }
 
+double compute_score(const MarketScore &market, double max_volume) {
+  double vol_term = 0.0;
+  if (max_volume > 1.0 && market.volume_usd > 1.0) {
+    vol_term = std::log(market.volume_usd) / std::log(max_volume);
+  }
+
+  const double spread_term =
+      1.0 -
+      std::abs(static_cast<double>(market.spread_cents) - kSpreadMidCents) /
+          kSpreadHalfRange;
+
+  return kWeightVolume * vol_term + kWeightSpread * std::max(0.0, spread_term) +
+         kWeightCategory * category_bonus(market.category);
+}
+
 } // namespace
 
 TickerScanner::TickerScanner(RestClient &rest, ScannerConfig config)
@@ -112,22 +127,6 @@ TickerScanner::scan(int top_n,
   }
 
   return candidates;
-}
-
-double TickerScanner::compute_score(const MarketScore &market,
-                                    double max_volume) const {
-  double vol_term = 0.0;
-  if (max_volume > 1.0 && market.volume_usd > 1.0) {
-    vol_term = std::log(market.volume_usd) / std::log(max_volume);
-  }
-
-  const double spread_term =
-      1.0 -
-      std::abs(static_cast<double>(market.spread_cents) - kSpreadMidCents) /
-          kSpreadHalfRange;
-
-  return kWeightVolume * vol_term + kWeightSpread * std::max(0.0, spread_term) +
-         kWeightCategory * category_bonus(market.category);
 }
 
 } // namespace kalshi

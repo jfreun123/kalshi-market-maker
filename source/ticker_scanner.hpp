@@ -39,9 +39,6 @@ public:
                            std::chrono::system_clock::now()) const;
 
 private:
-  [[nodiscard]] double compute_score(const MarketScore &market,
-                                     double max_volume) const;
-
   RestClient &rest_;
   ScannerConfig config_;
 };
