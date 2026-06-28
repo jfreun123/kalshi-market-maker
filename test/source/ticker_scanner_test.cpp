@@ -50,6 +50,13 @@ constexpr std::string_view kMarketCrypto =
     R"("status":"active","yes_bid_dollars":"0.4800","yes_ask_dollars":"0.5200",)"
     R"("volume_fp":"100000.00","close_time":"2026-06-26T00:00:00Z"})";
 
+// Crypto market with same volume/spread/mid as kMarketGoodA (Financials).
+// Used to verify category does not bias the score.
+constexpr std::string_view kMarketCryptoEqualVol =
+    R"({"ticker":"KXBTCH-P","title":"BTC event?","category":"Crypto",)"
+    R"("status":"active","yes_bid_dollars":"0.4800","yes_ask_dollars":"0.5200",)"
+    R"("volume_fp":"200000.00","close_time":"2026-06-26T00:00:00Z"})";
+
 // Filtered: price too low (mid=7.5c — deep longshot)
 constexpr std::string_view kMarketDeepLongshot =
     R"({"ticker":"KXLONG-D","title":"Longshot event?","category":"Other",)"
@@ -316,9 +323,9 @@ TEST_F(TickerScannerTest, ScanRanksHigherVolumeFirst) {
   EXPECT_EQ(results[0].ticker, "KXCPI-B");
 }
 
-TEST_F(TickerScannerTest, ScanRanksFinancialsAboveCrypto) {
-  // kMarketGoodA (Financials, 200k) vs kMarketCrypto (Crypto, 100k).
-  // Category bonus alone (1.0 vs 0.7) plus volume should put Financials first.
+TEST_F(TickerScannerTest, ScanRanksHigherVolumeFirstAcrossCategories) {
+  // kMarketGoodA (Financials, 200k) should rank above kMarketCrypto (Crypto,
+  // 100k) purely on volume — category is not a scoring factor.
   auto [client, transport] = make_client_with_transport();
   transport->enqueue(
       {kHttpOk, make_markets_response({kMarketCrypto, kMarketGoodA})});
@@ -328,6 +335,21 @@ TEST_F(TickerScannerTest, ScanRanksFinancialsAboveCrypto) {
 
   ASSERT_EQ(results.size(), 2U);
   EXPECT_EQ(results[0].ticker, "KXFED-A");
+}
+
+TEST_F(TickerScannerTest, ScanDoesNotBiasForFinancials) {
+  // A Crypto market and a Financials market with identical volume, spread, and
+  // price should receive equal scores. Category does not predict fill rate or
+  // MM edge and must not influence ranking.
+  auto [client, transport] = make_client_with_transport();
+  transport->enqueue(
+      {kHttpOk, make_markets_response({kMarketGoodA, kMarketCryptoEqualVol})});
+
+  kalshi::TickerScanner scanner{client};
+  auto results = scanner.scan(kScanTopN, kTestNow);
+
+  ASSERT_EQ(results.size(), 2U);
+  EXPECT_NEAR(results[0].score, results[1].score, 1e-9);
 }
 
 TEST_F(TickerScannerTest, ScanPopulatesMarketScoreFields) {

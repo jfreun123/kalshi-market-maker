@@ -10,32 +10,13 @@ namespace {
 
 constexpr double kSecondsPerDay = 86400.0;
 
-constexpr double kWeightVolume = 0.60;
+constexpr double kWeightVolume = 0.70;
 constexpr double kWeightSpread = 0.30;
-constexpr double kWeightCategory = 0.10;
 
 // Spread scoring peaks at the midpoint of the [min_spread, max_spread] filter
 // range ([3, 10]c) and falls to zero at the edges.
 constexpr double kSpreadMidCents = 6.5;
 constexpr double kSpreadHalfRange = 3.5;
-
-constexpr double kCategoryBonusFinancials = 1.0;
-constexpr double kCategoryBonusEconomics = 0.8;
-constexpr double kCategoryBonusCrypto = 0.7;
-constexpr double kCategoryBonusDefault = 0.5;
-
-double category_bonus(const std::string &category) {
-  if (category == "Financials") {
-    return kCategoryBonusFinancials;
-  }
-  if (category == "Economics") {
-    return kCategoryBonusEconomics;
-  }
-  if (category == "Crypto") {
-    return kCategoryBonusCrypto;
-  }
-  return kCategoryBonusDefault;
-}
 
 double compute_score(const MarketScore &market, double max_volume) {
   double vol_term = 0.0;
@@ -48,8 +29,7 @@ double compute_score(const MarketScore &market, double max_volume) {
       std::abs(static_cast<double>(market.spread_cents) - kSpreadMidCents) /
           kSpreadHalfRange;
 
-  return kWeightVolume * vol_term + kWeightSpread * std::max(0.0, spread_term) +
-         kWeightCategory * category_bonus(market.category);
+  return kWeightVolume * vol_term + kWeightSpread * std::max(0.0, spread_term);
 }
 
 } // namespace
