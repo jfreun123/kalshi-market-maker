@@ -36,56 +36,56 @@ constexpr double kCustomMinVolumeUsd = 150000.0;
 constexpr std::string_view kMarketGoodA =
     R"({"ticker":"KXFED-A","title":"Fed holds at 5.25%?","category":"Financials",)"
     R"("status":"active","yes_bid_dollars":"0.4800","yes_ask_dollars":"0.5200",)"
-    R"("volume_fp":"200000.00","close_time":"2026-06-26T00:00:00Z"})";
+    R"("volume_24h_fp":"200000.00","close_time":"2026-06-26T00:00:00Z"})";
 
 // Good market: mid=49.5c, spread=5c, 4 days out, higher volume, Financials
 constexpr std::string_view kMarketGoodB =
     R"({"ticker":"KXCPI-B","title":"CPI above 3%?","category":"Financials",)"
     R"("status":"active","yes_bid_dollars":"0.4700","yes_ask_dollars":"0.5200",)"
-    R"("volume_fp":"400000.00","close_time":"2026-06-25T00:00:00Z"})";
+    R"("volume_24h_fp":"400000.00","close_time":"2026-06-25T00:00:00Z"})";
 
 // Crypto market: mid=50c, spread=4c, 5 days out, mid volume
 constexpr std::string_view kMarketCrypto =
     R"({"ticker":"KXBTCD-C","title":"Bitcoin above $70k?","category":"Crypto",)"
     R"("status":"active","yes_bid_dollars":"0.4800","yes_ask_dollars":"0.5200",)"
-    R"("volume_fp":"100000.00","close_time":"2026-06-26T00:00:00Z"})";
+    R"("volume_24h_fp":"100000.00","close_time":"2026-06-26T00:00:00Z"})";
 
 // Crypto market with same volume/spread/mid as kMarketGoodA (Financials).
 // Used to verify category does not bias the score.
 constexpr std::string_view kMarketCryptoEqualVol =
     R"({"ticker":"KXBTCH-P","title":"BTC event?","category":"Crypto",)"
     R"("status":"active","yes_bid_dollars":"0.4800","yes_ask_dollars":"0.5200",)"
-    R"("volume_fp":"200000.00","close_time":"2026-06-26T00:00:00Z"})";
+    R"("volume_24h_fp":"200000.00","close_time":"2026-06-26T00:00:00Z"})";
 
 // Filtered: price too low (mid=7.5c — deep longshot)
 constexpr std::string_view kMarketDeepLongshot =
     R"({"ticker":"KXLONG-D","title":"Longshot event?","category":"Other",)"
     R"("status":"active","yes_bid_dollars":"0.0500","yes_ask_dollars":"0.1000",)"
-    R"("volume_fp":"500000.00","close_time":"2026-06-26T00:00:00Z"})";
+    R"("volume_24h_fp":"500000.00","close_time":"2026-06-26T00:00:00Z"})";
 
 // Filtered: price too high (mid=92.5c)
 constexpr std::string_view kMarketDeepFavorite =
     R"({"ticker":"KXFAV-E","title":"Near-certain event?","category":"Other",)"
     R"("status":"active","yes_bid_dollars":"0.9000","yes_ask_dollars":"0.9500",)"
-    R"("volume_fp":"500000.00","close_time":"2026-06-26T00:00:00Z"})";
+    R"("volume_24h_fp":"500000.00","close_time":"2026-06-26T00:00:00Z"})";
 
 // Filtered: volume too low
 constexpr std::string_view kMarketLowVolume =
     R"({"ticker":"KXLOW-F","title":"Illiquid market?","category":"Financials",)"
     R"("status":"active","yes_bid_dollars":"0.4800","yes_ask_dollars":"0.5200",)"
-    R"("volume_fp":"500.00","close_time":"2026-06-26T00:00:00Z"})";
+    R"("volume_24h_fp":"500.00","close_time":"2026-06-26T00:00:00Z"})";
 
 // Filtered: closes in 96 days (past max_days_to_close=90)
 constexpr std::string_view kMarketTooFarOut =
     R"({"ticker":"KXFAR-G","title":"Far future event?","category":"Financials",)"
     R"("status":"active","yes_bid_dollars":"0.4800","yes_ask_dollars":"0.5200",)"
-    R"("volume_fp":"200000.00","close_time":"2026-09-25T00:00:00Z"})";
+    R"("volume_24h_fp":"200000.00","close_time":"2026-09-25T00:00:00Z"})";
 
 // Mid-term market: closes in 60 days — should pass max_days_to_close=90 filter.
 constexpr std::string_view kMarketMediumTerm =
     R"({"ticker":"KXMED-M","title":"Medium-term event?","category":"Financials",)"
     R"("status":"active","yes_bid_dollars":"0.4800","yes_ask_dollars":"0.5200",)"
-    R"("volume_fp":"200000.00","close_time":"2026-08-20T00:00:00Z"})";
+    R"("volume_24h_fp":"200000.00","close_time":"2026-08-20T00:00:00Z"})";
 
 // High-probability market: mid=75c, spread=4c, same volume/category as
 // kMarketGoodA. Used to verify the scorer does not penalize markets away from
@@ -93,31 +93,31 @@ constexpr std::string_view kMarketMediumTerm =
 constexpr std::string_view kMarketHighProbability =
     R"({"ticker":"KXHIGH-P","title":"High probability event?","category":"Financials",)"
     R"("status":"active","yes_bid_dollars":"0.7300","yes_ask_dollars":"0.7700",)"
-    R"("volume_fp":"200000.00","close_time":"2026-06-26T00:00:00Z"})";
+    R"("volume_24h_fp":"200000.00","close_time":"2026-06-26T00:00:00Z"})";
 
 // Filtered: not active
 constexpr std::string_view kMarketClosed =
     R"({"ticker":"KXCLS-H","title":"Already closed?","category":"Financials",)"
     R"("status":"closed","yes_bid_dollars":"0.4800","yes_ask_dollars":"0.5200",)"
-    R"("volume_fp":"200000.00","close_time":"2026-06-22T00:00:00Z"})";
+    R"("volume_24h_fp":"200000.00","close_time":"2026-06-22T00:00:00Z"})";
 
 // Filtered: spread too wide (>10c)
 constexpr std::string_view kMarketWideSpread =
     R"({"ticker":"KXWIDE-I","title":"Wide spread market?","category":"Financials",)"
     R"("status":"active","yes_bid_dollars":"0.4000","yes_ask_dollars":"0.6000",)"
-    R"("volume_fp":"200000.00","close_time":"2026-06-26T00:00:00Z"})";
+    R"("volume_24h_fp":"200000.00","close_time":"2026-06-26T00:00:00Z"})";
 
 // Filtered: spread too narrow (<3c) — indicates locked/crossed book
 constexpr std::string_view kMarketNarrowSpread =
     R"({"ticker":"KXNARR-J","title":"Narrow spread market?","category":"Financials",)"
     R"("status":"active","yes_bid_dollars":"0.4900","yes_ask_dollars":"0.5000",)"
-    R"("volume_fp":"200000.00","close_time":"2026-06-26T00:00:00Z"})";
+    R"("volume_24h_fp":"200000.00","close_time":"2026-06-26T00:00:00Z"})";
 
 // Filtered: closes in 0.3 days (too soon)
 constexpr std::string_view kMarketTooSoon =
     R"({"ticker":"KXSOON-K","title":"Closing today?","category":"Financials",)"
     R"("status":"active","yes_bid_dollars":"0.4800","yes_ask_dollars":"0.5200",)"
-    R"("volume_fp":"200000.00","close_time":"2026-06-21T07:00:00Z"})";
+    R"("volume_24h_fp":"200000.00","close_time":"2026-06-21T07:00:00Z"})";
 
 std::string
 make_markets_response(std::initializer_list<std::string_view> markets) {
@@ -366,7 +366,7 @@ TEST_F(TickerScannerTest, ScanPopulatesMarketScoreFields) {
   EXPECT_EQ(market_score.category, "Financials");
   EXPECT_EQ(market_score.mid_price_cents, 50);
   EXPECT_EQ(market_score.spread_cents, 4);
-  EXPECT_DOUBLE_EQ(market_score.volume_usd, kHighVolume);
+  EXPECT_DOUBLE_EQ(market_score.volume_24h, kHighVolume);
   EXPECT_GT(market_score.days_to_close, 4.0);
   EXPECT_LT(market_score.days_to_close, 6.0);
   EXPECT_GT(market_score.score, 0.0);
@@ -392,13 +392,13 @@ TEST_F(TickerScannerTest, ScanRespectsScannerConfigOverrides) {
        make_markets_response({kMarketGoodA, kMarketGoodB, kMarketCrypto})});
 
   kalshi::ScannerConfig config;
-  config.min_volume_usd = kCustomMinVolumeUsd;
+  config.min_volume_24h = kCustomMinVolumeUsd;
   kalshi::TickerScanner scanner{client, config};
   auto results = scanner.scan(kScanTopN, kTestNow);
 
   EXPECT_EQ(results.size(), 2U);
   for (const auto &result : results) {
-    EXPECT_GE(result.volume_usd, 150000.0);
+    EXPECT_GE(result.volume_24h, 150000.0);
   }
 }
 

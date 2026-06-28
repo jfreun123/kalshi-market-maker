@@ -76,8 +76,8 @@ AppConfig load_config(const std::filesystem::path &path) {
         "min_spread_cents", ScannerConfig::kDefaultMinSpreadCents);
     config.scanner.max_spread_cents = scanner_json.value(
         "max_spread_cents", ScannerConfig::kDefaultMaxSpreadCents);
-    config.scanner.min_volume_usd = scanner_json.value(
-        "min_volume_usd", ScannerConfig::kDefaultMinVolumeUsd);
+    config.scanner.min_volume_24h = scanner_json.value(
+        "min_volume_24h", ScannerConfig::kDefaultMinVolume24h);
     config.scanner.min_days_to_close = scanner_json.value(
         "min_days_to_close", ScannerConfig::kDefaultMinDaysToClose);
     config.scanner.max_days_to_close = scanner_json.value(

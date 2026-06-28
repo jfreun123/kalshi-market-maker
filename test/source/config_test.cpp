@@ -90,7 +90,7 @@ TEST(ConfigTest, LoadsScannerSection) {
   config_json["scanner"] = {
       {"min_price_cents", kMinPrice},   {"max_price_cents", kMaxPrice},
       {"min_spread_cents", kMinSpread}, {"max_spread_cents", kMaxSpread},
-      {"min_volume_usd", kMinVolume},   {"min_days_to_close", kMinDays},
+      {"min_volume_24h", kMinVolume},   {"min_days_to_close", kMinDays},
       {"max_days_to_close", kMaxDays}};
 
   const auto path = write_temp_config(config_json);
@@ -101,7 +101,7 @@ TEST(ConfigTest, LoadsScannerSection) {
   EXPECT_EQ(config.scanner.max_price_cents, kMaxPrice);
   EXPECT_EQ(config.scanner.min_spread_cents, kMinSpread);
   EXPECT_EQ(config.scanner.max_spread_cents, kMaxSpread);
-  EXPECT_DOUBLE_EQ(config.scanner.min_volume_usd, kMinVolume);
+  EXPECT_DOUBLE_EQ(config.scanner.min_volume_24h, kMinVolume);
   EXPECT_DOUBLE_EQ(config.scanner.min_days_to_close, kMinDays);
   EXPECT_DOUBLE_EQ(config.scanner.max_days_to_close, kMaxDays);
 }
@@ -112,8 +112,8 @@ TEST(ConfigTest, DefaultsAppliedWhenOptionalSectionsAbsent) {
   std::filesystem::remove(path);
 
   EXPECT_EQ(config.base_url, "https://trading-api.kalshi.com/trade-api/v2");
-  EXPECT_EQ(config.scanner.min_volume_usd,
-            kalshi::ScannerConfig::kDefaultMinVolumeUsd);
+  EXPECT_EQ(config.scanner.min_volume_24h,
+            kalshi::ScannerConfig::kDefaultMinVolume24h);
   EXPECT_EQ(config.scanner.max_days_to_close,
             kalshi::ScannerConfig::kDefaultMaxDaysToClose);
   EXPECT_EQ(config.ws_url, "wss://trading-api.kalshi.com/trade-api/ws/v2");

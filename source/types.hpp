@@ -72,7 +72,7 @@ struct Market {
   int fee_rate_bps{0};
   int yes_bid_cents{0};
   int yes_ask_cents{0};
-  double volume_usd{0.0};
+  double volume_24h{0.0}; // contracts traded in the last 24h
   std::chrono::system_clock::time_point close_time;
 };
 

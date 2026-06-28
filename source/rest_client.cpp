@@ -136,9 +136,9 @@ Market parse_market(const nlohmann::json &market_json) {
       .fee_rate_bps = market_json.value("fee_rate_bps", 0),
       .yes_bid_cents = yes_bid,
       .yes_ask_cents = yes_ask,
-      .volume_usd =
-          market_json.contains("volume_fp")
-              ? std::stod(market_json.at("volume_fp").get<std::string>())
+      .volume_24h =
+          market_json.contains("volume_24h_fp")
+              ? std::stod(market_json.at("volume_24h_fp").get<std::string>())
               : 0.0,
       .close_time =
           parse_iso8601(market_json.at("close_time").get<std::string>()),

@@ -20,8 +20,8 @@ constexpr double kSpreadHalfRange = 3.5;
 
 double compute_score(const MarketScore &market, double max_volume) {
   double vol_term = 0.0;
-  if (max_volume > 1.0 && market.volume_usd > 1.0) {
-    vol_term = std::log(market.volume_usd) / std::log(max_volume);
+  if (max_volume > 1.0 && market.volume_24h > 1.0) {
+    vol_term = std::log(market.volume_24h) / std::log(max_volume);
   }
 
   const double spread_term =
@@ -77,7 +77,7 @@ TickerScanner::scan(int top_n,
         spread > config_.max_spread_cents) {
       continue;
     }
-    if (market.volume_usd < config_.min_volume_usd) {
+    if (market.volume_24h < config_.min_volume_24h) {
       continue;
     }
 
@@ -94,7 +94,7 @@ TickerScanner::scan(int top_n,
     scored.category = market.category;
     scored.mid_price_cents = mid;
     scored.spread_cents = spread;
-    scored.volume_usd = market.volume_usd;
+    scored.volume_24h = market.volume_24h;
     scored.days_to_close = days;
     candidates.push_back(std::move(scored));
   }
@@ -102,8 +102,8 @@ TickerScanner::scan(int top_n,
   // Find max volume among candidates for log-normalization.
   double max_volume = 1.0;
   for (const auto &candidate : candidates) {
-    if (candidate.volume_usd > max_volume) {
-      max_volume = candidate.volume_usd;
+    if (candidate.volume_24h > max_volume) {
+      max_volume = candidate.volume_24h;
     }
   }
 

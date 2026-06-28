@@ -108,6 +108,23 @@ TEST_F(RestClientTest, GetMarketsParsesSingleMarket) {
             std::chrono::system_clock::time_point{}); // non-default
 }
 
+TEST_F(RestClientTest, GetMarketsParsesDailyVolume) {
+  // The scanner ranks on 24h volume (live flow), not lifetime volume_fp.
+  constexpr double kExpectedDailyVolume = 6024216.16;
+  auto transport = std::make_unique<FakeTransport>();
+  FakeTransport *const transport_raw = transport.get();
+  transport_raw->enqueue(
+      {kHttpOk,
+       R"({"markets":[{"ticker":"KXBTCD","close_time":"2025-12-25T00:00:00Z",)"
+       R"("volume_fp":"15929810.28","volume_24h_fp":"6024216.16"}],"cursor":""})"});
+  auto client = make_client(std::move(transport));
+
+  auto markets = client.get_markets();
+
+  ASSERT_EQ(markets.size(), kOneResult);
+  EXPECT_DOUBLE_EQ(markets[0].volume_24h, kExpectedDailyVolume);
+}
+
 TEST_F(RestClientTest, GetMarketsWithMissingFeeRateBpsDefaultsToZero) {
   auto transport = std::make_unique<FakeTransport>();
   FakeTransport *const transport_raw = transport.get();
