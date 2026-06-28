@@ -2,6 +2,7 @@
 
 #include "quoter.hpp"
 #include "risk_manager.hpp"
+#include "ticker_scanner.hpp"
 
 #include <filesystem>
 #include <string>
@@ -18,6 +19,7 @@ struct AppConfig {
   std::vector<std::string> target_tickers;
   QuoterConfig quoter;
   RiskLimits risk;
+  ScannerConfig scanner;
 };
 
 // Loads configuration from a JSON file.

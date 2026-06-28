@@ -77,12 +77,45 @@ TEST(ConfigTest, LoadsAllFields) {
   EXPECT_DOUBLE_EQ(config.risk.daily_loss_limit, kDailyLossLimit);
 }
 
+TEST(ConfigTest, LoadsScannerSection) {
+  constexpr int kMinPrice = 5;
+  constexpr int kMaxPrice = 95;
+  constexpr int kMinSpread = 1;
+  constexpr int kMaxSpread = 20;
+  constexpr double kMinVolume = 25.0;
+  constexpr double kMinDays = 0.5;
+  constexpr double kMaxDays = 120.0;
+
+  nlohmann::json config_json = minimal_config_json();
+  config_json["scanner"] = {
+      {"min_price_cents", kMinPrice},   {"max_price_cents", kMaxPrice},
+      {"min_spread_cents", kMinSpread}, {"max_spread_cents", kMaxSpread},
+      {"min_volume_usd", kMinVolume},   {"min_days_to_close", kMinDays},
+      {"max_days_to_close", kMaxDays}};
+
+  const auto path = write_temp_config(config_json);
+  const auto config = kalshi::load_config(path);
+  std::filesystem::remove(path);
+
+  EXPECT_EQ(config.scanner.min_price_cents, kMinPrice);
+  EXPECT_EQ(config.scanner.max_price_cents, kMaxPrice);
+  EXPECT_EQ(config.scanner.min_spread_cents, kMinSpread);
+  EXPECT_EQ(config.scanner.max_spread_cents, kMaxSpread);
+  EXPECT_DOUBLE_EQ(config.scanner.min_volume_usd, kMinVolume);
+  EXPECT_DOUBLE_EQ(config.scanner.min_days_to_close, kMinDays);
+  EXPECT_DOUBLE_EQ(config.scanner.max_days_to_close, kMaxDays);
+}
+
 TEST(ConfigTest, DefaultsAppliedWhenOptionalSectionsAbsent) {
   const auto path = write_temp_config(minimal_config_json());
   const auto config = kalshi::load_config(path);
   std::filesystem::remove(path);
 
   EXPECT_EQ(config.base_url, "https://trading-api.kalshi.com/trade-api/v2");
+  EXPECT_EQ(config.scanner.min_volume_usd,
+            kalshi::ScannerConfig::kDefaultMinVolumeUsd);
+  EXPECT_EQ(config.scanner.max_days_to_close,
+            kalshi::ScannerConfig::kDefaultMaxDaysToClose);
   EXPECT_EQ(config.ws_url, "wss://trading-api.kalshi.com/trade-api/ws/v2");
   EXPECT_EQ(config.quoter.target_spread_cents,
             kalshi::QuoterConfig::kDefaultTargetSpreadCents);

@@ -66,6 +66,24 @@ AppConfig load_config(const std::filesystem::path &path) {
         risk_json.value("daily_loss_limit", RiskLimits::kDefaultDailyLossLimit);
   }
 
+  if (json_data.contains("scanner")) {
+    const auto &scanner_json = json_data.at("scanner");
+    config.scanner.min_price_cents = scanner_json.value(
+        "min_price_cents", ScannerConfig::kDefaultMinPriceCents);
+    config.scanner.max_price_cents = scanner_json.value(
+        "max_price_cents", ScannerConfig::kDefaultMaxPriceCents);
+    config.scanner.min_spread_cents = scanner_json.value(
+        "min_spread_cents", ScannerConfig::kDefaultMinSpreadCents);
+    config.scanner.max_spread_cents = scanner_json.value(
+        "max_spread_cents", ScannerConfig::kDefaultMaxSpreadCents);
+    config.scanner.min_volume_usd = scanner_json.value(
+        "min_volume_usd", ScannerConfig::kDefaultMinVolumeUsd);
+    config.scanner.min_days_to_close = scanner_json.value(
+        "min_days_to_close", ScannerConfig::kDefaultMinDaysToClose);
+    config.scanner.max_days_to_close = scanner_json.value(
+        "max_days_to_close", ScannerConfig::kDefaultMaxDaysToClose);
+  }
+
   return config;
 }
 

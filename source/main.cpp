@@ -192,12 +192,17 @@ static void check_ws_staleness(const kalshi::WebSocketClient &ws_client,
 // ---- Scanner mode ----
 
 static int run_scan_mode(kalshi::RestClient &rest,
+                         const kalshi::ScannerConfig &scanner_config,
                          std::shared_ptr<spdlog::logger> &log) {
   constexpr int kScanTopN = 20;
-  log->info("scanner mode — scanning all active markets");
+  log->info("scanner mode — scanning all markets "
+            "(price=[{},{}]c spread=[{},{}]c min_vol=${:.0f} max_days={:.0f})",
+            scanner_config.min_price_cents, scanner_config.max_price_cents,
+            scanner_config.min_spread_cents, scanner_config.max_spread_cents,
+            scanner_config.min_volume_usd, scanner_config.max_days_to_close);
 
   const auto now = std::chrono::system_clock::now();
-  kalshi::TickerScanner scanner{rest};
+  kalshi::TickerScanner scanner{rest, scanner_config};
   const auto results = scanner.scan(kScanTopN, now);
   if (results.empty()) {
     log->warn("no markets passed scanner filters");
@@ -292,7 +297,7 @@ int main(int argc, char *argv[]) {
                             app_config.base_url};
 
     if (cli.scan_mode) {
-      return run_scan_mode(rest, log);
+      return run_scan_mode(rest, app_config.scanner, log);
     }
 
     if (app_config.target_tickers.empty()) {

@@ -10,13 +10,21 @@
 namespace kalshi {
 
 struct ScannerConfig {
-  int min_price_cents{15};
-  int max_price_cents{85};
-  int min_spread_cents{3};
-  int max_spread_cents{10};
-  double min_volume_usd{1000.0};
-  double min_days_to_close{1.0};
-  double max_days_to_close{90.0};
+  static constexpr int kDefaultMinPriceCents = 15;
+  static constexpr int kDefaultMaxPriceCents = 85;
+  static constexpr int kDefaultMinSpreadCents = 3;
+  static constexpr int kDefaultMaxSpreadCents = 10;
+  static constexpr double kDefaultMinVolumeUsd = 1000.0;
+  static constexpr double kDefaultMinDaysToClose = 1.0;
+  static constexpr double kDefaultMaxDaysToClose = 90.0;
+
+  int min_price_cents{kDefaultMinPriceCents};
+  int max_price_cents{kDefaultMaxPriceCents};
+  int min_spread_cents{kDefaultMinSpreadCents};
+  int max_spread_cents{kDefaultMaxSpreadCents};
+  double min_volume_usd{kDefaultMinVolumeUsd};
+  double min_days_to_close{kDefaultMinDaysToClose};
+  double max_days_to_close{kDefaultMaxDaysToClose};
   // When non-empty, scan fetches each event series separately instead of
   // using the global /markets listing (which returns zero-volume junk).
   std::vector<std::string> event_series{};
