@@ -43,7 +43,7 @@ static void setup_logger(const std::filesystem::path &log_dir) {
   std::filesystem::create_directories(log_dir);
   const auto log_path = log_dir / "app.log";
 
-  constexpr std::size_t kMaxLogBytes = 20UL * 1024UL * 1024UL; // 20 MB
+  constexpr std::size_t kMaxLogBytes = 20UL * 1024UL * 1024UL;
   constexpr std::size_t kMaxLogFiles = 14U;
 
   auto file_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
@@ -73,6 +73,100 @@ prior_pnl_for(const std::unordered_map<std::string, double> &prior_pnl,
   return prior_pnl.contains(ticker) ? prior_pnl.at(ticker) : 0.0;
 }
 
+// Returns {transport, paper_ptr}. paper_ptr is non-null only in paper mode.
+static auto make_http_transport(bool paper_mode,
+                                std::shared_ptr<spdlog::logger> &log)
+    -> std::pair<std::unique_ptr<kalshi::IHttpTransport>,
+                 kalshi::PaperTransport *> {
+  if (paper_mode) {
+    log->info("paper trading mode — no live orders will be placed");
+    auto paper = std::make_unique<kalshi::PaperTransport>();
+    auto *ptr = paper.get();
+    return {std::move(paper), ptr};
+  }
+  return {std::make_unique<kalshi::HttpTransport>(), nullptr};
+}
+
+// ---- WS event handlers ----
+
+using ObMap = std::unordered_map<std::string, kalshi::LocalOrderbook>;
+using PnlMap = std::unordered_map<std::string, double>;
+
+static void handle_snapshot(ObMap &ob_map, const kalshi::Orderbook &snap,
+                            std::shared_ptr<spdlog::logger> &log) {
+  ob_map[snap.ticker].apply_snapshot(snap);
+  log->info("snapshot ticker={} yes_levels={} no_levels={}", snap.ticker,
+            snap.yes.size(), snap.no.size());
+}
+
+static void handle_delta(ObMap &ob_map, kalshi::Quoter &quoter,
+                         const std::string &ticker, kalshi::Side side,
+                         int price, int qty,
+                         std::shared_ptr<spdlog::logger> &log) {
+  ob_map[ticker].apply_delta(side, price, qty);
+  log->debug("delta ticker={} side={} price={} qty={} mid={:.1f} spread={}",
+             ticker, side_name(side), price, qty,
+             ob_map[ticker].mid_price_cents(), ob_map[ticker].spread_cents());
+  try {
+    quoter.update(ticker, ob_map[ticker]);
+  } catch (const std::exception &ex) {
+    log->error("quoter error ticker={}: {}", ticker, ex.what());
+  }
+}
+
+static void handle_fill(kalshi::IOrderManager &order_mgr,
+                        kalshi::RiskManager &risk_mgr,
+                        const kalshi::AppConfig &app_config, PnlMap &prior_pnl,
+                        const std::filesystem::path &pnl_path,
+                        std::shared_ptr<spdlog::logger> &log,
+                        const kalshi::Fill &fill) {
+  order_mgr.record_fill(fill);
+  risk_mgr.update(order_mgr, app_config.target_tickers);
+
+  const double session_pnl = order_mgr.realized_pnl(fill.market_ticker);
+  const double total_pnl =
+      prior_pnl_for(prior_pnl, fill.market_ticker) + session_pnl;
+
+  log->info("fill ticker={} side={} price={} qty={} is_taker={} "
+            "session_pnl=${:.2f} total_pnl=${:.2f}",
+            fill.market_ticker, side_name(fill.side), fill.price_cents,
+            fill.quantity, fill.is_taker, session_pnl / kCentsPerDollar,
+            total_pnl / kCentsPerDollar);
+
+  if (risk_mgr.is_halted()) {
+    log->critical("risk halted constraints={}", risk_mgr.active_constraints());
+  }
+
+  prior_pnl[fill.market_ticker] = total_pnl;
+
+  try {
+    nlohmann::json json_pnl = prior_pnl;
+    std::ofstream file{pnl_path};
+    file << json_pnl.dump(2);
+  } catch (...) {
+    log->warn("pnl_state: failed to write {}", pnl_path.string());
+  }
+}
+
+// ---- Status logging ----
+
+static void log_status_snapshot(const std::vector<std::string> &tickers,
+                                const kalshi::IOrderManager &order_mgr,
+                                const kalshi::RiskManager &risk_mgr,
+                                const PnlMap &prior_pnl,
+                                std::shared_ptr<spdlog::logger> &log) {
+  for (const auto &ticker : tickers) {
+    const int pos = order_mgr.net_position(ticker);
+    const double session_pnl = order_mgr.realized_pnl(ticker);
+    const double prior = prior_pnl_for(prior_pnl, ticker);
+    log->info("status ticker={} net_pos={} session_pnl_dollars={:.2f} "
+              "total_pnl_dollars={:.2f} halted={} constraints={}",
+              ticker, pos, session_pnl / kCentsPerDollar,
+              (prior + session_pnl) / kCentsPerDollar, risk_mgr.is_halted(),
+              risk_mgr.active_constraints());
+  }
+}
+
 static void check_ws_staleness(const kalshi::WebSocketClient &ws_client,
                                kalshi::RiskManager &risk_mgr,
                                std::shared_ptr<spdlog::logger> &log,
@@ -92,24 +186,6 @@ static void check_ws_staleness(const kalshi::WebSocketClient &ws_client,
     risk_mgr.clear(kalshi::Constraint::kStaleBook);
     stale_logged = false;
     log->info("ws recovered — stale constraint cleared");
-  }
-}
-
-static void
-log_status_snapshot(const std::vector<std::string> &tickers,
-                    const kalshi::OrderManager &order_mgr,
-                    const kalshi::RiskManager &risk_mgr,
-                    const std::unordered_map<std::string, double> &prior_pnl,
-                    std::shared_ptr<spdlog::logger> &log) {
-  for (const auto &ticker : tickers) {
-    const int pos = order_mgr.net_position(ticker);
-    const double session_pnl = order_mgr.realized_pnl(ticker);
-    const double prior = prior_pnl_for(prior_pnl, ticker);
-    log->info("status ticker={} net_pos={} session_pnl_dollars={:.2f} "
-              "total_pnl_dollars={:.2f} halted={} constraints={}",
-              ticker, pos, session_pnl / kCentsPerDollar,
-              (prior + session_pnl) / kCentsPerDollar, risk_mgr.is_halted(),
-              risk_mgr.active_constraints());
   }
 }
 
@@ -140,9 +216,8 @@ static int run_scan_mode(kalshi::RestClient &rest,
 
 // ---- PnL persistence ----
 
-static std::unordered_map<std::string, double>
-load_pnl(const std::filesystem::path &path) {
-  std::unordered_map<std::string, double> result;
+static PnlMap load_pnl(const std::filesystem::path &path) {
+  PnlMap result;
   if (!std::filesystem::exists(path)) {
     return result;
   }
@@ -157,17 +232,6 @@ load_pnl(const std::filesystem::path &path) {
                                path.string());
   }
   return result;
-}
-
-static void save_pnl(const std::filesystem::path &path,
-                     const std::unordered_map<std::string, double> &pnl) {
-  try {
-    nlohmann::json json = pnl;
-    std::ofstream file{path};
-    file << json.dump(2);
-  } catch (...) {
-    kalshi::get_logger()->warn("pnl_state: failed to write {}", path.string());
-  }
 }
 
 // ---- Arg parsing ----
@@ -199,17 +263,14 @@ int main(int argc, char *argv[]) {
   try {
     const auto cli =
         parse_args(std::span<char *>(argv, static_cast<std::size_t>(argc)));
-    const bool paper_mode = cli.paper_mode;
-    const bool scan_mode = cli.scan_mode;
-
     const kalshi::AppConfig app_config = kalshi::load_config(cli.config_path);
 
     setup_logger(std::filesystem::path{app_config.log_dir});
     auto log = kalshi::get_logger();
 
     log->info("startup mode={} tickers={} base_url={}",
-              paper_mode ? "paper" : "live", app_config.target_tickers.size(),
-              app_config.base_url);
+              cli.paper_mode ? "paper" : "live",
+              app_config.target_tickers.size(), app_config.base_url);
     for (const auto &ticker : app_config.target_tickers) {
       log->info("startup ticker={}", ticker);
     }
@@ -225,21 +286,11 @@ int main(int argc, char *argv[]) {
 
     kalshi::Auth auth{app_config.api_key, private_key_pem};
 
-    std::unique_ptr<kalshi::IHttpTransport> http_transport;
-    kalshi::PaperTransport *paper_ptr = nullptr;
-    if (paper_mode) {
-      auto paper = std::make_unique<kalshi::PaperTransport>();
-      paper_ptr = paper.get();
-      http_transport = std::move(paper);
-      log->info("paper trading mode — no live orders will be placed");
-    } else {
-      http_transport = std::make_unique<kalshi::HttpTransport>();
-    }
-
+    auto [http_transport, paper_ptr] = make_http_transport(cli.paper_mode, log);
     kalshi::RestClient rest{auth, std::move(http_transport),
                             app_config.base_url};
 
-    if (scan_mode) {
+    if (cli.scan_mode) {
       return run_scan_mode(rest, log);
     }
 
@@ -252,12 +303,11 @@ int main(int argc, char *argv[]) {
     kalshi::WebSocketClient ws_client{
         auth, std::make_unique<kalshi::IxWebSocket>(), app_config.ws_url};
 
-    std::unordered_map<std::string, kalshi::LocalOrderbook> ob_map;
+    ObMap ob_map;
     kalshi::OrderManager order_mgr{rest};
     kalshi::RiskManager risk_mgr{app_config.risk};
     kalshi::Quoter quoter{app_config.quoter, order_mgr, risk_mgr};
 
-    // Load prior-session PnL so the daily loss limit accounts for restarts.
     const std::filesystem::path pnl_path{"pnl_state.json"};
     auto prior_pnl = load_pnl(pnl_path);
     for (const auto &[ticker, cents] : prior_pnl) {
@@ -265,7 +315,6 @@ int main(int argc, char *argv[]) {
                 cents / kCentsPerDollar);
     }
 
-    // Seed orderbooks from REST snapshot and place initial quotes before WS.
     for (const auto &ticker : app_config.target_tickers) {
       log->info("seeding orderbook ticker={}", ticker);
       auto snap = rest.get_orderbook(ticker);
@@ -274,53 +323,21 @@ int main(int argc, char *argv[]) {
       quoter.update(ticker, ob_map[ticker]);
     }
 
-    // ---- Callbacks ----
-
     ws_client.on_orderbook_snapshot(
         [&ob_map, &log](const kalshi::Orderbook &snap) {
-          ob_map[snap.ticker].apply_snapshot(snap);
-          log->info("snapshot ticker={} yes_levels={} no_levels={}",
-                    snap.ticker, snap.yes.size(), snap.no.size());
-          // WS snapshot refreshes book state; repricing is driven by deltas.
+          handle_snapshot(ob_map, snap, log);
         });
 
-    ws_client.on_orderbook_delta([&ob_map, &quoter,
-                                  &log](const std::string &ticker,
-                                        kalshi::Side side, int price, int qty) {
-      ob_map[ticker].apply_delta(side, price, qty);
-      log->debug("delta ticker={} side={} price={} qty={} mid={:.1f} spread={}",
-                 ticker, side_name(side), price, qty,
-                 ob_map[ticker].mid_price_cents(),
-                 ob_map[ticker].spread_cents());
-      try {
-        quoter.update(ticker, ob_map[ticker]);
-      } catch (const std::exception &ex) {
-        log->error("quoter error on delta ticker={}: {}", ticker, ex.what());
-      }
-    });
+    ws_client.on_orderbook_delta(
+        [&ob_map, &quoter, &log](const std::string &ticker, kalshi::Side side,
+                                 int price, int qty) {
+          handle_delta(ob_map, quoter, ticker, side, price, qty, log);
+        });
 
     ws_client.on_fill([&order_mgr, &risk_mgr, &app_config, &prior_pnl,
                        &pnl_path, &log](const kalshi::Fill &fill) {
-      order_mgr.record_fill(fill);
-      risk_mgr.update(order_mgr, app_config.target_tickers);
-
-      const double session_pnl = order_mgr.realized_pnl(fill.market_ticker);
-      const double total_pnl =
-          prior_pnl_for(prior_pnl, fill.market_ticker) + session_pnl;
-
-      log->info("fill ticker={} side={} price={} qty={} is_taker={} "
-                "session_pnl=${:.2f} total_pnl=${:.2f}",
-                fill.market_ticker, side_name(fill.side), fill.price_cents,
-                fill.quantity, fill.is_taker, session_pnl / kCentsPerDollar,
-                total_pnl / kCentsPerDollar);
-
-      if (risk_mgr.is_halted()) {
-        log->critical("risk halted constraints={}",
-                      risk_mgr.active_constraints());
-      }
-
-      prior_pnl[fill.market_ticker] = total_pnl;
-      save_pnl(pnl_path, prior_pnl);
+      handle_fill(order_mgr, risk_mgr, app_config, prior_pnl, pnl_path, log,
+                  fill);
     });
 
     ws_client.on_disconnect([&order_mgr, &app_config, &log]() {
@@ -334,8 +351,6 @@ int main(int argc, char *argv[]) {
     std::signal(SIGTERM, handle_signal);
 
     std::thread ws_thread([&ws_client]() { ws_client.run(); });
-
-    // ---- Main poll loop ----
 
     constexpr auto kPollInterval = std::chrono::milliseconds{100};
     constexpr int kPositionLogInterval = 600;    // 600 × 100ms = 60s
@@ -365,7 +380,7 @@ int main(int argc, char *argv[]) {
       order_mgr.cancel_all(ticker);
     }
 
-    if (paper_mode && paper_ptr != nullptr) {
+    if (paper_ptr != nullptr) {
       log->info("paper mode: simulated fills={}", paper_ptr->fills().size());
     }
 
