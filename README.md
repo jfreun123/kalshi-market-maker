@@ -98,14 +98,29 @@ openssl rsa -in kalshi-private-key.pem -pubout -out kalshi-public-key.pem
 ## Running
 
 ```bash
-# Live trading
+# Scan active markets and print ranked candidates (no orders placed)
+./build/source/kalshi_mm --scan config.json
+
+# Live trading (target_tickers must be set in config.json)
 ./build/source/kalshi_mm config.json
 
 # Paper trading (simulates fills locally, no real orders)
 ./build/source/kalshi_mm --paper config.json
 
 # Demo / UAT environment
-# Set base_url to https://demo-api.kalshi.co/trade-api/v2 in config.json
+# Set base_url and ws_url to the demo endpoints in config.json:
+#   "base_url": "https://demo-api.kalshi.co/trade-api/v2"
+#   "ws_url":   "wss://demo-api.kalshi.co/trade-api/ws/v2"
+```
+
+### Workflow: scan then trade
+
+Run `--scan` first to find liquid markets, then copy the top tickers into `target_tickers` in your config and start the market maker:
+
+```bash
+./build/source/kalshi_mm --scan config.json 2>&1 | grep "ticker="
+# Pick tickers from the output, add them to config.json → target_tickers
+./build/source/kalshi_mm config.json
 ```
 
 ## Development
@@ -183,7 +198,7 @@ GitHub Actions runs four jobs on every push to `main`:
 
 | Job | What it checks |
 |---|---|
-| Build & Test | `cmake --preset dev`, all 195 unit + replay tests |
+| Build & Test | `cmake --preset dev`, all unit + replay tests |
 | AddressSanitizer | Same tests under ASAN |
 | Coverage | Line coverage via lcov + llvm-cov; report uploaded as artifact |
 | Benchmark | Builds and runs the benchmark binary |
