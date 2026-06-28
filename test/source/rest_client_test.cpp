@@ -145,6 +145,33 @@ TEST_F(RestClientTest, GetMarketsWithEventTickerAppendsQueryParam) {
             std::string::npos);
 }
 
+TEST_F(RestClientTest, GetMarketsRequestsLargePageSize) {
+  // A large limit minimizes round-trips when paginating the full listing.
+  auto transport = std::make_unique<FakeTransport>();
+  FakeTransport *const transport_raw = transport.get();
+  transport_raw->enqueue({kHttpOk, R"({"markets":[],"cursor":""})"});
+  auto client = make_client(std::move(transport));
+
+  client.get_markets();
+
+  EXPECT_NE(transport_raw->last_request().url.find("limit=1000"),
+            std::string::npos);
+}
+
+TEST_F(RestClientTest, GetMarketsRequestsOnlyOpenMarkets) {
+  // Settled/closed markets are never tradeable; restrict the listing to open
+  // markets to avoid paging through the full historical archive.
+  auto transport = std::make_unique<FakeTransport>();
+  FakeTransport *const transport_raw = transport.get();
+  transport_raw->enqueue({kHttpOk, R"({"markets":[],"cursor":""})"});
+  auto client = make_client(std::move(transport));
+
+  client.get_markets();
+
+  EXPECT_NE(transport_raw->last_request().url.find("status=open"),
+            std::string::npos);
+}
+
 TEST_F(RestClientTest, GetMarketsFollowsCursorToFetchAllPages) {
   // First page returns one market and a non-empty cursor; second page returns
   // a second market and an empty cursor, signalling end of results.

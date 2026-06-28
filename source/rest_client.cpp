@@ -192,19 +192,27 @@ RestClient::RestClient(Auth auth, std::unique_ptr<IHttpTransport> transport,
       path_prefix_{extract_path_prefix(base_url_)} {}
 
 std::vector<Market> RestClient::get_markets(std::string_view event_ticker) {
+  // Max page size accepted by the Kalshi /markets endpoint. Larger pages mean
+  // fewer round-trips when paginating the full (150k+ market) listing.
+  constexpr int kMarketsPageLimit = 1000;
+
   const std::string path = path_prefix_ + "/markets";
-  const std::string event_param =
-      event_ticker.empty() ? "" : "event_ticker=" + std::string(event_ticker);
+  // status=open restricts to currently-tradeable markets; without it the
+  // listing includes the entire settled archive (150k+ markets).
+  std::string base_query =
+      "limit=" + std::to_string(kMarketsPageLimit) + "&status=open";
+  if (!event_ticker.empty()) {
+    base_query += "&event_ticker=" + std::string(event_ticker);
+  }
 
   std::vector<Market> all_markets;
   std::string cursor;
 
   auto fetch_page = [&]() {
-    std::string url = base_url_ + "/markets?";
-    if (!event_param.empty()) {
-      url += event_param + "&";
+    std::string url = base_url_ + "/markets?" + base_query;
+    if (!cursor.empty()) {
+      url += "&cursor=" + cursor;
     }
-    url += "cursor=" + cursor;
 
     auto headers = auth_.sign("GET", path);
     auto resp = transport_->get(url, headers);

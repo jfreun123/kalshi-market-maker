@@ -50,12 +50,26 @@ HttpResponse make_response(const httplib::Result &result) {
 
 } // namespace
 
+namespace {
+
+constexpr int kConnectTimeoutSec = 10;
+constexpr int kReadTimeoutSec = 30;
+
+httplib::Client make_client(const std::string &base) {
+  httplib::Client client{base};
+  client.set_follow_location(true);
+  client.set_connection_timeout(kConnectTimeoutSec, 0);
+  client.set_read_timeout(kReadTimeoutSec, 0);
+  return client;
+}
+
+} // namespace
+
 HttpResponse
 HttpTransport::get(std::string_view url,
                    const std::map<std::string, std::string> &headers) {
   auto [base, path] = split_url(url);
-  httplib::Client client{base};
-  client.set_follow_location(true);
+  auto client = make_client(base);
   auto httplib_headers = to_httplib_headers(headers);
   return make_response(client.Get(path, httplib_headers));
 }
@@ -65,8 +79,7 @@ HttpTransport::post(std::string_view url,
                     const std::map<std::string, std::string> &headers,
                     std::string_view body) {
   auto [base, path] = split_url(url);
-  httplib::Client client{base};
-  client.set_follow_location(true);
+  auto client = make_client(base);
   auto httplib_headers = to_httplib_headers(headers);
   return make_response(client.Post(path, httplib_headers, std::string(body),
                                    "application/json"));
@@ -76,8 +89,7 @@ HttpResponse
 HttpTransport::delete_(std::string_view url,
                        const std::map<std::string, std::string> &headers) {
   auto [base, path] = split_url(url);
-  httplib::Client client{base};
-  client.set_follow_location(true);
+  auto client = make_client(base);
   auto httplib_headers = to_httplib_headers(headers);
   return make_response(client.Delete(path, httplib_headers));
 }
