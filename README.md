@@ -123,6 +123,27 @@ Run `--scan` first to find liquid markets, then copy the top tickers into `targe
 ./build/source/kalshi_mm config.json
 ```
 
+The scanner pages through all **open** markets (`status=open`, 1000/page) and ranks
+them by a volume-weighted score with a spread-quality term. Filters are set in the
+optional `scanner` section of the config:
+
+```json
+"scanner": {
+  "min_price_cents": 15,
+  "max_price_cents": 85,
+  "min_spread_cents": 3,
+  "max_spread_cents": 10,
+  "min_volume_usd": 1000.0,
+  "min_days_to_close": 1.0,
+  "max_days_to_close": 90.0
+}
+```
+
+All fields are optional and fall back to the defaults shown above. Loosen
+`min_volume_usd`, the price range, and the spread range for demo (where liquidity
+is thin); tighten them for production. Switching environments is just a matter of
+changing `base_url`/`ws_url` and these thresholds.
+
 ## Development
 
 ### CMake presets

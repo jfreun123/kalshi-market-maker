@@ -18,5 +18,14 @@
     "max_open_orders_per_market": 4,
     "max_order_size": 25,
     "daily_loss_limit": -500.0
+  },
+  "scanner": {
+    "min_price_cents": 15,
+    "max_price_cents": 85,
+    "min_spread_cents": 3,
+    "max_spread_cents": 10,
+    "min_volume_usd": 1000.0,
+    "min_days_to_close": 1.0,
+    "max_days_to_close": 90.0
   }
 }
