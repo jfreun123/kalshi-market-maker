@@ -32,11 +32,11 @@ struct QuoterConfig {
 class Quoter {
 public:
   // Default pricing: HeuristicModel.
-  Quoter(QuoterConfig config, OrderManager &order_mgr, RiskManager &risk_mgr);
+  Quoter(QuoterConfig config, IOrderManager &order_mgr, RiskManager &risk_mgr);
 
   // Custom pricing: inject any IPricingModel via a FairValueEngine.
   Quoter(QuoterConfig config, FairValueEngine fv_engine,
-         OrderManager &order_mgr, RiskManager &risk_mgr);
+         IOrderManager &order_mgr, RiskManager &risk_mgr);
 
   void update(std::string_view ticker, const LocalOrderbook &book);
 
@@ -59,7 +59,7 @@ private:
 
   QuoterConfig config_;
   FairValueEngine fv_engine_;
-  OrderManager &order_mgr_;
+  IOrderManager &order_mgr_;
   RiskManager &risk_mgr_;
   std::unordered_map<std::string, LiveQuote> live_quotes_;
 };

@@ -17,13 +17,13 @@ constexpr int kAskMinCents = 2;
 constexpr int kAskMaxCents = 99;
 constexpr int kHalfSpreadMin = 1;
 
-Quoter::Quoter(QuoterConfig config, OrderManager &order_mgr,
+Quoter::Quoter(QuoterConfig config, IOrderManager &order_mgr,
                RiskManager &risk_mgr)
     : Quoter(config, FairValueEngine{std::make_unique<HeuristicModel>()},
              order_mgr, risk_mgr) {}
 
 Quoter::Quoter(QuoterConfig config, FairValueEngine fv_engine,
-               OrderManager &order_mgr, RiskManager &risk_mgr)
+               IOrderManager &order_mgr, RiskManager &risk_mgr)
     : config_{config}, fv_engine_{std::move(fv_engine)}, order_mgr_{order_mgr},
       risk_mgr_{risk_mgr} {}
 

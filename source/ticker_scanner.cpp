@@ -10,15 +10,14 @@ namespace {
 
 constexpr double kSecondsPerDay = 86400.0;
 
-constexpr double kWeightVolume = 0.35;
-constexpr double kWeightPrice = 0.25;
-constexpr double kWeightSpread = 0.20;
-constexpr double kWeightTime = 0.10;
+constexpr double kWeightVolume = 0.60;
+constexpr double kWeightSpread = 0.30;
 constexpr double kWeightCategory = 0.10;
 
-constexpr double kMidTarget = 50.0;
-constexpr double kMidRange = 35.0;
-constexpr double kSpreadTarget = 5.0;
+// Spread scoring peaks at the midpoint of the [min_spread, max_spread] filter
+// range ([3, 10]c) and falls to zero at the edges.
+constexpr double kSpreadMidCents = 6.5;
+constexpr double kSpreadHalfRange = 3.5;
 
 constexpr double kCategoryBonusFinancials = 1.0;
 constexpr double kCategoryBonusEconomics = 0.8;
@@ -122,20 +121,12 @@ double TickerScanner::compute_score(const MarketScore &market,
     vol_term = std::log(market.volume_usd) / std::log(max_volume);
   }
 
-  const double price_term =
-      1.0 - std::abs(static_cast<double>(market.mid_price_cents) - kMidTarget) /
-                kMidRange;
-
   const double spread_term =
-      1.0 - std::abs(static_cast<double>(market.spread_cents) - kSpreadTarget) /
-                kSpreadTarget;
+      1.0 -
+      std::abs(static_cast<double>(market.spread_cents) - kSpreadMidCents) /
+          kSpreadHalfRange;
 
-  const double time_term =
-      1.0 - market.days_to_close / config_.max_days_to_close;
-
-  return kWeightVolume * vol_term + kWeightPrice * std::max(0.0, price_term) +
-         kWeightSpread * std::max(0.0, spread_term) +
-         kWeightTime * std::max(0.0, time_term) +
+  return kWeightVolume * vol_term + kWeightSpread * std::max(0.0, spread_term) +
          kWeightCategory * category_bonus(market.category);
 }
 

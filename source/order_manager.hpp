@@ -12,42 +12,54 @@
 
 namespace kalshi {
 
+// Interface for order lifecycle operations. Quoter and RiskManager depend on
+// this abstraction rather than the concrete RestClient-backed OrderManager,
+// which allows unit testing without HTTP and enables alternative
+// implementations (paper trading, multi-exchange routing, rate-limited
+// wrappers).
+class IOrderManager {
+public:
+  virtual ~IOrderManager() = default;
+
+  // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
+  virtual Order place(std::string_view ticker, Side side, int price_cents,
+                      int quantity) = 0;
+  virtual bool cancel(std::string_view order_id) = 0;
+  virtual void cancel_all(std::string_view ticker) = 0;
+  virtual void record_fill(const Fill &fill) = 0;
+
+  [[nodiscard]] virtual int net_position(std::string_view ticker) const = 0;
+  [[nodiscard]] virtual double realized_pnl(std::string_view ticker) const = 0;
+  [[nodiscard]] virtual const std::unordered_map<std::string, Order> &
+  open_orders() const = 0;
+};
+
 // Tracks the lifecycle of all live orders and accumulates fill data.
 //
 // - place/cancel/cancel_all forward to RestClient and maintain local state.
 // - record_fill updates net_position and realized_pnl using FIFO matching:
 //   each incoming fill is matched against the oldest opposing-side lots.
 //   Duplicate fills (same order_id + timestamp) are silently ignored.
-class OrderManager {
+class OrderManager : public IOrderManager {
 public:
   explicit OrderManager(RestClient &rest_client);
 
-  // Place a limit order and record it locally.
-  // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
+  ~OrderManager() override = default;
+  OrderManager(const OrderManager &) = delete;
+  OrderManager &operator=(const OrderManager &) = delete;
+  OrderManager(OrderManager &&) = delete;
+  OrderManager &operator=(OrderManager &&) = delete;
+
   Order place(std::string_view ticker, Side side, int price_cents,
-              int quantity);
+              int quantity) override;
+  bool cancel(std::string_view order_id) override;
+  void cancel_all(std::string_view ticker) override;
+  void record_fill(const Fill &fill) override;
 
-  // Cancel an order. Returns true on success, false if the API rejected it.
-  // Does not remove the order from open_orders on failure.
-  bool cancel(std::string_view order_id);
-
-  // Cancel all open orders for ticker. No-op for unknown tickers.
-  void cancel_all(std::string_view ticker);
-
-  // Process a fill event from the WebSocket feed.
-  // Idempotent: duplicate fills (same order_id + timestamp) are ignored.
-  void record_fill(const Fill &fill);
-
-  // Net YES contracts for ticker (negative = net NO exposure).
-  [[nodiscard]] int net_position(std::string_view ticker) const;
-
-  // Cumulative PnL in cents for matched (YES + NO) position pairs.
-  // Computed via FIFO: each NO fill that closes a YES lot (or vice versa)
-  // contributes (100 - yes_price - no_price) * matched_qty cents.
-  [[nodiscard]] double realized_pnl(std::string_view ticker) const;
-
+  [[nodiscard]] int net_position(std::string_view ticker) const override;
+  [[nodiscard]] double realized_pnl(std::string_view ticker) const override;
   [[nodiscard]] const std::unordered_map<std::string, Order> &
-  open_orders() const;
+  open_orders() const override;
 
 private:
   struct Lot {

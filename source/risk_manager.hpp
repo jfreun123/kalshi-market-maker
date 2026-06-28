@@ -58,7 +58,7 @@ public:
 
   // Snapshots open order counts, net positions, and realized PnL from om for
   // each ticker in the provided list. Sets kPnLLimit on daily loss breach.
-  void update(const OrderManager &order_mgr,
+  void update(const IOrderManager &order_mgr,
               const std::vector<std::string> &tickers);
 
   // Set / clear individual constraint bits. Any set bit causes is_halted().

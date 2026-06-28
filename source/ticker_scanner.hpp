@@ -14,9 +14,9 @@ struct ScannerConfig {
   int max_price_cents{85};
   int min_spread_cents{3};
   int max_spread_cents{10};
-  double min_volume_usd{5000.0};
+  double min_volume_usd{1000.0};
   double min_days_to_close{1.0};
-  double max_days_to_close{10.0};
+  double max_days_to_close{90.0};
 };
 
 struct MarketScore {

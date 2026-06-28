@@ -68,11 +68,25 @@ constexpr std::string_view kMarketLowVolume =
     R"("status":"active","yes_bid_dollars":"0.4800","yes_ask_dollars":"0.5200",)"
     R"("volume_fp":"500.00","close_time":"2026-06-26T00:00:00Z"})";
 
-// Filtered: closes in 40 days (past max_days_to_close=10)
+// Filtered: closes in 96 days (past max_days_to_close=90)
 constexpr std::string_view kMarketTooFarOut =
     R"({"ticker":"KXFAR-G","title":"Far future event?","category":"Financials",)"
     R"("status":"active","yes_bid_dollars":"0.4800","yes_ask_dollars":"0.5200",)"
-    R"("volume_fp":"200000.00","close_time":"2026-07-31T00:00:00Z"})";
+    R"("volume_fp":"200000.00","close_time":"2026-09-25T00:00:00Z"})";
+
+// Mid-term market: closes in 60 days — should pass max_days_to_close=90 filter.
+constexpr std::string_view kMarketMediumTerm =
+    R"({"ticker":"KXMED-M","title":"Medium-term event?","category":"Financials",)"
+    R"("status":"active","yes_bid_dollars":"0.4800","yes_ask_dollars":"0.5200",)"
+    R"("volume_fp":"200000.00","close_time":"2026-08-20T00:00:00Z"})";
+
+// High-probability market: mid=75c, spread=4c, same volume/category as
+// kMarketGoodA. Used to verify the scorer does not penalize markets away from
+// 50c.
+constexpr std::string_view kMarketHighProbability =
+    R"({"ticker":"KXHIGH-P","title":"High probability event?","category":"Financials",)"
+    R"("status":"active","yes_bid_dollars":"0.7300","yes_ask_dollars":"0.7700",)"
+    R"("volume_fp":"200000.00","close_time":"2026-06-26T00:00:00Z"})";
 
 // Filtered: not active
 constexpr std::string_view kMarketClosed =
@@ -203,6 +217,8 @@ TEST_F(TickerScannerTest, ScanFiltersLowVolumeMarkets) {
 }
 
 TEST_F(TickerScannerTest, ScanFiltersTooFarOutMarkets) {
+  // kMarketTooFarOut closes in 96 days, past the max_days_to_close=90
+  // threshold.
   auto [client, transport] = make_client_with_transport();
   transport->enqueue(
       {kHttpOk, make_markets_response({kMarketGoodA, kMarketTooFarOut})});
@@ -377,4 +393,31 @@ TEST_F(TickerScannerTest, ScanResultsAreSortedByScoreDescending) {
   for (std::size_t idx = 1U; idx < results.size(); ++idx) {
     EXPECT_GE(results[idx - 1U].score, results[idx].score);
   }
+}
+
+TEST_F(TickerScannerTest, ScanAcceptsMediumTermMarkets) {
+  // max_days_to_close=90 admits markets up to 90 days out; this one is 60 days.
+  auto [client, transport] = make_client_with_transport();
+  transport->enqueue({kHttpOk, make_markets_response({kMarketMediumTerm})});
+
+  kalshi::TickerScanner scanner{client};
+  auto results = scanner.scan(kScanTopN, kTestNow);
+
+  ASSERT_EQ(results.size(), 1U);
+  EXPECT_EQ(results[0].ticker, "KXMED-M");
+}
+
+TEST_F(TickerScannerTest, ScanDoesNotPenalizeHighProbabilityMarkets) {
+  // A market at 75c mid and a market at 50c mid with identical volume, spread,
+  // and category should receive equal scores. A market maker earns the same
+  // spread regardless of the market's implied probability.
+  auto [client, transport] = make_client_with_transport();
+  transport->enqueue(
+      {kHttpOk, make_markets_response({kMarketGoodA, kMarketHighProbability})});
+
+  kalshi::TickerScanner scanner{client};
+  auto results = scanner.scan(kScanTopN, kTestNow);
+
+  ASSERT_EQ(results.size(), 2U);
+  EXPECT_NEAR(results[0].score, results[1].score, 1e-9);
 }

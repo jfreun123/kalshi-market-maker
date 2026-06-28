@@ -43,7 +43,7 @@ bool RiskManager::check_order(std::string_view ticker, Side side,
   return std::abs(current_pos + delta) <= limits_.max_position_per_market;
 }
 
-void RiskManager::update(const OrderManager &order_mgr,
+void RiskManager::update(const IOrderManager &order_mgr,
                          const std::vector<std::string> &tickers) {
   cached_position_.clear();
   cached_open_order_count_.clear();
