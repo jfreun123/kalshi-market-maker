@@ -27,3 +27,6 @@ docs/Doxyfile.configured
 config.json
 pnl_state.json
 *.pem
+
+# Runtime logs
+logs/
