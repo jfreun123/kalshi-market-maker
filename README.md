@@ -115,13 +115,19 @@ openssl rsa -in kalshi-private-key.pem -pubout -out kalshi-public-key.pem
 
 ### Workflow: scan then trade
 
-Run `--scan` first to find liquid markets, then copy the top tickers into `target_tickers` in your config and start the market maker:
+`--scan` is fully automated: it finds liquid markets and writes a ready-to-run
+trade config with the top tickers already filled in. The daily flow is two commands:
 
 ```bash
-./build/source/kalshi_mm --scan config.json 2>&1 | grep "ticker="
-# Pick tickers from the output, add them to config.json → target_tickers
-./build/source/kalshi_mm config.json
+./build/source/kalshi_mm --scan config.json   # → writes config.trade.json
+./build/source/kalshi_mm config.trade.json    # → makes markets on the top-N
 ```
+
+The generated `config.trade.json` is a verbatim copy of the base config (same
+credentials, quoter, risk, and scanner sections) with **`target_tickers` replaced**
+by the top `trade_top_n` results. The output name is derived from the base config:
+`config.json` → `config.trade.json`, `config.demo.json` → `config.demo.trade.json`.
+It is gitignored (it contains the copied credentials).
 
 The scanner pages through all **open** markets (`status=open`, 1000/page) and ranks
 them by a volume-weighted score with a spread-quality term. Filters are set in the
@@ -135,26 +141,22 @@ optional `scanner` section of the config:
   "max_spread_cents": 10,
   "min_volume_24h": 1000.0,
   "min_days_to_close": 1.0,
-  "max_days_to_close": 90.0
+  "max_days_to_close": 90.0,
+  "trade_top_n": 5
 }
 ```
 
 All fields are optional and fall back to the defaults shown above. `min_volume_24h`
 filters on **24-hour** contract volume (live flow), which is also the basis for the
-ranking score. Loosen it, the price range, and the spread range for demo (where
-liquidity is thin); tighten them for production. Switching environments is just a
-matter of changing `base_url`/`ws_url` and these thresholds.
+ranking score. `trade_top_n` controls how many top tickers go into the generated
+trade config (default 5 — safe for the Basic rate-limit tier). Loosen the volume,
+price, and spread ranges for demo (where liquidity is thin); tighten them for
+production. Switching environments is just a matter of changing `base_url`/`ws_url`
+and these thresholds.
 
-Each scan also writes **`scan_results.json`** in the working directory — a ranked
-JSON document with a top-level `tickers` array (rank order) and a `markets` array
-with full per-market detail. This is the hand-off to the trader: pick the top N
-tickers and put them in `target_tickers`.
-
-```bash
-./build/source/kalshi_mm --scan config.json
-# Top 5 tickers into the config, then trade them:
-jq '.tickers[:5]' scan_results.json
-```
+Each scan also writes **`scan_results.json`** — a ranked JSON document with a
+top-level `tickers` array (rank order) and a `markets` array with full per-market
+detail, for any custom downstream tooling.
 
 ## Development
 

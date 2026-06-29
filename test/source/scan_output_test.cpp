@@ -88,3 +88,47 @@ TEST(ScanOutputTest, WriteScanResultsCreatesReadableFile) {
   EXPECT_EQ(json.at("count").get<int>(), 2);
   std::filesystem::remove(path);
 }
+
+TEST(ScanOutputTest, WriteTradeConfigCopiesBaseAndSetsTickers) {
+  const auto base_path =
+      std::filesystem::temp_directory_path() / "kalshi_base_config.json";
+  const auto out_path =
+      std::filesystem::temp_directory_path() / "kalshi_base_config.trade.json";
+  std::filesystem::remove(out_path);
+
+  // A base config with secrets and other sections that must be preserved.
+  const nlohmann::json base = {{"api_key", "secret-key"},
+                               {"private_key_path", "/keys/k.pem"},
+                               {"base_url", "https://demo-api.kalshi.co"},
+                               {"target_tickers", nlohmann::json::array()},
+                               {"quoter", {{"quote_size", 10}}}};
+  {
+    std::ofstream file{base_path};
+    file << base.dump();
+  }
+
+  const std::vector<std::string> tickers = {"KXA-1", "KXB-2", "KXC-3"};
+  ASSERT_TRUE(kalshi::write_trade_config(base_path, out_path, tickers));
+
+  std::ifstream out_file{out_path};
+  const auto generated = nlohmann::json::parse(out_file);
+
+  // target_tickers replaced with the supplied list, in order.
+  ASSERT_EQ(generated.at("target_tickers").size(), 3U);
+  EXPECT_EQ(generated.at("target_tickers").at(0).get<std::string>(), "KXA-1");
+  EXPECT_EQ(generated.at("target_tickers").at(2).get<std::string>(), "KXC-3");
+  // All other fields (including secrets and nested sections) preserved.
+  EXPECT_EQ(generated.at("api_key").get<std::string>(), "secret-key");
+  EXPECT_EQ(generated.at("private_key_path").get<std::string>(), "/keys/k.pem");
+  EXPECT_EQ(generated.at("quoter").at("quote_size").get<int>(), 10);
+
+  std::filesystem::remove(base_path);
+  std::filesystem::remove(out_path);
+}
+
+TEST(ScanOutputTest, WriteTradeConfigReturnsFalseWhenBaseMissing) {
+  const auto out_path =
+      std::filesystem::temp_directory_path() / "kalshi_missing.trade.json";
+  EXPECT_FALSE(kalshi::write_trade_config("/nonexistent/base.json", out_path,
+                                          {"KXA-1"}));
+}

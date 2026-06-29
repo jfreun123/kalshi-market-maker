@@ -78,6 +78,8 @@ AppConfig load_config(const std::filesystem::path &path) {
         "max_spread_cents", ScannerConfig::kDefaultMaxSpreadCents);
     config.scanner.min_volume_24h = scanner_json.value(
         "min_volume_24h", ScannerConfig::kDefaultMinVolume24h);
+    config.scanner.trade_top_n =
+        scanner_json.value("trade_top_n", ScannerConfig::kDefaultTradeTopN);
     config.scanner.min_days_to_close = scanner_json.value(
         "min_days_to_close", ScannerConfig::kDefaultMinDaysToClose);
     config.scanner.max_days_to_close = scanner_json.value(

@@ -17,6 +17,9 @@ struct ScannerConfig {
   static constexpr double kDefaultMinVolume24h = 1000.0;
   static constexpr double kDefaultMinDaysToClose = 1.0;
   static constexpr double kDefaultMaxDaysToClose = 90.0;
+  // Number of top-ranked tickers written into the generated trade config.
+  // PLAN.md notes the Basic rate tier is safe at <=5 concurrent tickers.
+  static constexpr int kDefaultTradeTopN = 5;
 
   int min_price_cents{kDefaultMinPriceCents};
   int max_price_cents{kDefaultMaxPriceCents};
@@ -25,6 +28,7 @@ struct ScannerConfig {
   double min_volume_24h{kDefaultMinVolume24h};
   double min_days_to_close{kDefaultMinDaysToClose};
   double max_days_to_close{kDefaultMaxDaysToClose};
+  int trade_top_n{kDefaultTradeTopN};
   // When non-empty, scan fetches each event series separately instead of
   // using the global /markets listing (which returns zero-volume junk).
   std::vector<std::string> event_series{};

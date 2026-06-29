@@ -17,6 +17,7 @@
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <csignal>
@@ -194,8 +195,19 @@ static void check_ws_staleness(const kalshi::WebSocketClient &ws_client,
 
 static constexpr auto kScanResultsPath = "scan_results.json";
 
+// Derives the generated trade-config path from the base config path by
+// inserting ".trade" before the extension: config.json -> config.trade.json,
+// config.demo.json -> config.demo.trade.json.
+static std::filesystem::path
+trade_config_path_for(const std::filesystem::path &base_config_path) {
+  const auto stem = base_config_path.stem().string();
+  const auto ext = base_config_path.extension().string();
+  return base_config_path.parent_path() / (stem + ".trade" + ext);
+}
+
 static int run_scan_mode(kalshi::RestClient &rest,
                          const kalshi::ScannerConfig &scanner_config,
+                         const std::filesystem::path &config_path,
                          std::shared_ptr<spdlog::logger> &log) {
   constexpr int kScanTopN = 20;
   log->info(
@@ -229,6 +241,24 @@ static int run_scan_mode(kalshi::RestClient &rest,
               results.size());
   } else {
     log->warn("failed to write scan results to {}", results_path.string());
+  }
+
+  // Generate a ready-to-run trade config with the top-N tickers filled in.
+  const auto top_n = std::min(
+      static_cast<std::size_t>(scanner_config.trade_top_n), results.size());
+  std::vector<std::string> top_tickers;
+  top_tickers.reserve(top_n);
+  for (std::size_t idx = 0U; idx < top_n; ++idx) {
+    top_tickers.push_back(results[idx].ticker);
+  }
+
+  const auto trade_path = trade_config_path_for(config_path);
+  if (kalshi::write_trade_config(config_path, trade_path, top_tickers)) {
+    log->info("trade config written to {} (top {} tickers) — run: {} {}",
+              trade_path.string(), top_tickers.size(), "kalshi_mm",
+              trade_path.string());
+  } else {
+    log->warn("failed to write trade config to {}", trade_path.string());
   }
   return 0;
 }
@@ -310,7 +340,7 @@ int main(int argc, char *argv[]) {
                             app_config.base_url};
 
     if (cli.scan_mode) {
-      return run_scan_mode(rest, app_config.scanner, log);
+      return run_scan_mode(rest, app_config.scanner, cli.config_path, log);
     }
 
     if (app_config.target_tickers.empty()) {
