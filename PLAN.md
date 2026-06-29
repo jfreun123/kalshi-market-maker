@@ -367,6 +367,14 @@ separated from the risk-aggregation layer, as distinct OS processes:
   kill-switch (`Portfolio` + `RiskManager::update_portfolio`) promoted to a
   process with many inputs.
 
+A second driver is **multiple exchanges**: a quoter process targets one venue via
+its own `IHttpTransport`/`IWebSocket` adapter (Kalshi today, **Polymarket** next),
+and the aggregator becomes a cross-exchange risk/arbitrage authority — netting
+exposure and hedging across venues, and acting on the same event priced
+differently on each. Polymarket is on-chain (EVM) with very different auth,
+latency, and settlement, so its own process keeps those quirks off the Kalshi hot
+path while it reports into the same aggregator via the same `RiskReport`.
+
 Boundary: `IRiskPublisher` (quoter → aggregator, payload ≈ `PortfolioSnapshot` +
 `strategy_id` + heartbeat) and `IControlChannel` (aggregator → quoter), in-process
 today, IPC at split time — same interface+fake discipline as `IHttpTransport`.

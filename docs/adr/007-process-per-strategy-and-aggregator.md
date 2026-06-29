@@ -19,6 +19,16 @@ Process separation buys the things a single process can't: fault isolation (one
 quoter crashing doesn't take down the others), horizontal scaling (add a
 process), independent deploy/restart, and heterogeneous strategies side by side.
 
+It is also the natural path to **multiple exchanges**. A quoter process targets
+one venue through its own `IHttpTransport` / `IWebSocket` adapter (Kalshi today,
+**Polymarket** next), and the aggregator becomes a **cross-exchange** risk and
+arbitrage authority: it sees positions across venues in one place, can hedge
+directional exposure across them, and can act on the same event priced
+differently on each. Polymarket in particular is on-chain (EVM) with very
+different auth, latency, and settlement; isolating it in its own process keeps
+those quirks off the Kalshi hot path while it still reports into the same
+aggregator via the same `RiskReport` contract.
+
 ```mermaid
 graph TD
     AGG["Aggregator process<br/>(portfolio of portfolios)<br/>global risk + capital allocation"]
@@ -70,6 +80,9 @@ graph TD
   (`update_portfolio`) from *local enforcement* (`check_order`).
 - **`IPricingModel` / `FairValueEngine`** abstracts the pricing decision — the
   natural seam for "different strategies".
+- **Exchange adapters** — `IHttpTransport` / `IWebSocket` already isolate the
+  venue. A Polymarket quoter is a new adapter pair behind the same interfaces,
+  reusing `OrderManager` / `RiskManager` / `Quoter` / `TradingSession` unchanged.
 
 ## Seams to keep clean (regressions that would block the split)
 
@@ -82,6 +95,10 @@ graph TD
 - A quoter must always honor a remote halt the way it honors a local one — route
   `ControlCommand` halts through the same `RiskManager` + `enforce_quote_safety`
   path so the "always cancel quotes when halted" invariant still holds.
+- Keep the `RiskReport` and the aggregator **venue-agnostic**: identify a
+  position by `(exchange, market, side)` with PnL/capital in a common currency,
+  so the aggregator nets exposure across Kalshi and Polymarket without
+  special-casing either. Don't leak Kalshi-specific shapes into the report.
 
 ## Cost control (do-now vs. defer)
 
