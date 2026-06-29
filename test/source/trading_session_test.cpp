@@ -204,6 +204,35 @@ TEST_F(TradingSessionTest, DisconnectCancelsRestingOrders) {
   EXPECT_TRUE(order_mgr_.open_orders().empty());
 }
 
+TEST_F(TradingSessionTest, EnforceQuoteSafetyFlattensWhenHalted) {
+  transport_.enqueue({kHttpOk, order_json(kOrderId1, kDefaultQuoteSize)});
+  transport_.enqueue({kHttpOk, order_json(kOrderId2, kDefaultQuoteSize)});
+  session_.on_snapshot(make_orderbook(kTicker, kYesBid, kNoBid, kObQty));
+  session_.on_delta(kTicker, kalshi::Side::Yes, kSubBboDeltaPrice,
+                    kSubBboDeltaQty);
+  ASSERT_EQ(order_mgr_.open_orders().size(), 2U);
+
+  risk_mgr_.halt();
+  session_.enforce_quote_safety();
+
+  EXPECT_TRUE(order_mgr_.open_orders().empty());
+  EXPECT_EQ(count_method(transport_, "DELETE"), 2);
+}
+
+TEST_F(TradingSessionTest, EnforceQuoteSafetyIsNoOpWhenNotHalted) {
+  transport_.enqueue({kHttpOk, order_json(kOrderId1, kDefaultQuoteSize)});
+  transport_.enqueue({kHttpOk, order_json(kOrderId2, kDefaultQuoteSize)});
+  session_.on_snapshot(make_orderbook(kTicker, kYesBid, kNoBid, kObQty));
+  session_.on_delta(kTicker, kalshi::Side::Yes, kSubBboDeltaPrice,
+                    kSubBboDeltaQty);
+  ASSERT_EQ(order_mgr_.open_orders().size(), 2U);
+
+  session_.enforce_quote_safety(); // not halted
+
+  EXPECT_EQ(order_mgr_.open_orders().size(), 2U);
+  EXPECT_EQ(count_method(transport_, "DELETE"), 0);
+}
+
 TEST_F(TradingSessionTest, SeedOrderbookPlacesInitialQuotes) {
   transport_.enqueue({kHttpOk, order_json(kOrderId1, kDefaultQuoteSize)});
   transport_.enqueue({kHttpOk, order_json(kOrderId2, kDefaultQuoteSize)});

@@ -44,6 +44,15 @@ public:
   // Cancel all resting orders (called when the market-data feed drops).
   void on_disconnect();
 
+  // Best-effort flatten: cancel every resting order across all tickers. Never
+  // throws — safe to call from shutdown / error paths.
+  void cancel_all_quotes();
+
+  // Safety net: if risk is halted, cancel all resting quotes so a halt can't
+  // leave orders on the book to fill adversely. Idempotent and cheap once flat;
+  // call it once per loop iteration.
+  void enforce_quote_safety();
+
   // Apply a seed snapshot and immediately quote the market — used to place
   // initial quotes before the live feed connects.
   void seed_orderbook(const Orderbook &snapshot);

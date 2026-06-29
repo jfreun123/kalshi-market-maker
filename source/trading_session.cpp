@@ -78,8 +78,30 @@ void TradingSession::on_fill(const Fill &fill) {
 
 void TradingSession::on_disconnect() {
   get_logger()->warn("ws disconnected — cancelling all open orders");
+  cancel_all_quotes();
+}
+
+void TradingSession::cancel_all_quotes() {
+  if (order_mgr_.open_orders().empty()) {
+    return;
+  }
+  get_logger()->warn("flattening — cancelling all resting quotes ({} open)",
+                     order_mgr_.open_orders().size());
   for (const auto &ticker : tickers_) {
-    order_mgr_.cancel_all(ticker);
+    // OrderManager::cancel_all is itself best-effort; the extra guard keeps a
+    // surprise from one ticker from skipping the others.
+    try {
+      order_mgr_.cancel_all(ticker);
+    } catch (const std::exception &ex) {
+      get_logger()->error("cancel_all_quotes: ticker={} failed: {}", ticker,
+                          ex.what());
+    }
+  }
+}
+
+void TradingSession::enforce_quote_safety() {
+  if (risk_mgr_.is_halted()) {
+    cancel_all_quotes();
   }
 }
 
