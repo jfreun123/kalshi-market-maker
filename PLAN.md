@@ -458,6 +458,24 @@ the Target architecture above + [ADR-007](docs/adr/007-process-per-strategy-and-
   live; also a standalone `--reconcile` command (exit non-zero on mismatch) for
   pre-trade / CI checks.
 
+**Drawdown kill-switch — deferred refinements (documented, NOT built):**
+
+1. **Persist the high-water mark across restarts.** Today `peak_total_pnl_cents_`
+   is in-memory and resets to 0 on restart (session-scoped). A crash/redeploy
+   mid-session resets the protection — after a restart you could give back a large
+   prior peak without tripping. Fix: persist the peak (alongside `pnl_state.json`)
+   and reload it like realized PnL. Needs a decision on scope (daily vs. session
+   vs. lifetime) and how it composes with carried inventory.
+2. **Reconsider the anchor.** The peak tracks total PnL (realized + unrealized)
+   starting at break-even (0), so early-session losses register as drawdown-from-0
+   — at the $500 default this is *tighter* than the −$1000 loss floor before any
+   profit is banked. Options to weigh: (a) anchor on **realized-only** gains
+   (protect locked profit, ignore volatile marks — fewer false trips from thin/
+   one-sided books where the unrealized mark is noisy, but slower to react to a
+   real bleed); (b) start the peak at the **first observed PnL** instead of 0 so
+   it's a pure give-back-from-high (the loss floor already covers absolute early
+   losses); (c) make the starting anchor configurable.
+
 Next: optional auto-resync of local state from the exchange snapshot, and wiring
 the shared kill-switch into the sharded quoters once Phases 21–22 land.
 
