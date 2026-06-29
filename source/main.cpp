@@ -11,6 +11,7 @@
 #include "risk_manager.hpp"
 #include "scan_output.hpp"
 #include "ticker_scanner.hpp"
+#include "trading_session.hpp"
 #include "websocket_client.hpp"
 
 #include <nlohmann/json.hpp>
@@ -67,16 +68,6 @@ static void setup_logger(const std::filesystem::path &log_dir) {
 
 static constexpr double kCentsPerDollar = 100.0;
 
-static const char *side_name(kalshi::Side side) {
-  return side == kalshi::Side::Yes ? "yes" : "no";
-}
-
-static double
-prior_pnl_for(const std::unordered_map<std::string, double> &prior_pnl,
-              const std::string &ticker) {
-  return prior_pnl.contains(ticker) ? prior_pnl.at(ticker) : 0.0;
-}
-
 // Returns {transport, paper_ptr}. paper_ptr is non-null only in paper mode.
 static auto make_http_transport(bool paper_mode,
                                 std::shared_ptr<spdlog::logger> &log)
@@ -91,181 +82,21 @@ static auto make_http_transport(bool paper_mode,
   return {std::make_unique<kalshi::HttpTransport>(), nullptr};
 }
 
-// ---- WS event handlers ----
+// ---- PnL persistence ----
 
-using ObMap = std::unordered_map<std::string, kalshi::LocalOrderbook>;
 using PnlMap = std::unordered_map<std::string, double>;
 
-static void handle_snapshot(ObMap &ob_map, const kalshi::Orderbook &snap,
-                            std::shared_ptr<spdlog::logger> &log) {
-  ob_map[snap.ticker].apply_snapshot(snap);
-  log->info("snapshot ticker={} yes_levels={} no_levels={}", snap.ticker,
-            snap.yes.size(), snap.no.size());
-}
-
-static void handle_delta(ObMap &ob_map, kalshi::Quoter &quoter,
-                         const std::string &ticker, kalshi::Side side,
-                         int price, int qty,
-                         std::shared_ptr<spdlog::logger> &log) {
-  ob_map[ticker].apply_delta(side, price, qty);
-  log->debug("delta ticker={} side={} price={} qty={} mid={:.1f} spread={}",
-             ticker, side_name(side), price, qty,
-             ob_map[ticker].mid_price_cents(), ob_map[ticker].spread_cents());
+// Persists the carried per-ticker PnL map; wired as the session's fill
+// listener.
+static void persist_pnl(const std::filesystem::path &pnl_path,
+                        const PnlMap &pnl,
+                        std::shared_ptr<spdlog::logger> &log) {
   try {
-    quoter.update(ticker, ob_map[ticker]);
-  } catch (const std::exception &ex) {
-    log->error("quoter error ticker={}: {}", ticker, ex.what());
-  }
-}
-
-static void handle_fill(kalshi::IOrderManager &order_mgr,
-                        kalshi::RiskManager &risk_mgr,
-                        const kalshi::AppConfig &app_config, PnlMap &prior_pnl,
-                        const std::filesystem::path &pnl_path,
-                        std::shared_ptr<spdlog::logger> &log,
-                        const kalshi::Fill &fill) {
-  order_mgr.record_fill(fill);
-  risk_mgr.update(order_mgr, app_config.target_tickers);
-
-  const double session_pnl = order_mgr.realized_pnl(fill.market_ticker);
-  const double total_pnl =
-      prior_pnl_for(prior_pnl, fill.market_ticker) + session_pnl;
-
-  log->info("fill ticker={} side={} price={} qty={} is_taker={} "
-            "session_pnl=${:.2f} total_pnl=${:.2f}",
-            fill.market_ticker, side_name(fill.side), fill.price_cents,
-            fill.quantity, fill.is_taker, session_pnl / kCentsPerDollar,
-            total_pnl / kCentsPerDollar);
-
-  if (risk_mgr.is_halted()) {
-    log->critical("risk halted constraints={}", risk_mgr.active_constraints());
-  }
-
-  prior_pnl[fill.market_ticker] = total_pnl;
-
-  try {
-    nlohmann::json json_pnl = prior_pnl;
+    const nlohmann::json json_pnl = pnl;
     std::ofstream file{pnl_path};
     file << json_pnl.dump(2);
   } catch (...) {
     log->warn("pnl_state: failed to write {}", pnl_path.string());
-  }
-}
-
-// ---- Status logging ----
-
-static void log_status_snapshot(const std::vector<std::string> &tickers,
-                                const kalshi::IOrderManager &order_mgr,
-                                const kalshi::RiskManager &risk_mgr,
-                                const PnlMap &prior_pnl,
-                                std::shared_ptr<spdlog::logger> &log) {
-  for (const auto &ticker : tickers) {
-    const int pos = order_mgr.net_position(ticker);
-    const double session_pnl = order_mgr.realized_pnl(ticker);
-    const double prior = prior_pnl_for(prior_pnl, ticker);
-    log->info("status ticker={} net_pos={} session_pnl_dollars={:.2f} "
-              "total_pnl_dollars={:.2f} halted={} constraints={}",
-              ticker, pos, session_pnl / kCentsPerDollar,
-              (prior + session_pnl) / kCentsPerDollar, risk_mgr.is_halted(),
-              risk_mgr.active_constraints());
-  }
-}
-
-// Builds a mark map (ticker -> YES mid cents) from the live orderbooks,
-// skipping markets with no two-sided book.
-static kalshi::MarkMap build_marks(const std::vector<std::string> &tickers,
-                                   const ObMap &ob_map) {
-  kalshi::MarkMap marks;
-  for (const auto &ticker : tickers) {
-    auto book_it = ob_map.find(ticker);
-    if (book_it == ob_map.end()) {
-      continue;
-    }
-    const double mid = book_it->second.mid_price_cents();
-    if (mid > 0.0) {
-      marks[ticker] = static_cast<int>(std::lround(mid));
-    }
-  }
-  return marks;
-}
-
-// Aggregates the whole-book read-model: marks open inventory to the current
-// orderbook and rolls positions up into total PnL and per-event exposure.
-static kalshi::PortfolioSnapshot
-make_portfolio_snapshot(const std::vector<std::string> &tickers,
-                        const kalshi::IOrderManager &order_mgr,
-                        const ObMap &ob_map) {
-  const kalshi::Portfolio portfolio{order_mgr};
-  return portfolio.snapshot(tickers, build_marks(tickers, ob_map));
-}
-
-// Portfolio-level kill-switch: feeds the read-model into the RiskManager, which
-// halts ALL quoters at once on aggregate over-exposure or total drawdown.
-// Logs once on the transition into a halted state to avoid per-cycle spam.
-static void check_portfolio_risk(const kalshi::PortfolioSnapshot &snap,
-                                 kalshi::RiskManager &risk_mgr,
-                                 std::shared_ptr<spdlog::logger> &log) {
-  const bool was_halted = risk_mgr.is_halted();
-  risk_mgr.update_portfolio(snap);
-  if (risk_mgr.is_halted() && !was_halted) {
-    log->critical(
-        "portfolio risk halt — constraints={} total_pnl_dollars={:.2f} "
-        "capital_at_risk_dollars={:.2f}",
-        risk_mgr.active_constraints(), snap.total_pnl_cents() / kCentsPerDollar,
-        snap.total_notional_cents / kCentsPerDollar);
-  }
-}
-
-// Logs the whole-book aggregate: total realized + unrealized PnL, total capital
-// at risk, and the largest event exposures (concentration view).
-static void log_portfolio_snapshot(const kalshi::PortfolioSnapshot &snap,
-                                   std::shared_ptr<spdlog::logger> &log) {
-  log->info("portfolio realized_dollars={:.2f} unrealized_dollars={:.2f} "
-            "total_pnl_dollars={:.2f} capital_at_risk_dollars={:.2f} events={}",
-            snap.total_realized_cents / kCentsPerDollar,
-            snap.total_unrealized_cents / kCentsPerDollar,
-            snap.total_pnl_cents() / kCentsPerDollar,
-            snap.total_notional_cents / kCentsPerDollar, snap.by_event.size());
-
-  constexpr std::size_t kMaxEventsLogged = 5U;
-  const std::size_t shown = std::min(kMaxEventsLogged, snap.by_event.size());
-  for (std::size_t idx = 0U; idx < shown; ++idx) {
-    const auto &event = snap.by_event[idx];
-    log->info("  event={} markets={} pnl_dollars={:.2f} "
-              "capital_at_risk_dollars={:.2f}",
-              event.event_ticker, event.market_count,
-              event.total_pnl_cents() / kCentsPerDollar,
-              event.notional_cost_cents / kCentsPerDollar);
-  }
-}
-
-// Periodic portfolio work, driven off the poll counter. The kill-switch runs
-// more often than the 60s status log so the global halt reacts quickly; the
-// snapshot is built once and reused when both intervals coincide
-// (kPositionLogInterval is a multiple of kPortfolioRiskInterval).
-static void
-run_portfolio_tasks(int poll_count, const kalshi::AppConfig &app_config,
-                    const kalshi::IOrderManager &order_mgr, const ObMap &ob_map,
-                    kalshi::RiskManager &risk_mgr, const PnlMap &prior_pnl,
-                    std::shared_ptr<spdlog::logger> &log) {
-  constexpr int kPositionLogInterval = 600;  // 600 × 100ms = 60s
-  constexpr int kPortfolioRiskInterval = 10; // 10 × 100ms = 1s
-
-  const bool do_log = poll_count % kPositionLogInterval == 0;
-  const bool do_risk = poll_count % kPortfolioRiskInterval == 0;
-  if (!do_log && !do_risk) {
-    return;
-  }
-
-  const auto snap =
-      make_portfolio_snapshot(app_config.target_tickers, order_mgr, ob_map);
-  if (do_risk) {
-    check_portfolio_risk(snap, risk_mgr, log);
-  }
-  if (do_log) {
-    log_status_snapshot(app_config.target_tickers, order_mgr, risk_mgr,
-                        prior_pnl, log);
-    log_portfolio_snapshot(snap, log);
   }
 }
 
@@ -508,10 +339,11 @@ int main(int argc, char *argv[]) {
     kalshi::WebSocketClient ws_client{
         auth, std::make_unique<kalshi::IxWebSocket>(), app_config.ws_url};
 
-    ObMap ob_map;
     kalshi::OrderManager order_mgr{rest};
     kalshi::RiskManager risk_mgr{app_config.risk};
     kalshi::Quoter quoter{app_config.quoter, order_mgr, risk_mgr};
+    kalshi::TradingSession session{app_config.target_tickers, order_mgr,
+                                   risk_mgr, quoter};
 
     const std::filesystem::path pnl_path{"pnl_state.json"};
     auto prior_pnl = load_pnl(pnl_path);
@@ -519,38 +351,29 @@ int main(int argc, char *argv[]) {
       log->info("pnl_state loaded ticker={} prior_pnl_dollars={:.2f}", ticker,
                 cents / kCentsPerDollar);
     }
+    session.set_prior_pnl(std::move(prior_pnl));
+    session.set_pnl_listener([&pnl_path, &log](const PnlMap &pnl) {
+      persist_pnl(pnl_path, pnl, log);
+    });
 
     for (const auto &ticker : app_config.target_tickers) {
-      log->info("seeding orderbook ticker={}", ticker);
       auto snap = rest.get_orderbook(ticker);
-      ob_map[ticker].apply_snapshot(snap);
+      session.seed_orderbook(snap);
       ws_client.subscribe(ticker);
-      quoter.update(ticker, ob_map[ticker]);
     }
 
-    ws_client.on_orderbook_snapshot(
-        [&ob_map, &log](const kalshi::Orderbook &snap) {
-          handle_snapshot(ob_map, snap, log);
-        });
+    ws_client.on_orderbook_snapshot([&session](const kalshi::Orderbook &snap) {
+      session.on_snapshot(snap);
+    });
 
     ws_client.on_orderbook_delta(
-        [&ob_map, &quoter, &log](const std::string &ticker, kalshi::Side side,
-                                 int price, int qty) {
-          handle_delta(ob_map, quoter, ticker, side, price, qty, log);
-        });
+        [&session](const std::string &ticker, kalshi::Side side, int price,
+                   int qty) { session.on_delta(ticker, side, price, qty); });
 
-    ws_client.on_fill([&order_mgr, &risk_mgr, &app_config, &prior_pnl,
-                       &pnl_path, &log](const kalshi::Fill &fill) {
-      handle_fill(order_mgr, risk_mgr, app_config, prior_pnl, pnl_path, log,
-                  fill);
-    });
+    ws_client.on_fill(
+        [&session](const kalshi::Fill &fill) { session.on_fill(fill); });
 
-    ws_client.on_disconnect([&order_mgr, &app_config, &log]() {
-      log->warn("ws disconnected — cancelling all open orders");
-      for (const auto &ticker : app_config.target_tickers) {
-        order_mgr.cancel_all(ticker);
-      }
-    });
+    ws_client.on_disconnect([&session]() { session.on_disconnect(); });
 
     std::signal(SIGINT, handle_signal);
     std::signal(SIGTERM, handle_signal);
@@ -560,6 +383,8 @@ int main(int argc, char *argv[]) {
     constexpr auto kPollInterval = std::chrono::milliseconds{100};
     constexpr int kStalenessCheckInterval = 300; // 300 × 100ms = 30s
     constexpr int kReconcileInterval = 1200;     // 1200 × 100ms = 120s
+    constexpr int kPositionLogInterval = 600;    // 600 × 100ms = 60s
+    constexpr int kPortfolioRiskInterval = 10;   // 10 × 100ms = 1s
 
     int poll_count = 0;
     bool stale_logged = false;
@@ -571,8 +396,14 @@ int main(int argc, char *argv[]) {
       if (poll_count % kStalenessCheckInterval == 0) {
         check_ws_staleness(ws_client, risk_mgr, log, stale_logged);
       }
-      run_portfolio_tasks(poll_count, app_config, order_mgr, ob_map, risk_mgr,
-                          prior_pnl, log);
+      // Portfolio kill-switch runs more often than the 60s status log so the
+      // global halt reacts quickly to aggregate exposure / drawdown.
+      if (poll_count % kPortfolioRiskInterval == 0) {
+        session.run_portfolio_risk();
+      }
+      if (poll_count % kPositionLogInterval == 0) {
+        session.log_status();
+      }
       // Reconcile against the exchange's authoritative positions. Skipped in
       // paper mode (no real exchange positions to compare against).
       if (paper_ptr == nullptr && poll_count % kReconcileInterval == 0) {
