@@ -397,7 +397,15 @@ TEST_F(QuoterTest, AskAlwaysHigherThanBidWithExtremeInventory) {
   record_position_fill(order_mgr, kOrderId1, kalshi::Side::Yes,
                        kExtremeLongPosition);
 
-  kalshi::RiskManager risk_mgr{kalshi::RiskLimits{}};
+  // This test verifies clamping math (ask > bid at extreme skew), not the
+  // price-range gate — open the band to the full valid range so the clamped
+  // quotes are placed.
+  constexpr int kWidestBandMin = 1;
+  constexpr int kWidestBandMax = 99;
+  kalshi::RiskLimits limits;
+  limits.min_quote_price_cents = kWidestBandMin;
+  limits.max_quote_price_cents = kWidestBandMax;
+  kalshi::RiskManager risk_mgr{limits};
   kalshi::Quoter quoter{kalshi::QuoterConfig{}, order_mgr, risk_mgr};
   quoter.update(kTicker, make_ob(kYesBid52, kNoBid52));
 

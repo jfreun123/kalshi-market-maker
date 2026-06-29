@@ -158,17 +158,22 @@ score = 0.35 × log(volume) / log(max_volume)
 
 ---
 
-### Phase 29 — Price-Range Gate
+### Phase 29 — Price-Range Gate — built
 
-Add to `QuoterConfig`:
-```cpp
-int min_quote_price_cents{15};
-int max_quote_price_cents{85};
-```
+Enforced at the single risk chokepoint rather than in the Quoter: `RiskLimits`
+gained `min_quote_price_cents` / `max_quote_price_cents` (default `[10, 90]`,
+configurable under `risk`), and `RiskManager::check_order` now uses its
+previously-unused `price_cents` arg to reject any order whose **own-side**
+contract price falls outside the band. Because `check_order` runs before every
+`place`, both YES and NO quotes are gated by their own contract price — a YES bid
+at 5c and a NO order at 5c (= YES 95c) are both refused. The low bound avoids
+cheap longshots (Bürgi: maker returns on <10c are significantly negative); the
+high bound caps near-settled extremes. Cancels are unaffected (they don't pass
+through `check_order`), so out-of-band resting orders can always be flattened.
 
-In `Quoter::update()`: if `mid < min_quote_price_cents || mid > max_quote_price_cents`, call `cancel_all(ticker)` and return. Prevents quoting deep-longshot contracts where even Makers lose >35%.
-
-**Files:** `source/quoter.hpp/cpp`, `test/source/quoter_test.cpp` (new `PriceRangeGate` tests)
+**Files:** `source/risk_manager.hpp/cpp`, `source/config.cpp`, `config.example.json`,
+tests in `risk_manager_test` + `config_test` (the extreme-inventory `quoter_test`
+uses a `[1, 99]` band so it still verifies clamping math).
 
 ---
 
@@ -521,7 +526,7 @@ LPs accumulate net directional exposure (`E_win`) that dominates terminal P&L. T
 - [~] UAT Blocker — `--capture` built & run; **blocked on placeholder `api_key` in `config-demo.json`** (fill real access key ID, then capture + verify field shapes). See UAT Blockers.
 - [ ] Real-capture replay — record a demo session, drop into `test/fixtures/`, add capture-specific assertions to `replay_session_test`
 - [ ] Phase 32 — Operational hardening (systemd, logrotate, Telegram alert script)
-- [ ] Phase 29 — Price-Range Gate
+- [x] Phase 29 — Price-Range Gate (band gate in `check_order`, default [10,90]c)
 - [ ] Phase 27 — Spread Floor & E_win Tracking
 - [ ] Phase 26 — Flow Imbalance Signal
 - [ ] Phase 28 — View-Based Pricing (β=0.09 debiasing)

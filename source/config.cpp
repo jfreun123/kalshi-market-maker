@@ -68,6 +68,10 @@ AppConfig load_config(const std::filesystem::path &path) {
         "max_total_exposure_dollars", RiskLimits::kDefaultMaxTotalExposure);
     config.risk.max_total_loss_dollars = risk_json.value(
         "max_total_loss_dollars", RiskLimits::kDefaultMaxTotalLoss);
+    config.risk.min_quote_price_cents = risk_json.value(
+        "min_quote_price_cents", RiskLimits::kDefaultMinQuotePrice);
+    config.risk.max_quote_price_cents = risk_json.value(
+        "max_quote_price_cents", RiskLimits::kDefaultMaxQuotePrice);
   }
 
   if (json_data.contains("scanner")) {

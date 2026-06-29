@@ -19,7 +19,9 @@
     "max_order_size": 25,
     "daily_loss_limit": -500.0,
     "max_total_exposure_dollars": 10000.0,
-    "max_total_loss_dollars": -1000.0
+    "max_total_loss_dollars": -1000.0,
+    "min_quote_price_cents": 10,
+    "max_quote_price_cents": 90
   },
   "scanner": {
     "min_price_cents": 15,

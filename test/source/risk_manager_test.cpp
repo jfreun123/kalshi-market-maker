@@ -167,6 +167,33 @@ TEST_F(RiskManagerTest, AcceptsOrderAtExactMaxSize) {
                                    kMaxOrderSize));
 }
 
+// ---- Price-range gate ----
+
+TEST_F(RiskManagerTest, RejectsOrderBelowMinQuotePrice) {
+  const kalshi::RiskLimits limits;
+  kalshi::RiskManager risk_mgr{limits};
+  const int below = limits.min_quote_price_cents - 1; // cheap longshot
+  EXPECT_FALSE(
+      risk_mgr.check_order(kTicker, kalshi::Side::Yes, below, kSmallQty));
+}
+
+TEST_F(RiskManagerTest, RejectsOrderAboveMaxQuotePrice) {
+  const kalshi::RiskLimits limits;
+  kalshi::RiskManager risk_mgr{limits};
+  const int above = limits.max_quote_price_cents + 1;
+  EXPECT_FALSE(
+      risk_mgr.check_order(kTicker, kalshi::Side::No, above, kSmallQty));
+}
+
+TEST_F(RiskManagerTest, AcceptsOrderAtQuotePriceBandEdges) {
+  const kalshi::RiskLimits limits;
+  kalshi::RiskManager risk_mgr{limits};
+  EXPECT_TRUE(risk_mgr.check_order(kTicker, kalshi::Side::Yes,
+                                   limits.min_quote_price_cents, kSmallQty));
+  EXPECT_TRUE(risk_mgr.check_order(kTicker, kalshi::Side::Yes,
+                                   limits.max_quote_price_cents, kSmallQty));
+}
+
 // ---- Position limit (from zero, no update() needed) ----
 
 TEST_F(RiskManagerTest, RejectsYesOrderExceedingPositionLimitFromZero) {

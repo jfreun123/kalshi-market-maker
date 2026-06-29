@@ -39,6 +39,8 @@ TEST(ConfigTest, LoadsAllFields) {
   constexpr int kMaxOrderSize = 10;
   constexpr double kDailyLossLimit = -100.0;
   constexpr double kMaxTotalLoss = -250.0;
+  constexpr int kMinQuotePrice = 12;
+  constexpr int kMaxQuotePrice = 88;
 
   const nlohmann::json config_json = {
       {"api_key", "my-key"},
@@ -56,7 +58,9 @@ TEST(ConfigTest, LoadsAllFields) {
         {"max_open_orders_per_market", kMaxOpenOrders},
         {"max_order_size", kMaxOrderSize},
         {"daily_loss_limit", kDailyLossLimit},
-        {"max_total_loss_dollars", kMaxTotalLoss}}}};
+        {"max_total_loss_dollars", kMaxTotalLoss},
+        {"min_quote_price_cents", kMinQuotePrice},
+        {"max_quote_price_cents", kMaxQuotePrice}}}};
 
   const auto path = write_temp_config(config_json);
   const auto config = kalshi::load_config(path);
@@ -78,6 +82,8 @@ TEST(ConfigTest, LoadsAllFields) {
   EXPECT_EQ(config.risk.max_order_size, kMaxOrderSize);
   EXPECT_DOUBLE_EQ(config.risk.daily_loss_limit, kDailyLossLimit);
   EXPECT_DOUBLE_EQ(config.risk.max_total_loss_dollars, kMaxTotalLoss);
+  EXPECT_EQ(config.risk.min_quote_price_cents, kMinQuotePrice);
+  EXPECT_EQ(config.risk.max_quote_price_cents, kMaxQuotePrice);
 }
 
 TEST(ConfigTest, LoadsScannerSection) {
@@ -139,6 +145,10 @@ TEST(ConfigTest, DefaultsAppliedWhenOptionalSectionsAbsent) {
                    kalshi::RiskLimits::kDefaultMaxTotalExposure);
   EXPECT_DOUBLE_EQ(config.risk.max_total_loss_dollars,
                    kalshi::RiskLimits::kDefaultMaxTotalLoss);
+  EXPECT_EQ(config.risk.min_quote_price_cents,
+            kalshi::RiskLimits::kDefaultMinQuotePrice);
+  EXPECT_EQ(config.risk.max_quote_price_cents,
+            kalshi::RiskLimits::kDefaultMaxQuotePrice);
 }
 
 TEST(ConfigTest, ThrowsOnMissingApiKey) {

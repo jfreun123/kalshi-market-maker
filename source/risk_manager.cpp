@@ -20,12 +20,18 @@ constexpr std::array<std::string_view, 10> kConstraintNames = {
 
 RiskManager::RiskManager(RiskLimits limits) : limits_{limits} {}
 
+// NOLINTBEGIN(bugprone-easily-swappable-parameters) — mirrors header decl
 bool RiskManager::check_order(std::string_view ticker, Side side,
-                              int /*price_cents*/, int quantity) const {
+                              int price_cents, int quantity) const {
   if (constraints_.any()) {
     return false;
   }
   if (quantity > limits_.max_order_size) {
+    return false;
+  }
+  // Price-range gate: refuse to quote a contract priced outside the band.
+  if (price_cents < limits_.min_quote_price_cents ||
+      price_cents > limits_.max_quote_price_cents) {
     return false;
   }
 
@@ -43,6 +49,7 @@ bool RiskManager::check_order(std::string_view ticker, Side side,
   const int delta = (side == Side::Yes) ? quantity : -quantity;
   return std::abs(current_pos + delta) <= limits_.max_position_per_market;
 }
+// NOLINTEND(bugprone-easily-swappable-parameters)
 
 void RiskManager::update(const IOrderManager &order_mgr,
                          const std::vector<std::string> &tickers) {

@@ -45,6 +45,12 @@ struct RiskLimits {
   // mark-to-market unrealized, so a book bleeding while holding inventory
   // halts.
   static constexpr double kDefaultMaxTotalLoss = -1000.0; // dollars
+  // Price-range gate: only quote contracts priced inside [min, max] cents. The
+  // low bound avoids cheap longshots — Bürgi/Deng/Whelan find maker returns on
+  // <10c contracts are significantly negative; the high bound caps
+  // capital-inefficient near-settled extremes. Enforced in check_order.
+  static constexpr int kDefaultMinQuotePrice = 10; // cents
+  static constexpr int kDefaultMaxQuotePrice = 90; // cents
 
   int max_position_per_market = kDefaultMaxPosition;
   int max_open_orders_per_market = kDefaultMaxOpenOrders;
@@ -52,6 +58,8 @@ struct RiskLimits {
   double daily_loss_limit = kDefaultDailyLossLimit; // dollars (negative = loss)
   double max_total_exposure_dollars = kDefaultMaxTotalExposure;
   double max_total_loss_dollars = kDefaultMaxTotalLoss; // dollars (negative)
+  int min_quote_price_cents = kDefaultMinQuotePrice;
+  int max_quote_price_cents = kDefaultMaxQuotePrice;
 };
 
 // Pre-trade risk checks for all outgoing orders.
