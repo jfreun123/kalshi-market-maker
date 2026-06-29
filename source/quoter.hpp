@@ -12,16 +12,21 @@
 
 namespace kalshi {
 
+class FlowImbalanceGuard; // widen the spread under adverse one-sided flow
+
 struct QuoterConfig {
   static constexpr int kDefaultTargetSpreadCents = 4;
   static constexpr double kDefaultSkewPerContractCents = 0.05;
   static constexpr int kDefaultRepriceThresholdCents = 1;
   static constexpr int kDefaultQuoteSize = 10;
+  // Extra cents added to the target spread while flow is imbalanced.
+  static constexpr int kDefaultImbalanceSpreadCents = 2;
 
   int target_spread_cents = kDefaultTargetSpreadCents;
   double skew_per_contract_cents = kDefaultSkewPerContractCents;
   int reprice_threshold_cents = kDefaultRepriceThresholdCents;
   int quote_size = kDefaultQuoteSize;
+  int imbalance_spread_cents = kDefaultImbalanceSpreadCents;
 };
 
 // Maintains one bid (YES buy) and one ask (NO buy) per subscribed ticker.
@@ -31,12 +36,15 @@ struct QuoterConfig {
 // when its price drifts by more than reprice_threshold_cents to avoid churn.
 class Quoter {
 public:
-  // Default pricing: HeuristicModel.
-  Quoter(QuoterConfig config, IOrderManager &order_mgr, RiskManager &risk_mgr);
+  // Default pricing: HeuristicModel. flow_guard is optional (nullptr disables
+  // the imbalance widening) and must outlive the Quoter.
+  Quoter(QuoterConfig config, IOrderManager &order_mgr, RiskManager &risk_mgr,
+         const FlowImbalanceGuard *flow_guard = nullptr);
 
   // Custom pricing: inject any IPricingModel via a FairValueEngine.
   Quoter(QuoterConfig config, FairValueEngine fv_engine,
-         IOrderManager &order_mgr, RiskManager &risk_mgr);
+         IOrderManager &order_mgr, RiskManager &risk_mgr,
+         const FlowImbalanceGuard *flow_guard = nullptr);
 
   void update(std::string_view ticker, const LocalOrderbook &book);
 
@@ -61,6 +69,7 @@ private:
   FairValueEngine fv_engine_;
   IOrderManager &order_mgr_;
   RiskManager &risk_mgr_;
+  const FlowImbalanceGuard *flow_guard_{nullptr};
   std::unordered_map<std::string, LiveQuote> live_quotes_;
 };
 

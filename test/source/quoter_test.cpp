@@ -1,4 +1,5 @@
 #include "fake_transport.hpp"
+#include "flow_imbalance.hpp"
 #include "order_manager.hpp"
 #include "orderbook.hpp"
 #include "quoter.hpp"
@@ -44,6 +45,11 @@ constexpr std::string_view kBidPriceMid52Short20 = R"("price":"0.5100")";
 constexpr std::string_view kBidPriceExtremeClamp = R"("price":"0.0100")";
 constexpr std::string_view kAskPriceExtremeClamp =
     R"("price":"0.0400")"; // YES=100-96=4
+// Flow imbalance: default spread 4 → half 2 → bid 50; +2 imbalance → half 3 →
+// bid 49.
+constexpr std::string_view kBidPriceImbalanced = R"("price":"0.4900")";
+constexpr int kImbalanceYesQty = 30;
+constexpr int kImbalanceNoQty = 5;
 
 constexpr int kObLevelQty = 100;
 constexpr int kFillPrice = 52;
@@ -420,4 +426,34 @@ TEST_F(QuoterTest, AskAlwaysHigherThanBidWithExtremeInventory) {
   EXPECT_NE(ask_body.find("\"side\":\"ask\""), std::string::npos);
   EXPECT_NE(ask_body.find(std::string(kAskPriceExtremeClamp)),
             std::string::npos);
+}
+
+TEST_F(QuoterTest, ImbalancedFlowWidensSpread) {
+  auto transport_ptr = std::make_unique<FakeTransport>();
+  FakeTransport &transport = *transport_ptr;
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId1, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId2, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  kalshi::RestClient rest{kalshi::Auth{kApiKey, kPemPrivateKey},
+                          std::move(transport_ptr), kBaseUrl};
+  kalshi::OrderManager order_mgr{rest};
+  kalshi::RiskManager risk_mgr{kalshi::RiskLimits{}};
+
+  // Heavy one-sided flow → imbalanced (30 vs 5, ratio 6 > 2, vol 35 ≥ 20).
+  kalshi::FlowImbalanceGuard flow_guard{kalshi::FlowImbalanceConfig{}};
+  flow_guard.record_fill(kTicker, kalshi::Side::Yes, kImbalanceYesQty);
+  flow_guard.record_fill(kTicker, kalshi::Side::No, kImbalanceNoQty);
+  ASSERT_TRUE(flow_guard.is_imbalanced(kTicker));
+
+  kalshi::Quoter quoter{kalshi::QuoterConfig{}, order_mgr, risk_mgr,
+                        &flow_guard};
+  quoter.update(kTicker, make_ob(kYesBid52, kNoBid52)); // mid 52
+
+  // Spread 4 → bid 50 normally; +2 imbalance spread → half 3 → bid 49.
+  ASSERT_EQ(transport.recorded_requests().size(), 2U);
+  const std::string &bid_body = transport.recorded_requests().at(0).body;
+  EXPECT_NE(bid_body.find(std::string(kBidPriceImbalanced)), std::string::npos);
 }

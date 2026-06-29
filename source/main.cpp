@@ -1,6 +1,7 @@
 #include "auth.hpp"
 #include "capture.hpp"
 #include "config.hpp"
+#include "flow_imbalance.hpp"
 #include "http_transport.hpp"
 #include "logger.hpp"
 #include "order_manager.hpp"
@@ -455,9 +456,10 @@ int main(int argc, char *argv[]) {
 
     kalshi::OrderManager order_mgr{rest};
     kalshi::RiskManager risk_mgr{app_config.risk};
-    kalshi::Quoter quoter{app_config.quoter, order_mgr, risk_mgr};
+    kalshi::FlowImbalanceGuard flow_guard{app_config.flow};
+    kalshi::Quoter quoter{app_config.quoter, order_mgr, risk_mgr, &flow_guard};
     kalshi::TradingSession session{app_config.target_tickers, order_mgr,
-                                   risk_mgr, quoter};
+                                   risk_mgr, quoter, &flow_guard};
 
     const std::filesystem::path pnl_path{"pnl_state.json"};
     auto prior_pnl = load_pnl(pnl_path);

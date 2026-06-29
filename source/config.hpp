@@ -1,5 +1,6 @@
 #pragma once
 
+#include "flow_imbalance.hpp"
 #include "quoter.hpp"
 #include "risk_manager.hpp"
 #include "ticker_scanner.hpp"
@@ -20,6 +21,7 @@ struct AppConfig {
   QuoterConfig quoter;
   RiskLimits risk;
   ScannerConfig scanner;
+  FlowImbalanceConfig flow;
 };
 
 // Loads configuration from a JSON file.

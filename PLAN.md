@@ -199,22 +199,27 @@ struct ExposureDecomposition {
 
 ---
 
-### Phase 26 — Flow Imbalance Signal
+### Phase 26 — Flow Imbalance Signal — built
 
-```cpp
-class FlowImbalanceGuard {
-public:
-  void record_fill(const std::string &ticker, Side side, int quantity,
-                   TimePoint tp = Clock::now());
-  [[nodiscard]] double imbalance_ratio(const std::string &ticker) const; // 1.0 = balanced
-  [[nodiscard]] bool is_imbalanced(const std::string &ticker) const;
-  void reset(const std::string &ticker);
-};
-```
+`FlowImbalanceGuard` (`source/flow_imbalance.hpp/.cpp`) tracks the bot's fill
+volume per side, per ticker, over a rolling time window (`FlowImbalanceConfig`:
+`window_seconds`, `imbalance_ratio_threshold`, `min_flow_volume`; default
+300s/2.0/20). `imbalance_ratio()` = larger-side / smaller-side (1.0 = balanced);
+`is_imbalanced()` is true when the window holds ≥ `min_flow_volume` contracts and
+the ratio exceeds the threshold. Per Palumbo, side-weighted volume imbalance — the
+bot accumulating mostly YES or mostly NO — is the largest predictor of adverse
+terminal directional exposure (`E_win`), so a sustained one-sided fill stream is
+the signal to back off.
 
-`Quoter::update()` adds `imbalance_spread_cents` (a `QuoterConfig` field) when `is_imbalanced()` returns true.
+Wired via an **optional guard pointer** (nullptr disables it, so existing call
+sites are untouched): `TradingSession::on_fill` feeds the guard; `Quoter::update`
+queries `is_imbalanced(ticker)` and adds `quoter.imbalance_spread_cents` (default
+2) to the target spread while imbalanced, demanding more compensation for the
+adverse flow. Read queries take an injectable `now` for deterministic tests.
 
-**Files:** `source/flow_imbalance.hpp/cpp`, `test/source/flow_imbalance_test.cpp`
+**Files:** `source/flow_imbalance.*`, `flow_imbalance_test.cpp`, plus optional-ptr
+integration in `quoter.*` / `trading_session.*` / `main.cpp`, `config.*` (`flow`
+section + `imbalance_spread_cents`).
 
 ---
 
@@ -551,7 +556,7 @@ LPs accumulate net directional exposure (`E_win`) that dominates terminal P&L. T
 - [ ] Phase 32 — Operational hardening (systemd, logrotate, Telegram alert script)
 - [x] Phase 29 — Price-Range Gate (band gate in `check_order`, default [10,90]c)
 - [ ] Phase 27 — Spread Floor & E_win Tracking
-- [ ] Phase 26 — Flow Imbalance Signal
+- [x] Phase 26 — Flow Imbalance Signal (FlowImbalanceGuard → widen spread under one-sided flow)
 - [ ] Phase 28 — View-Based Pricing (β=0.09 debiasing)
 - [ ] Phase 30 — Maker Fee Integration
 

@@ -30,8 +30,11 @@ public:
   // Invoked after a fill updates carried PnL, so the host can persist it.
   using PnlListener = std::function<void(const PnlMap &)>;
 
+  // flow_guard is optional; when present, on_fill feeds it so the Quoter can
+  // widen spreads under adverse one-sided flow. Must outlive the session.
   TradingSession(std::vector<std::string> tickers, IOrderManager &order_mgr,
-                 RiskManager &risk_mgr, Quoter &quoter);
+                 RiskManager &risk_mgr, Quoter &quoter,
+                 FlowImbalanceGuard *flow_guard = nullptr);
 
   // ---- WebSocket event reactions ----
 
@@ -84,6 +87,7 @@ private:
   IOrderManager &order_mgr_;
   RiskManager &risk_mgr_;
   Quoter &quoter_;
+  FlowImbalanceGuard *flow_guard_{nullptr};
   OrderbookMap ob_map_;
   PnlMap prior_pnl_;
   PnlListener pnl_listener_;

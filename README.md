@@ -28,6 +28,7 @@ WebSocketClient ──► TradingSession ──► Quoter ──► OrderManager
 | `TheoGrid` | `theo_grid.hpp` | Bilinear interpolation table for fast repricing |
 | `Quoter` | `quoter.hpp` | Computes bid/ask, reprices on orderbook delta |
 | `AdverseSelectionGuard` | `adverse_selection.hpp` | Pulls quotes when fill rate exceeds threshold |
+| `FlowImbalanceGuard` | `flow_imbalance.hpp` | Tracks one-sided fill flow; Quoter widens spread when imbalanced (Palumbo E_win signal) |
 | `TickerScanner` | `ticker_scanner.hpp` | Ranks markets by volume/spread; writes a trade config |
 | `Capturing{WebSocket,HttpTransport}` | `capture.hpp` | Tee raw WS frames / REST responses for `--capture` replay |
 | `Auth` | `auth.hpp` | RSA-PSS-SHA256 request signing |

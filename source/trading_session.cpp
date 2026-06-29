@@ -1,5 +1,6 @@
 #include "trading_session.hpp"
 
+#include "flow_imbalance.hpp"
 #include "logger.hpp"
 #include "portfolio.hpp"
 
@@ -26,9 +27,9 @@ double prior_pnl_for(const TradingSession::PnlMap &prior_pnl,
 
 TradingSession::TradingSession(std::vector<std::string> tickers,
                                IOrderManager &order_mgr, RiskManager &risk_mgr,
-                               Quoter &quoter)
+                               Quoter &quoter, FlowImbalanceGuard *flow_guard)
     : tickers_{std::move(tickers)}, order_mgr_{order_mgr}, risk_mgr_{risk_mgr},
-      quoter_{quoter} {}
+      quoter_{quoter}, flow_guard_{flow_guard} {}
 
 void TradingSession::on_snapshot(const Orderbook &snapshot) {
   ob_map_[snapshot.ticker].apply_snapshot(snapshot);
@@ -53,6 +54,10 @@ void TradingSession::on_delta(const std::string &ticker, Side side,
 void TradingSession::on_fill(const Fill &fill) {
   order_mgr_.record_fill(fill);
   risk_mgr_.update(order_mgr_, tickers_);
+  if (flow_guard_ != nullptr) {
+    flow_guard_->record_fill(fill.market_ticker, fill.side, fill.quantity,
+                             fill.timestamp);
+  }
 
   const double session_pnl = order_mgr_.realized_pnl(fill.market_ticker);
   const double total_pnl =

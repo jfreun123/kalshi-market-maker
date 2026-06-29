@@ -35,6 +35,7 @@ kalshi_add_test(scan_output_test source/scan_output_test.cpp)
 kalshi_add_test(portfolio_test source/portfolio_test.cpp)
 kalshi_add_test(trading_session_test source/trading_session_test.cpp)
 kalshi_add_test(capture_test source/capture_test.cpp)
+kalshi_add_test(flow_imbalance_test source/flow_imbalance_test.cpp)
 
 # ---- Replay tests ----
 

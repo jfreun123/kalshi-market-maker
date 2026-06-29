@@ -42,6 +42,10 @@ TEST(ConfigTest, LoadsAllFields) {
   constexpr int kMinQuotePrice = 12;
   constexpr int kMaxQuotePrice = 88;
   constexpr double kMaxDrawdown = 300.0;
+  constexpr int kImbalanceSpread = 3;
+  constexpr int kFlowWindowSeconds = 120;
+  constexpr double kFlowRatioThreshold = 1.5;
+  constexpr int kFlowMinVolume = 10;
 
   const nlohmann::json config_json = {
       {"api_key", "my-key"},
@@ -53,7 +57,12 @@ TEST(ConfigTest, LoadsAllFields) {
        {{"target_spread_cents", kSpreadCents},
         {"skew_per_contract_cents", kSkew},
         {"reprice_threshold_cents", kRepriceCents},
-        {"quote_size", kQuoteSize}}},
+        {"quote_size", kQuoteSize},
+        {"imbalance_spread_cents", kImbalanceSpread}}},
+      {"flow",
+       {{"window_seconds", kFlowWindowSeconds},
+        {"imbalance_ratio_threshold", kFlowRatioThreshold},
+        {"min_flow_volume", kFlowMinVolume}}},
       {"risk",
        {{"max_position_per_market", kMaxPosition},
         {"max_open_orders_per_market", kMaxOpenOrders},
@@ -79,6 +88,10 @@ TEST(ConfigTest, LoadsAllFields) {
   EXPECT_DOUBLE_EQ(config.quoter.skew_per_contract_cents, kSkew);
   EXPECT_EQ(config.quoter.reprice_threshold_cents, kRepriceCents);
   EXPECT_EQ(config.quoter.quote_size, kQuoteSize);
+  EXPECT_EQ(config.quoter.imbalance_spread_cents, kImbalanceSpread);
+  EXPECT_EQ(config.flow.window_seconds, kFlowWindowSeconds);
+  EXPECT_DOUBLE_EQ(config.flow.imbalance_ratio_threshold, kFlowRatioThreshold);
+  EXPECT_EQ(config.flow.min_flow_volume, kFlowMinVolume);
   EXPECT_EQ(config.risk.max_position_per_market, kMaxPosition);
   EXPECT_EQ(config.risk.max_open_orders_per_market, kMaxOpenOrders);
   EXPECT_EQ(config.risk.max_order_size, kMaxOrderSize);
@@ -136,6 +149,14 @@ TEST(ConfigTest, DefaultsAppliedWhenOptionalSectionsAbsent) {
   EXPECT_EQ(config.quoter.reprice_threshold_cents,
             kalshi::QuoterConfig::kDefaultRepriceThresholdCents);
   EXPECT_EQ(config.quoter.quote_size, kalshi::QuoterConfig::kDefaultQuoteSize);
+  EXPECT_EQ(config.quoter.imbalance_spread_cents,
+            kalshi::QuoterConfig::kDefaultImbalanceSpreadCents);
+  EXPECT_EQ(config.flow.window_seconds,
+            kalshi::FlowImbalanceConfig::kDefaultWindowSeconds);
+  EXPECT_DOUBLE_EQ(config.flow.imbalance_ratio_threshold,
+                   kalshi::FlowImbalanceConfig::kDefaultRatioThreshold);
+  EXPECT_EQ(config.flow.min_flow_volume,
+            kalshi::FlowImbalanceConfig::kDefaultMinFlowVolume);
   EXPECT_EQ(config.risk.max_position_per_market,
             kalshi::RiskLimits::kDefaultMaxPosition);
   EXPECT_EQ(config.risk.max_open_orders_per_market,

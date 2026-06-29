@@ -52,6 +52,19 @@ AppConfig load_config(const std::filesystem::path &path) {
         "reprice_threshold_cents", QuoterConfig::kDefaultRepriceThresholdCents);
     config.quoter.quote_size =
         quoter_json.value("quote_size", QuoterConfig::kDefaultQuoteSize);
+    config.quoter.imbalance_spread_cents = quoter_json.value(
+        "imbalance_spread_cents", QuoterConfig::kDefaultImbalanceSpreadCents);
+  }
+
+  if (json_data.contains("flow")) {
+    const auto &flow_json = json_data.at("flow");
+    config.flow.window_seconds = flow_json.value(
+        "window_seconds", FlowImbalanceConfig::kDefaultWindowSeconds);
+    config.flow.imbalance_ratio_threshold =
+        flow_json.value("imbalance_ratio_threshold",
+                        FlowImbalanceConfig::kDefaultRatioThreshold);
+    config.flow.min_flow_volume = flow_json.value(
+        "min_flow_volume", FlowImbalanceConfig::kDefaultMinFlowVolume);
   }
 
   if (json_data.contains("risk")) {
