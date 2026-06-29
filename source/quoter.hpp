@@ -31,6 +31,10 @@ struct QuoterConfig {
   int quote_size = kDefaultQuoteSize;
   int imbalance_spread_cents = kDefaultImbalanceSpreadCents;
   int min_spread_cents = kDefaultMinSpreadCents;
+  // Price toward the favorite-longshot-debiased view instead of the raw mid.
+  // Off by default (HeuristicModel is the safe baseline); β per Bürgi et al.
+  bool use_view_based_pricing = false;
+  double view_debias_beta = ViewBasedModel::kDefaultBeta;
 };
 
 // Maintains one bid (YES buy) and one ask (NO buy) per subscribed ticker.

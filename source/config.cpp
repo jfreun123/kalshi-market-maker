@@ -56,6 +56,10 @@ AppConfig load_config(const std::filesystem::path &path) {
         "imbalance_spread_cents", QuoterConfig::kDefaultImbalanceSpreadCents);
     config.quoter.min_spread_cents = quoter_json.value(
         "min_spread_cents", QuoterConfig::kDefaultMinSpreadCents);
+    config.quoter.use_view_based_pricing =
+        quoter_json.value("use_view_based_pricing", false);
+    config.quoter.view_debias_beta =
+        quoter_json.value("view_debias_beta", ViewBasedModel::kDefaultBeta);
   }
 
   if (json_data.contains("flow")) {

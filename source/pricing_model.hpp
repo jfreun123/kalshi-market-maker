@@ -26,4 +26,25 @@ public:
   [[nodiscard]] double estimate(const FairValueInput &input) const override;
 };
 
+// Debias an observed market probability to the true probability under the
+// Bürgi/Deng/Whelan favorite-longshot model: π* = (P − β/2) / (1 − β). Pulls
+// longshots down and favorites up. Result clamped to [0.01, 0.99].
+[[nodiscard]] double debias_probability(double market_prob, double beta);
+
+// "View-based" pricing: the fair value is the bot's probability *view*, not the
+// raw (biased) market mid. The view is an external estimate when supplied via
+// FairValueInput::external_prob, otherwise the debiased market mid. Per
+// Bürgi/Deng/Whelan, market prices carry a favorite-longshot bias (β≈0.09), so
+// pricing toward the debiased probability is where systematic maker edge comes
+// from. Result in cents, clamped to [1, 99].
+class ViewBasedModel : public IPricingModel {
+public:
+  static constexpr double kDefaultBeta = 0.09;
+  explicit ViewBasedModel(double beta = kDefaultBeta);
+  [[nodiscard]] double estimate(const FairValueInput &input) const override;
+
+private:
+  double beta_;
+};
+
 } // namespace kalshi

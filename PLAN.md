@@ -89,7 +89,7 @@ strings, timestamps) can only be confirmed once authenticated traffic flows.
 | 19 | Paper Trading Mode | `--paper` flag |
 | 20 | Documentation | `docs/`, `docs/adr/` |
 
-295 tests passing. Build clean.
+302 tests passing. Build clean.
 
 ### Also shipped (post-phase-20, on top of the table above)
 
@@ -229,22 +229,24 @@ section + `imbalance_spread_cents`).
 
 ---
 
-### Phase 28 — View-Based Pricing (β=0.09 debiasing)
+### Phase 28 — View-Based Pricing (β=0.09 debiasing) — built
 
-```cpp
-class ViewBasedModel : public IPricingModel {
-public:
-  explicit ViewBasedModel(double view_probability);
-  void update_view(double new_probability);
-  [[nodiscard]] double estimate(const FairValueInput &input) const override;
-private:
-  double view_probability_;
-};
-```
+`ViewBasedModel : IPricingModel` (`source/pricing_model.*`) prices toward the
+bot's probability *view* rather than the raw (biased) market mid. Stateless: the
+view is `FairValueInput::external_prob` when supplied, otherwise the **debiased
+market mid** via the free function `debias_probability(P, β) = (P − β/2)/(1 − β)`,
+clamped to [0.01, 0.99] (β default 0.09 per Bürgi/Deng/Whelan, clamped ≤ 0.95 to
+keep 1−β positive). This pulls longshots down (20c → 17c) and favorites up
+(80c → 83c) — quoting toward true probability is where systematic maker edge
+comes from. Inventory skew / spread stay the Quoter's job (it passes
+`net_position=0` to the model), so the model is pure debiasing.
 
-When bootstrapping from market mid, apply debiasing: `π* = (P − 0.045) / 0.91` (derivation: Bürgi et al. β=0.09 calibration). Clamp to [0.01, 0.99].
+Selected via `QuoterConfig.use_view_based_pricing` (default **false** — Heuristic
+remains the safe baseline) + `view_debias_beta`; `main` builds the chosen
+`FairValueEngine` and logs which model is active.
 
-**Files:** `source/pricing_model.hpp/cpp`, `test/source/view_based_model_test.cpp`
+**Files:** `source/pricing_model.*`, `view_based_model_test.cpp`, `quoter.hpp`
+(config) + `config.cpp` + `main.cpp` (selection), `config.example.json`.
 
 ---
 
@@ -563,7 +565,7 @@ LPs accumulate net directional exposure (`E_win`) that dominates terminal P&L. T
 - [x] Phase 29 — Price-Range Gate (band gate in `check_order`, default [10,90]c)
 - [x] Phase 27 — Spread Floor & E_win Tracking (min_spread floor + OrderManager::exposure)
 - [x] Phase 26 — Flow Imbalance Signal (FlowImbalanceGuard → widen spread under one-sided flow)
-- [ ] Phase 28 — View-Based Pricing (β=0.09 debiasing)
+- [x] Phase 28 — View-Based Pricing (β=0.09 favorite-longshot debiasing, opt-in)
 - [ ] Phase 30 — Maker Fee Integration
 
 **Deferred (scaling — after consistent profit on ≤5 tickers):**

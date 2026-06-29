@@ -1,6 +1,7 @@
 #include "auth.hpp"
 #include "capture.hpp"
 #include "config.hpp"
+#include "fair_value.hpp"
 #include "flow_imbalance.hpp"
 #include "http_transport.hpp"
 #include "logger.hpp"
@@ -8,6 +9,7 @@
 #include "orderbook.hpp"
 #include "paper_transport.hpp"
 #include "portfolio.hpp"
+#include "pricing_model.hpp"
 #include "quoter.hpp"
 #include "rest_client.hpp"
 #include "risk_manager.hpp"
@@ -457,7 +459,18 @@ int main(int argc, char *argv[]) {
     kalshi::OrderManager order_mgr{rest};
     kalshi::RiskManager risk_mgr{app_config.risk};
     kalshi::FlowImbalanceGuard flow_guard{app_config.flow};
-    kalshi::Quoter quoter{app_config.quoter, order_mgr, risk_mgr, &flow_guard};
+    // Pricing model: debiased "view" pricing when enabled, else the heuristic.
+    auto pricing_model =
+        app_config.quoter.use_view_based_pricing
+            ? kalshi::FairValueEngine{std::make_unique<kalshi::ViewBasedModel>(
+                  app_config.quoter.view_debias_beta)}
+            : kalshi::FairValueEngine{
+                  std::make_unique<kalshi::HeuristicModel>()};
+    log->info("pricing model={}", app_config.quoter.use_view_based_pricing
+                                      ? "view_based"
+                                      : "heuristic");
+    kalshi::Quoter quoter{app_config.quoter, std::move(pricing_model),
+                          order_mgr, risk_mgr, &flow_guard};
     kalshi::TradingSession session{app_config.target_tickers, order_mgr,
                                    risk_mgr, quoter, &flow_guard};
 

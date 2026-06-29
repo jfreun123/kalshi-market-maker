@@ -24,7 +24,8 @@ WebSocketClient ──► TradingSession ──► Quoter ──► OrderManager
 | `RiskManager` | `risk_manager.hpp` | Constraint bitset; blocks orders when any bit is set; `update_portfolio` is the global kill-switch |
 | `Portfolio` | `portfolio.hpp` | Read-model: total PnL, capital-at-risk, per-event risk; `reconcile()` vs exchange |
 | `FairValueEngine` | `fair_value.hpp` | Delegates to a pluggable `IPricingModel` |
-| `HeuristicModel` | `pricing_model.hpp` | Mid-price + time-decay + inventory skew |
+| `HeuristicModel` | `pricing_model.hpp` | Mid-price + time-decay + inventory skew (default) |
+| `ViewBasedModel` | `pricing_model.hpp` | Favorite-longshot debiasing `π*=(P−β/2)/(1−β)`; opt-in via `use_view_based_pricing` |
 | `TheoGrid` | `theo_grid.hpp` | Bilinear interpolation table for fast repricing |
 | `Quoter` | `quoter.hpp` | Computes bid/ask, reprices on orderbook delta |
 | `AdverseSelectionGuard` | `adverse_selection.hpp` | Pulls quotes when fill rate exceeds threshold |
