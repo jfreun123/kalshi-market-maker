@@ -248,8 +248,8 @@ run_portfolio_tasks(int poll_count, const kalshi::AppConfig &app_config,
                     const kalshi::IOrderManager &order_mgr, const ObMap &ob_map,
                     kalshi::RiskManager &risk_mgr, const PnlMap &prior_pnl,
                     std::shared_ptr<spdlog::logger> &log) {
-  constexpr int kPositionLogInterval = 600;   // 600 × 100ms = 60s
-  constexpr int kPortfolioRiskInterval = 100; // 100 × 100ms = 10s
+  constexpr int kPositionLogInterval = 600;  // 600 × 100ms = 60s
+  constexpr int kPortfolioRiskInterval = 10; // 10 × 100ms = 1s
 
   const bool do_log = poll_count % kPositionLogInterval == 0;
   const bool do_risk = poll_count % kPortfolioRiskInterval == 0;

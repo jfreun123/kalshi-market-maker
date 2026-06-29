@@ -353,7 +353,9 @@ quoting (Phases 21–22) will report into.
 
   Both only set bits; clearing requires `resume()` (don't auto-resume into a
   crashing market). The main loop builds the snapshot once and feeds it to both
-  the kill-switch (every ~10s, `run_portfolio_tasks`) and the status log (~60s).
+  the kill-switch (every ~1s, `run_portfolio_tasks`) and the status log (~60s).
+  Truly event-driven (recompute on every WS delta) is deferred to Phase 23
+  (Incremental Risk) — full recompute per delta doesn't scale; 1s sampling does.
 
   ```mermaid
   graph TD

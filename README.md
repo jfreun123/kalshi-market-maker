@@ -173,7 +173,7 @@ breakdown (correlated strikes rolled up). It's logged each status interval.
 
 Three portfolio-level safety checks complement the per-market risk limits. The
 first two form a **global kill-switch**: `RiskManager::update_portfolio()` consumes
-the read-model snapshot (built once per cycle, ~10s cadence) and any tripped bit
+the read-model snapshot (rebuilt ~1s, sub-ms at this scale) and any tripped bit
 halts **all** quoters at once.
 
 - **Over-exposure** — `risk.max_total_exposure_dollars` caps total capital at risk
