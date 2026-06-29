@@ -21,12 +21,16 @@ struct QuoterConfig {
   static constexpr int kDefaultQuoteSize = 10;
   // Extra cents added to the target spread while flow is imbalanced.
   static constexpr int kDefaultImbalanceSpreadCents = 2;
+  // Hard floor on the quoted spread — never quote tighter than this, so the
+  // underwriting premium isn't given away (Palumbo: LPs are underwriters).
+  static constexpr int kDefaultMinSpreadCents = 3;
 
   int target_spread_cents = kDefaultTargetSpreadCents;
   double skew_per_contract_cents = kDefaultSkewPerContractCents;
   int reprice_threshold_cents = kDefaultRepriceThresholdCents;
   int quote_size = kDefaultQuoteSize;
   int imbalance_spread_cents = kDefaultImbalanceSpreadCents;
+  int min_spread_cents = kDefaultMinSpreadCents;
 };
 
 // Maintains one bid (YES buy) and one ask (NO buy) per subscribed ticker.

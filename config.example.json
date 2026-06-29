@@ -12,7 +12,8 @@
     "skew_per_contract_cents": 0.05,
     "reprice_threshold_cents": 1,
     "quote_size": 10,
-    "imbalance_spread_cents": 2
+    "imbalance_spread_cents": 2,
+    "min_spread_cents": 3
   },
   "flow": {
     "window_seconds": 300,

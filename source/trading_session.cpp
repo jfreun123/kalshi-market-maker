@@ -162,6 +162,16 @@ void TradingSession::log_status() const {
               ticker, pos, session_pnl / kCentsPerDollar,
               (prior + session_pnl) / kCentsPerDollar, risk_mgr_.is_halted(),
               risk_mgr_.active_constraints());
+
+    // E_win decomposition: locked spread capture vs. the directional bet.
+    const auto exposure = order_mgr_.exposure(ticker);
+    log->info(
+        "exposure ticker={} net_inventory={} spread_capture_dollars={:.2f} "
+        "e_win_dollars={:.2f} e_loss_dollars={:.2f}",
+        ticker, exposure.net_inventory,
+        exposure.spread_capture_cents / kCentsPerDollar,
+        exposure.e_win_cents / kCentsPerDollar,
+        exposure.e_loss_cents / kCentsPerDollar);
   }
 
   const auto snap = portfolio_snapshot();

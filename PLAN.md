@@ -89,7 +89,7 @@ strings, timestamps) can only be confirmed once authenticated traffic flows.
 | 19 | Paper Trading Mode | `--paper` flag |
 | 20 | Documentation | `docs/`, `docs/adr/` |
 
-272 tests passing. Build clean.
+295 tests passing. Build clean.
 
 ### Also shipped (post-phase-20, on top of the table above)
 
@@ -177,25 +177,31 @@ uses a `[1, 99]` band so it still verifies clamping math).
 
 ---
 
-### Phase 27 — Spread Floor & E_win Tracking
+### Phase 27 — Spread Floor & E_win Tracking — built
 
-Add `min_spread_cents{3}` to `QuoterConfig`. In `Quoter::compute_quotes()`:
-```cpp
-half_spread = std::max({kHalfSpreadMin, config_.target_spread_cents / 2,
-                        config_.min_spread_cents / 2});
-```
+**Spread floor:** `QuoterConfig.min_spread_cents` (default 3, configurable). In
+`Quoter::update`, `half_spread = max({kHalfSpreadMin, target_spread / 2,
+min_spread_cents / 2})` so the bot never quotes tighter than the floor (it applies
+on top of the imbalance widening from Phase 26). Don't give away the underwriting
+premium.
 
-Add to `OrderManager`:
+**E_win tracking:** `OrderManager::exposure(ticker)` (added to `IOrderManager`)
+returns an `ExposureDecomposition`:
 ```cpp
 struct ExposureDecomposition {
-  double c_a_cents{};   // net cashflow Yes (spread capture)
-  double c_b_cents{};   // net cashflow No  (spread capture)
-  double e_win_cents{}; // directional exposure on winning outcome
+  double spread_capture_cents; // realized profit from matched YES/NO pairs (outcome-independent)
+  int    net_inventory;        // signed open contracts (+YES / -NO)
+  double e_win_cents;          // payoff if the held side WINS  (qty*100 - cost)
+  double e_loss_cents;         // payoff if it LOSES (≤ 0; = -capital at risk)
 };
-[[nodiscard]] ExposureDecomposition exposure(const std::string &ticker) const;
 ```
+Open inventory sits on one side at a time (offsetting fills realize first), so the
+split is exact: locked spread capture vs. the directional E_win bet that, per
+Palumbo, dominates terminal P&L. `TradingSession::log_status` logs it per ticker.
 
-**Files:** `source/config.hpp`, `source/order_manager.hpp/cpp`
+**Files:** `source/quoter.*`, `source/order_manager.*`, `source/config.cpp`,
+`source/trading_session.cpp`, `config.example.json`, tests in `order_manager_test`
+/ `quoter_test` / `config_test`.
 
 ---
 
@@ -555,7 +561,7 @@ LPs accumulate net directional exposure (`E_win`) that dominates terminal P&L. T
 - [ ] Real-capture replay — record a demo session, drop into `test/fixtures/`, add capture-specific assertions to `replay_session_test`
 - [ ] Phase 32 — Operational hardening (systemd, logrotate, Telegram alert script)
 - [x] Phase 29 — Price-Range Gate (band gate in `check_order`, default [10,90]c)
-- [ ] Phase 27 — Spread Floor & E_win Tracking
+- [x] Phase 27 — Spread Floor & E_win Tracking (min_spread floor + OrderManager::exposure)
 - [x] Phase 26 — Flow Imbalance Signal (FlowImbalanceGuard → widen spread under one-sided flow)
 - [ ] Phase 28 — View-Based Pricing (β=0.09 debiasing)
 - [ ] Phase 30 — Maker Fee Integration

@@ -129,7 +129,9 @@ void Quoter::update(std::string_view ticker, const LocalOrderbook &book) {
         "flow imbalanced ticker={} ratio={:.2f} — widening spread to {}c",
         ticker, flow_guard_->imbalance_ratio(ticker_str), target_spread);
   }
-  const int half_spread = std::max(kHalfSpreadMin, target_spread / 2);
+  // Apply the spread floor: never quote tighter than min_spread_cents.
+  const int half_spread = std::max(
+      {kHalfSpreadMin, target_spread / 2, config_.min_spread_cents / 2});
   const double inventory_skew =
       static_cast<double>(order_mgr_.net_position(ticker_str)) *
       config_.skew_per_contract_cents;

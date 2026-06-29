@@ -28,6 +28,8 @@ constexpr int kSecondFillQty = 5;
 constexpr int kYesFillPrice = 52;
 constexpr int kNoFillPrice = 44;
 constexpr int kSecondNoFillPrice = 46;
+constexpr int kContractPayout = 100; // a winning binary contract pays 100c
+constexpr int kNoMatchQty = 3; // partial offset against a 5-lot YES position
 // Each YES@52 + NO@44 pair: PnL = 100 - 52 - 44 = 4 cents per contract
 constexpr double kExpectedPnlPerPair = 4.0;
 constexpr double kExpectedPnl5Pairs = 20.0;
@@ -479,4 +481,74 @@ TEST_F(OrderManagerTest, PositionCostSumsOpenLotCostBasis) {
                             kFillQty, kTs1Ns));
 
   EXPECT_DOUBLE_EQ(mgr.position_cost(kTicker), kExpectedCost);
+}
+
+// ---- exposure() / E_win decomposition ----
+
+TEST_F(OrderManagerTest, ExposureZeroWithNoPosition) {
+  auto rest_client = make_rest_client(std::make_unique<FakeTransport>());
+  kalshi::OrderManager mgr{rest_client};
+
+  const auto exposure = mgr.exposure(kTicker);
+
+  EXPECT_EQ(exposure.net_inventory, 0);
+  EXPECT_DOUBLE_EQ(exposure.spread_capture_cents, 0.0);
+  EXPECT_DOUBLE_EQ(exposure.e_win_cents, 0.0);
+  EXPECT_DOUBLE_EQ(exposure.e_loss_cents, 0.0);
+}
+
+TEST_F(OrderManagerTest, ExposureOnNetLongYes) {
+  auto rest_client = make_rest_client(std::make_unique<FakeTransport>());
+  kalshi::OrderManager mgr{rest_client};
+  mgr.record_fill(make_fill(kOrderId, kTicker, kalshi::Side::Yes, kYesFillPrice,
+                            kFillQty, kTs1Ns));
+
+  const auto exposure = mgr.exposure(kTicker);
+  const double cost = static_cast<double>(kYesFillPrice) * kFillQty; // 260
+
+  EXPECT_EQ(exposure.net_inventory, kFillQty);
+  EXPECT_DOUBLE_EQ(exposure.spread_capture_cents, 0.0);
+  // If YES wins: 5 * 100 - 260 = 240; if it loses: -260 (the cost).
+  EXPECT_DOUBLE_EQ(exposure.e_win_cents,
+                   static_cast<double>(kFillQty) * kContractPayout - cost);
+  EXPECT_DOUBLE_EQ(exposure.e_loss_cents, -cost);
+}
+
+TEST_F(OrderManagerTest, ExposureOnNetLongNo) {
+  auto rest_client = make_rest_client(std::make_unique<FakeTransport>());
+  kalshi::OrderManager mgr{rest_client};
+  mgr.record_fill(make_fill(kOrderId, kTicker, kalshi::Side::No, kNoFillPrice,
+                            kFillQty, kTs1Ns));
+
+  const auto exposure = mgr.exposure(kTicker);
+  const double cost = static_cast<double>(kNoFillPrice) * kFillQty; // 220
+
+  EXPECT_EQ(exposure.net_inventory, -kFillQty);
+  EXPECT_DOUBLE_EQ(exposure.e_win_cents,
+                   static_cast<double>(kFillQty) * kContractPayout - cost);
+  EXPECT_DOUBLE_EQ(exposure.e_loss_cents, -cost);
+}
+
+TEST_F(OrderManagerTest, ExposureSplitsMatchedSpreadFromDirectional) {
+  auto rest_client = make_rest_client(std::make_unique<FakeTransport>());
+  kalshi::OrderManager mgr{rest_client};
+  // 5 YES @ 52, then 3 NO @ 44 → 3 contracts offset (spread capture), 2 YES
+  // open.
+  mgr.record_fill(make_fill(kOrderId, kTicker, kalshi::Side::Yes, kYesFillPrice,
+                            kFillQty, kTs1Ns));
+  mgr.record_fill(make_fill(kOrderId2, kTicker, kalshi::Side::No, kNoFillPrice,
+                            kNoMatchQty, kTs2Ns));
+
+  const auto exposure = mgr.exposure(kTicker);
+  const double spread =
+      static_cast<double>(kContractPayout - kNoFillPrice - kYesFillPrice) *
+      kNoMatchQty;                              // (100-44-52)*3 = 12
+  const int remaining = kFillQty - kNoMatchQty; // 2
+  const double cost = static_cast<double>(kYesFillPrice) * remaining; // 104
+
+  EXPECT_EQ(exposure.net_inventory, remaining);
+  EXPECT_DOUBLE_EQ(exposure.spread_capture_cents, spread);
+  EXPECT_DOUBLE_EQ(exposure.e_win_cents,
+                   static_cast<double>(remaining) * kContractPayout - cost);
+  EXPECT_DOUBLE_EQ(exposure.e_loss_cents, -cost);
 }

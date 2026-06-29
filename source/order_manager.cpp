@@ -6,6 +6,7 @@
 #include <exception>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace kalshi {
@@ -169,6 +170,43 @@ double OrderManager::position_cost(std::string_view ticker) const {
   accumulate(no_lots_, key);
 
   return cost;
+}
+
+ExposureDecomposition OrderManager::exposure(std::string_view ticker) const {
+  const std::string key{ticker};
+
+  // Sum the open inventory on one side: returns {contracts, total cost cents}.
+  auto sum_side =
+      [&key](const std::unordered_map<std::string, std::deque<Lot>> &lots)
+      -> std::pair<int, double> {
+    auto iter = lots.find(key);
+    if (iter == lots.end()) {
+      return {0, 0.0};
+    }
+    int quantity = 0;
+    double cost = 0.0;
+    for (const Lot &lot : iter->second) {
+      quantity += lot.remaining;
+      cost += static_cast<double>(lot.price_cents) * lot.remaining;
+    }
+    return {quantity, cost};
+  };
+
+  const auto [yes_qty, yes_cost] = sum_side(yes_lots_);
+  const auto [no_qty, no_cost] = sum_side(no_lots_);
+
+  ExposureDecomposition decomp;
+  decomp.spread_capture_cents = realized_pnl(ticker);
+  decomp.net_inventory = yes_qty - no_qty;
+
+  // Inventory sits on at most one side; value the dominant side against its
+  // winning outcome (each contract pays 100) and its losing outcome (pays 0).
+  const int held_qty = (yes_qty >= no_qty) ? yes_qty : no_qty;
+  const double held_cost = (yes_qty >= no_qty) ? yes_cost : no_cost;
+  decomp.e_win_cents =
+      static_cast<double>(held_qty) * kContractMaxCents - held_cost;
+  decomp.e_loss_cents = -held_cost;
+  return decomp;
 }
 
 const std::unordered_map<std::string, Order> &

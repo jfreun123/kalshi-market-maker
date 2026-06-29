@@ -54,6 +54,8 @@ AppConfig load_config(const std::filesystem::path &path) {
         quoter_json.value("quote_size", QuoterConfig::kDefaultQuoteSize);
     config.quoter.imbalance_spread_cents = quoter_json.value(
         "imbalance_spread_cents", QuoterConfig::kDefaultImbalanceSpreadCents);
+    config.quoter.min_spread_cents = quoter_json.value(
+        "min_spread_cents", QuoterConfig::kDefaultMinSpreadCents);
   }
 
   if (json_data.contains("flow")) {

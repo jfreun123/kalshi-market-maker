@@ -12,6 +12,20 @@
 
 namespace kalshi {
 
+// Decomposes a ticker's position into the spread the bot has locked in (from
+// matched YES/NO pairs — outcome-independent profit) and its remaining
+// directional exposure. Per Palumbo, that directional bet (E_win) — not spread
+// capture — dominates LP terminal P&L, so it is worth tracking on its own. All
+// figures in cents. Open inventory sits on at most one side at a time
+// (offsetting fills realize against the opposing inventory first).
+struct ExposureDecomposition {
+  double spread_capture_cents{
+      0.0};                 // realized profit from matched complete sets
+  int net_inventory{0};     // signed open contracts (+YES / -NO)
+  double e_win_cents{0.0};  // payoff if the held side WINS
+  double e_loss_cents{0.0}; // payoff if it LOSES (≤ 0; -capital at risk)
+};
+
 // Interface for order lifecycle operations. Quoter and RiskManager depend on
 // this abstraction rather than the concrete RestClient-backed OrderManager,
 // which allows unit testing without HTTP and enables alternative
@@ -39,6 +53,11 @@ public:
   // Capital currently at risk in open inventory: sum of (remaining * cost) for
   // all open lots, in cents. This is the most a long binary position can lose.
   [[nodiscard]] virtual double position_cost(std::string_view ticker) const = 0;
+
+  // Splits the position into locked spread capture and directional
+  // E_win/E_loss.
+  [[nodiscard]] virtual ExposureDecomposition
+  exposure(std::string_view ticker) const = 0;
 
   [[nodiscard]] virtual const std::unordered_map<std::string, Order> &
   open_orders() const = 0;
@@ -71,6 +90,8 @@ public:
   [[nodiscard]] double unrealized_pnl(std::string_view ticker,
                                       int yes_mid_cents) const override;
   [[nodiscard]] double position_cost(std::string_view ticker) const override;
+  [[nodiscard]] ExposureDecomposition
+  exposure(std::string_view ticker) const override;
   [[nodiscard]] const std::unordered_map<std::string, Order> &
   open_orders() const override;
 
