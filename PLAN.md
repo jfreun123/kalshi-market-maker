@@ -353,13 +353,37 @@ Kalshi Basic tier: **200 read tokens/s**, **100 write tokens/s**. Each REST requ
 
 Scalability is a goal, but the bottlenecks below only matter once pricing is working and generating edge. Expand to these only after the small-ticker setup is demonstrably profitable. Long-term, the same architecture can extend to **Polymarket and other prediction market exchanges** — the `IHttpTransport` and `IWebSocket` interfaces are designed for exactly this: swap in a Polymarket REST/WS implementation behind the same interfaces, reuse `OrderManager`, `RiskManager`, and `Quoter` unchanged.
 
+### Target architecture: process-per-strategy + an aggregator process (see [ADR-007](docs/adr/007-process-per-strategy-and-aggregator.md))
+
+The end-state for scaling is a **portfolio of strategies** with the quoting layer
+separated from the risk-aggregation layer, as distinct OS processes:
+
+- **Each market maker / Quoter is its own process** — one strategy over a market
+  set, its own exchange connections, enforcing *local* risk. This is exactly a
+  `TradingSession` + its transports.
+- **A "portfolio of portfolios" aggregator is its own process** — consumes every
+  quoter's `RiskReport`, enforces *global* risk + capital allocation, and emits
+  `ControlCommand`s (halt/resume/limit). This is today's in-process global
+  kill-switch (`Portfolio` + `RiskManager::update_portfolio`) promoted to a
+  process with many inputs.
+
+Boundary: `IRiskPublisher` (quoter → aggregator, payload ≈ `PortfolioSnapshot` +
+`strategy_id` + heartbeat) and `IControlChannel` (aggregator → quoter), in-process
+today, IPC at split time — same interface+fake discipline as `IHttpTransport`.
+**Already positioned:** `TradingSession` is the quoter core, aggregation already
+consumes a `PortfolioSnapshot` DTO (not live objects), and `IPricingModel` is the
+strategy seam. **Don't regress:** keep the aggregator snapshot-only (never reach
+into a quoter's internals); route remote halts through `RiskManager` +
+`enforce_quote_safety` so the cancel-on-halt invariant holds across the wire.
+Phase 24 below *is* the aggregator extraction; Phase 25 lives in it.
+
 | Phase | Component | Bottleneck it solves |
 |---|---|---|
 | 21 | Async HTTP Order Dispatch | REST blocks reprice at ~5 tickers |
 | 22 | Per-Series WS + Thread-per-Series | Single WS thread serializes all repricing |
 | 23 | Incremental RiskManager Update | O(n) scan on every fill |
-| 24 | PortfolioModel (No-Arbitrage Consistency) | Correlated markets drift apart |
-| 25 | Cross-Ticker Delta Hedging | Unhedged directional exposure across series |
+| 24 | Aggregator process (PortfolioModel + global risk) | Portfolio of strategies needs one risk/PnL authority across processes |
+| 25 | Cross-Ticker Delta Hedging (in the aggregator) | Unhedged directional exposure across series/strategies |
 | 26+ | Multi-Exchange Support (Polymarket, etc.) | New exchange adapters behind existing interfaces |
 
 ### Portfolio aggregation (read-model) — built
@@ -371,8 +395,9 @@ capital at risk, and a per-**event** breakdown (correlated strikes rolled up via
 `event_ticker_of`, sorted by capital at risk). `OrderManager` gained
 `unrealized_pnl(ticker, yes_mid)` and `position_cost(ticker)` to source the
 mark-to-market and capital-at-risk numbers from its open lots. The main loop logs
-the aggregate each status interval. This is the fan-in backbone the sharded
-quoting (Phases 21–22) will report into.
+the aggregate each status interval. This is the fan-in backbone the per-strategy
+quoter processes will report into once aggregation moves to its own process (see
+the Target architecture above + [ADR-007](docs/adr/007-process-per-strategy-and-aggregator.md)).
 
 **Portfolio-level safety (built on top):**
 - **Global halt (kill-switch)** — `RiskManager::update_portfolio(const PortfolioSnapshot&)`
