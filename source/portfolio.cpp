@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <string>
+#include <unordered_map>
+#include <unordered_set>
 
 namespace kalshi {
 
@@ -11,6 +13,43 @@ std::string event_ticker_of(std::string_view market_ticker) {
     return std::string{market_ticker};
   }
   return std::string{market_ticker.substr(0, last_hyphen)};
+}
+
+Reconciliation
+reconcile(const IOrderManager &order_mgr,
+          const std::vector<std::string> &tickers,
+          const std::vector<MarketPosition> &exchange_positions) {
+  std::unordered_map<std::string, int> exchange_by_ticker;
+  for (const auto &position : exchange_positions) {
+    exchange_by_ticker[position.ticker] = position.position;
+  }
+
+  // Check the tracked universe plus any ticker the exchange reports a non-zero
+  // position in (so positions we don't track still surface).
+  std::unordered_set<std::string> to_check{tickers.begin(), tickers.end()};
+  for (const auto &position : exchange_positions) {
+    if (position.position != 0) {
+      to_check.insert(position.ticker);
+    }
+  }
+
+  Reconciliation result;
+  for (const auto &ticker : to_check) {
+    const int local = order_mgr.net_position(ticker);
+    auto exch_it = exchange_by_ticker.find(ticker);
+    const int exchange =
+        exch_it == exchange_by_ticker.end() ? 0 : exch_it->second;
+    if (local != exchange) {
+      result.diffs.push_back({ticker, local, exchange});
+    }
+  }
+
+  std::sort(result.diffs.begin(), result.diffs.end(),
+            [](const PositionDiff &lhs, const PositionDiff &rhs) {
+              return lhs.ticker < rhs.ticker;
+            });
+  result.in_sync = result.diffs.empty();
+  return result;
 }
 
 Portfolio::Portfolio(const IOrderManager &order_mgr) : order_mgr_{order_mgr} {}

@@ -145,6 +145,24 @@ Market parse_market(const nlohmann::json &market_json) {
   };
 }
 
+// Parses a dollars fixed-point string to a (possibly fractional) cents value.
+double parse_dollars_to_cents_d(const std::string &dollars) {
+  return std::stod(dollars) * kCentsPerDollar;
+}
+
+MarketPosition parse_position(const nlohmann::json &position_json) {
+  return MarketPosition{
+      .ticker = position_json.at("ticker").get<std::string>(),
+      .position = parse_fp_count(
+          position_json.value("position_fp", std::string{"0.00"})),
+      .realized_pnl_cents = parse_dollars_to_cents_d(
+          position_json.value("realized_pnl_dollars", std::string{"0"})),
+      .market_exposure_cents = parse_dollars_to_cents_d(
+          position_json.value("market_exposure_dollars", std::string{"0"})),
+      .resting_orders_count = position_json.value("resting_orders_count", 0),
+  };
+}
+
 // Parses an order from a GET /portfolio/orders response object.
 // The V2 API uses outcome_side, yes_price_dollars/no_price_dollars,
 // initial_count_fp, and fill_count_fp instead of the old integer fields.
@@ -242,6 +260,37 @@ std::vector<Market> RestClient::get_markets(std::string_view event_ticker) {
   }
 
   return all_markets;
+}
+
+std::vector<MarketPosition> RestClient::get_positions() {
+  const std::string path = path_prefix_ + "/portfolio/positions";
+
+  std::vector<MarketPosition> all_positions;
+  std::string cursor;
+
+  auto fetch_page = [&]() {
+    std::string url = base_url_ + "/portfolio/positions";
+    if (!cursor.empty()) {
+      url += "?cursor=" + cursor;
+    }
+
+    auto headers = auth_.sign("GET", path);
+    auto resp = transport_->get(url, headers);
+    check_response(resp);
+
+    auto json_data = nlohmann::json::parse(resp.body);
+    for (const auto &position_json : json_data.at("market_positions")) {
+      all_positions.push_back(parse_position(position_json));
+    }
+    cursor = json_data.value("cursor", std::string{});
+  };
+
+  fetch_page();
+  while (!cursor.empty()) {
+    fetch_page();
+  }
+
+  return all_positions;
 }
 
 Orderbook RestClient::get_orderbook(std::string_view ticker) {

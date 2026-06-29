@@ -12,9 +12,10 @@ namespace kalshi {
 constexpr double kCentsToDollars = 100.0;
 
 // Human-readable names for each constraint bit — indexed by Constraint value.
-constexpr std::array<std::string_view, 8> kConstraintNames = {
-    "kPnLLimit",  "kPositionLimit", "kOpenOrders", "kHighFillRate",
-    "kStaleBook", "kModelDiverge",  "kManualHalt", "kConnectivity",
+constexpr std::array<std::string_view, 9> kConstraintNames = {
+    "kPnLLimit",     "kPositionLimit", "kOpenOrders",
+    "kHighFillRate", "kStaleBook",     "kModelDiverge",
+    "kManualHalt",   "kConnectivity",  "kOverExposure",
 };
 
 RiskManager::RiskManager(RiskLimits limits) : limits_{limits} {}
@@ -53,13 +54,20 @@ void RiskManager::update(const IOrderManager &order_mgr,
     cached_open_order_count_[order_entry.second.market_ticker]++;
   }
 
+  double total_exposure_cents = 0.0;
   for (const auto &ticker : tickers) {
     cached_position_[ticker] = order_mgr.net_position(ticker);
     cached_total_pnl_cents_ += order_mgr.realized_pnl(ticker);
+    total_exposure_cents += order_mgr.position_cost(ticker);
   }
 
   if (cached_total_pnl_cents_ / kCentsToDollars < limits_.daily_loss_limit) {
     set(Constraint::kPnLLimit);
+  }
+
+  if (total_exposure_cents / kCentsToDollars >
+      limits_.max_total_exposure_dollars) {
+    set(Constraint::kOverExposure);
   }
 }
 

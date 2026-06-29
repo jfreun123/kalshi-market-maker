@@ -76,6 +76,18 @@ struct Market {
   std::chrono::system_clock::time_point close_time;
 };
 
+// ---- MarketPosition ----
+
+// The exchange's authoritative view of our position in one market, from
+// GET /portfolio/positions. Used to reconcile against local accounting.
+struct MarketPosition {
+  std::string ticker;
+  int position{0};                   // signed contracts: + YES, - NO
+  double realized_pnl_cents{0.0};    // includes fees
+  double market_exposure_cents{0.0}; // capital currently at risk
+  int resting_orders_count{0};
+};
+
 // ---- Price helpers ----
 
 // Kalshi prices are integers in [1, 99] representing cents (= probability %).

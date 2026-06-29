@@ -64,6 +64,8 @@ AppConfig load_config(const std::filesystem::path &path) {
         risk_json.value("max_order_size", RiskLimits::kDefaultMaxOrderSize);
     config.risk.daily_loss_limit =
         risk_json.value("daily_loss_limit", RiskLimits::kDefaultDailyLossLimit);
+    config.risk.max_total_exposure_dollars = risk_json.value(
+        "max_total_exposure_dollars", RiskLimits::kDefaultMaxTotalExposure);
   }
 
   if (json_data.contains("scanner")) {

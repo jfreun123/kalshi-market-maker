@@ -24,6 +24,10 @@ public:
   bool cancel_order(std::string_view order_id);
   std::vector<Order> get_open_orders();
 
+  // Fetches all market positions from the exchange (paginated). This is the
+  // authoritative position state used to reconcile against local accounting.
+  std::vector<MarketPosition> get_positions();
+
 private:
   Auth auth_;
   std::unique_ptr<IHttpTransport> transport_;

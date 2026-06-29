@@ -43,6 +43,29 @@ struct PortfolioSnapshot {
 // hyphen is returned unchanged.
 [[nodiscard]] std::string event_ticker_of(std::string_view market_ticker);
 
+// One ticker where local accounting disagrees with the exchange.
+struct PositionDiff {
+  std::string ticker;
+  int local_position{0};
+  int exchange_position{0};
+};
+
+// Result of reconciling local positions against the exchange's authoritative
+// positions. in_sync is true only when every checked ticker matches exactly.
+struct Reconciliation {
+  bool in_sync{true};
+  std::vector<PositionDiff> diffs; // mismatches only, sorted by ticker
+};
+
+// Compares local net positions (from order_mgr, over the tracked ticker
+// universe) against the exchange's positions. Checks the union of the tracked
+// tickers and any ticker the exchange reports a non-zero position in (catching
+// positions we don't know about). Exchange entries with position 0 are ignored.
+[[nodiscard]] Reconciliation
+reconcile(const IOrderManager &order_mgr,
+          const std::vector<std::string> &tickers,
+          const std::vector<MarketPosition> &exchange_positions);
+
 // Pure read-model. Aggregates positions, realized and unrealized PnL, and
 // capital at risk from an IOrderManager across a supplied set of tickers,
 // marking open inventory with the supplied marks. Owns no state and places no

@@ -27,6 +27,9 @@ constexpr int kLossPriceNo = 80;
 // YES@90 + NO@80 → PnL = 100-90-80 = -70 cents = -$0.70 per pair.
 // kTightDailyLossLimit = -$0.50, so one such pair triggers the halt.
 constexpr double kTightDailyLossLimit = -0.50;
+// A YES@90 qty-1 fill costs 90 cents = $0.90 in capital at risk.
+// kTightExposureLimit = $0.50, so a single such fill trips over-exposure.
+constexpr double kTightExposureLimit = 0.50;
 constexpr long long kTs1Ns = 1'000'000LL;
 constexpr long long kTs2Ns = 2'000'000LL;
 constexpr int kHttpOk = 200;
@@ -44,6 +47,12 @@ std::string
     kPemPrivateKey; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 
 kalshi::RiskLimits default_limits() { return kalshi::RiskLimits{}; }
+
+kalshi::RiskLimits tight_exposure_limits() {
+  kalshi::RiskLimits limits;
+  limits.max_total_exposure_dollars = kTightExposureLimit;
+  return limits;
+}
 
 kalshi::RiskLimits tight_loss_limits() {
   kalshi::RiskLimits limits;
@@ -281,6 +290,33 @@ TEST_F(RiskManagerTest, UpdateDoesNotHaltWithinLimits) {
   risk_mgr.update(order_mgr, {kTicker});
 
   EXPECT_FALSE(risk_mgr.is_halted());
+}
+
+// ---- Over-exposure via update() ----
+
+TEST_F(RiskManagerTest, UpdateHaltsWhenTotalExposureExceeded) {
+  // A single YES@90 qty-1 fill leaves 90c = $0.90 capital at risk, above the
+  // $0.50 cap → over-exposure halt.
+  auto rest = make_rest_client(std::make_unique<FakeTransport>());
+  kalshi::OrderManager order_mgr{rest};
+  order_mgr.record_fill(make_fill(kOrderId1, kTicker, kalshi::Side::Yes,
+                                  kLossPriceYes, 1, kTs1Ns));
+
+  kalshi::RiskManager risk_mgr{tight_exposure_limits()};
+  risk_mgr.update(order_mgr, {kTicker});
+
+  EXPECT_TRUE(risk_mgr.is_halted());
+  EXPECT_TRUE(risk_mgr.is_set(kalshi::Constraint::kOverExposure));
+}
+
+TEST_F(RiskManagerTest, UpdateDoesNotHaltWhenExposureWithinLimit) {
+  auto rest = make_rest_client(std::make_unique<FakeTransport>());
+  kalshi::OrderManager order_mgr{rest};
+
+  kalshi::RiskManager risk_mgr{tight_exposure_limits()};
+  risk_mgr.update(order_mgr, {kTicker});
+
+  EXPECT_FALSE(risk_mgr.is_set(kalshi::Constraint::kOverExposure));
 }
 
 TEST_F(RiskManagerTest, ResumeRestoresAfterAutoHalt) {

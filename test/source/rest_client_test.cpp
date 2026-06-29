@@ -219,6 +219,60 @@ TEST_F(RestClientTest, GetMarketsThrowsOnHttpError) {
   EXPECT_THROW(client.get_markets(), std::runtime_error);
 }
 
+// ---- get_positions ----
+
+TEST_F(RestClientTest, GetPositionsParsesMarketPositionFields) {
+  // Schema mirrors the live GET /portfolio/positions response: position_fp is a
+  // signed fixed-point count; money fields are *_dollars fixed-point strings.
+  auto transport = std::make_unique<FakeTransport>();
+  FakeTransport *const transport_raw = transport.get();
+  transport_raw->enqueue(
+      {kHttpOk,
+       R"({"market_positions":[{"ticker":"KXFED-26SEP-T3.00","position_fp":"-7.00",)"
+       R"("realized_pnl_dollars":"1.250000","market_exposure_dollars":"3.080000",)"
+       R"("resting_orders_count":2}],"cursor":""})"});
+  auto client = make_client(std::move(transport));
+
+  auto positions = client.get_positions();
+
+  ASSERT_EQ(positions.size(), kOneResult);
+  EXPECT_EQ(positions[0].ticker, "KXFED-26SEP-T3.00");
+  EXPECT_EQ(positions[0].position, -7); // NO position -> negative
+  EXPECT_DOUBLE_EQ(positions[0].realized_pnl_cents, 125.0);
+  EXPECT_DOUBLE_EQ(positions[0].market_exposure_cents, 308.0);
+  EXPECT_EQ(positions[0].resting_orders_count, 2);
+}
+
+TEST_F(RestClientTest, GetPositionsFollowsCursorAcrossPages) {
+  auto transport = std::make_unique<FakeTransport>();
+  FakeTransport *const transport_raw = transport.get();
+  transport_raw->enqueue(
+      {kHttpOk,
+       R"({"market_positions":[{"ticker":"KXA","position_fp":"5.00"}],"cursor":"next"})"});
+  transport_raw->enqueue(
+      {kHttpOk,
+       R"({"market_positions":[{"ticker":"KXB","position_fp":"3.00"}],"cursor":""})"});
+  auto client = make_client(std::move(transport));
+
+  auto positions = client.get_positions();
+
+  ASSERT_EQ(positions.size(), kTwoResults);
+  EXPECT_EQ(positions[0].ticker, "KXA");
+  EXPECT_EQ(positions[1].ticker, "KXB");
+}
+
+TEST_F(RestClientTest, GetPositionsRequestsPositionsEndpoint) {
+  auto transport = std::make_unique<FakeTransport>();
+  FakeTransport *const transport_raw = transport.get();
+  transport_raw->enqueue({kHttpOk, R"({"market_positions":[],"cursor":""})"});
+  auto client = make_client(std::move(transport));
+
+  client.get_positions();
+
+  EXPECT_NE(transport_raw->last_request().url.find("/portfolio/positions"),
+            std::string::npos);
+}
+
 // ---- get_orderbook ----
 
 TEST_F(RestClientTest, GetOrderbookCallsCorrectUrl) {

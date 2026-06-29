@@ -336,9 +336,22 @@ capital at risk, and a per-**event** breakdown (correlated strikes rolled up via
 `unrealized_pnl(ticker, yes_mid)` and `position_cost(ticker)` to source the
 mark-to-market and capital-at-risk numbers from its open lots. The main loop logs
 the aggregate each status interval. This is the fan-in backbone the sharded
-quoting (Phases 21–22) will report into; the next step on top of it is
-portfolio-level limits + a global halt (a total-loss / total-capital kill-switch
-that stops all quoters at once, complementing the existing per-market checks).
+quoting (Phases 21–22) will report into.
+
+**Portfolio-level safety (built on top):**
+- **Over-exposure halt** — `RiskManager::update()` sums `position_cost` across all
+  markets; if total capital at risk exceeds `risk.max_total_exposure_dollars` it
+  trips `kOverExposure`. Per-market limits don't bound aggregate exposure at scale.
+- **Reconciliation** — `reconcile()` (portfolio.cpp) diffs local net positions
+  against the exchange's authoritative `GET /portfolio/positions`
+  (`RestClient::get_positions`, paginated). Checks the union of tracked tickers and
+  any ticker the exchange reports a non-zero position in (catches positions we
+  don't know about). On drift it trips `kModelDiverge` and halts. Runs every ~2min
+  live; also a standalone `--reconcile` command (exit non-zero on mismatch) for
+  pre-trade / CI checks.
+
+Next: a true global kill-switch shared across sharded quoters (Phases 21–22), and
+optional auto-resync of local state from the exchange snapshot.
 
 ---
 

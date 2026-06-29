@@ -107,6 +107,10 @@ openssl rsa -in kalshi-private-key.pem -pubout -out kalshi-public-key.pem
 # Paper trading (simulates fills locally, no real orders)
 ./build/source/kalshi_mm --paper config.json
 
+# Reconcile local accounting against the exchange (no orders placed).
+# Exits 0 if in sync, non-zero on any position mismatch — good for CI/pre-trade.
+./build/source/kalshi_mm --reconcile config.json
+
 # Demo / UAT environment
 # Set base_url and ws_url to the demo endpoints in config.json:
 #   "base_url": "https://demo-api.kalshi.co/trade-api/v2"
@@ -157,6 +161,25 @@ and these thresholds.
 Each scan also writes **`scan_results.json`** — a ranked JSON document with a
 top-level `tickers` array (rank order) and a `markets` array with full per-market
 detail, for any custom downstream tooling.
+
+### Portfolio risk & reconciliation
+
+`OrderManager` is the single source of truth for positions and PnL; `Portfolio`
+(`portfolio.hpp`) is a pure read-model over it that aggregates **total realized +
+unrealized (mark-to-market) PnL**, **total capital at risk**, and a per-**event**
+breakdown (correlated strikes rolled up). It's logged each status interval.
+
+Two portfolio-level safety checks complement the per-market risk limits:
+
+- **Over-exposure** — `risk.max_total_exposure_dollars` caps total capital at risk
+  across all markets. Per-market limits don't bound aggregate exposure; this does.
+  A breach trips `kOverExposure` and halts all quoting.
+- **Reconciliation** — local accounting is rebuilt from a WebSocket fill stream,
+  which can drift from the exchange (missed messages, reconnects). The bot fetches
+  Kalshi's authoritative `GET /portfolio/positions` every ~2 min during live
+  trading and compares net positions per ticker. Any mismatch trips
+  `kModelDiverge` and halts quoting — if you don't know your true position, you
+  stop. Run `--reconcile` for a one-shot check (exits non-zero on mismatch).
 
 ## Development
 

@@ -153,3 +153,82 @@ TEST(PortfolioTest, ByEventSortedByNotionalDescending) {
   EXPECT_EQ(snap.by_event.at(1).event_ticker, "KXMID-26");
   EXPECT_EQ(snap.by_event.at(2).event_ticker, "KXSMALL-26");
 }
+
+// ---- reconcile ----
+
+namespace {
+kalshi::MarketPosition exchange_pos(const std::string &ticker, int position) {
+  kalshi::MarketPosition pos;
+  pos.ticker = ticker;
+  pos.position = position;
+  return pos;
+}
+
+constexpr int kLocalYes = 5;
+constexpr int kLocalNo = -3;
+constexpr int kExchangeMismatch = 3;
+constexpr int kUntrackedPosition = 4;
+} // namespace
+
+TEST(PortfolioTest, ReconcileInSyncWhenPositionsMatch) {
+  FakeOrderManager order_mgr;
+  order_mgr.positions["KXA-26-T1"] = kLocalYes;
+  order_mgr.positions["KXB-26-T1"] = kLocalNo;
+
+  const std::vector<kalshi::MarketPosition> exchange = {
+      exchange_pos("KXA-26-T1", kLocalYes),
+      exchange_pos("KXB-26-T1", kLocalNo)};
+
+  const auto result =
+      kalshi::reconcile(order_mgr, {"KXA-26-T1", "KXB-26-T1"}, exchange);
+
+  EXPECT_TRUE(result.in_sync);
+  EXPECT_TRUE(result.diffs.empty());
+}
+
+TEST(PortfolioTest, ReconcileDetectsPositionMismatch) {
+  FakeOrderManager order_mgr;
+  order_mgr.positions["KXA-26-T1"] = kLocalYes;
+
+  const std::vector<kalshi::MarketPosition> exchange = {
+      exchange_pos("KXA-26-T1", kExchangeMismatch)};
+
+  const auto result = kalshi::reconcile(order_mgr, {"KXA-26-T1"}, exchange);
+
+  EXPECT_FALSE(result.in_sync);
+  ASSERT_EQ(result.diffs.size(), 1U);
+  EXPECT_EQ(result.diffs.at(0).ticker, "KXA-26-T1");
+  EXPECT_EQ(result.diffs.at(0).local_position, kLocalYes);
+  EXPECT_EQ(result.diffs.at(0).exchange_position, kExchangeMismatch);
+}
+
+TEST(PortfolioTest, ReconcileFlagsUntrackedExchangePosition) {
+  // The exchange reports a non-zero position in a ticker we are not tracking —
+  // a position we don't know about. This must be flagged.
+  FakeOrderManager order_mgr;
+
+  const std::vector<kalshi::MarketPosition> exchange = {
+      exchange_pos("KXSURPRISE-26-T1", kUntrackedPosition)};
+
+  const auto result = kalshi::reconcile(order_mgr, {}, exchange);
+
+  EXPECT_FALSE(result.in_sync);
+  ASSERT_EQ(result.diffs.size(), 1U);
+  EXPECT_EQ(result.diffs.at(0).ticker, "KXSURPRISE-26-T1");
+  EXPECT_EQ(result.diffs.at(0).local_position, 0);
+  EXPECT_EQ(result.diffs.at(0).exchange_position, kUntrackedPosition);
+}
+
+TEST(PortfolioTest, ReconcileIgnoresZeroExchangePositions) {
+  // Settled/flat markets the exchange still lists with position 0 must not be
+  // treated as drift.
+  FakeOrderManager order_mgr;
+
+  const std::vector<kalshi::MarketPosition> exchange = {
+      exchange_pos("KXOLD-26-T1", 0)};
+
+  const auto result = kalshi::reconcile(order_mgr, {}, exchange);
+
+  EXPECT_TRUE(result.in_sync);
+  EXPECT_TRUE(result.diffs.empty());
+}

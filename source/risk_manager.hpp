@@ -24,9 +24,10 @@ enum class Constraint : uint8_t {
   kOpenOrders = 2,
   kHighFillRate = 3,
   kStaleBook = 4,
-  kModelDiverge = 5,
+  kModelDiverge = 5, // local accounting diverged from exchange (reconciliation)
   kManualHalt = 6,
   kConnectivity = 7,
+  kOverExposure = 8, // total capital at risk exceeded the portfolio cap
 };
 
 struct RiskLimits {
@@ -34,11 +35,15 @@ struct RiskLimits {
   static constexpr int kDefaultMaxOpenOrders = 4;
   static constexpr int kDefaultMaxOrderSize = 25;
   static constexpr double kDefaultDailyLossLimit = -500.0; // dollars
+  // Portfolio-wide cap on total capital at risk across all markets. Per-market
+  // limits don't bound aggregate exposure at scale; this does.
+  static constexpr double kDefaultMaxTotalExposure = 10000.0; // dollars
 
   int max_position_per_market = kDefaultMaxPosition;
   int max_open_orders_per_market = kDefaultMaxOpenOrders;
   int max_order_size = kDefaultMaxOrderSize;
   double daily_loss_limit = kDefaultDailyLossLimit; // dollars (negative = loss)
+  double max_total_exposure_dollars = kDefaultMaxTotalExposure;
 };
 
 // Pre-trade risk checks for all outgoing orders.
@@ -74,7 +79,7 @@ public:
   void resume(); // clears all constraints
 
 private:
-  static constexpr std::size_t kNumConstraints = 8;
+  static constexpr std::size_t kNumConstraints = 9;
 
   RiskLimits limits_;
   std::bitset<kNumConstraints> constraints_;

@@ -311,6 +311,55 @@ static int run_scan_mode(kalshi::RestClient &rest,
   return 0;
 }
 
+// ---- Reconciliation against the exchange ----
+
+// Fetches the exchange's authoritative positions and compares them to local
+// accounting. On drift, logs every mismatch; if risk_mgr is non-null (live
+// trading) it trips kModelDiverge to halt all quoting. Returns true if in sync.
+static bool reconcile_against_exchange(kalshi::RestClient &rest,
+                                       const kalshi::IOrderManager &order_mgr,
+                                       const std::vector<std::string> &tickers,
+                                       kalshi::RiskManager *risk_mgr,
+                                       std::shared_ptr<spdlog::logger> &log) {
+  std::vector<kalshi::MarketPosition> exchange;
+  try {
+    exchange = rest.get_positions();
+  } catch (const std::exception &ex) {
+    log->error("reconcile: failed to fetch exchange positions: {}", ex.what());
+    return false;
+  }
+
+  const auto result = kalshi::reconcile(order_mgr, tickers, exchange);
+  if (result.in_sync) {
+    log->info("reconcile: in sync ({} exchange positions checked)",
+              exchange.size());
+    return true;
+  }
+
+  for (const auto &diff : result.diffs) {
+    log->critical("reconcile DRIFT ticker={} local={} exchange={}", diff.ticker,
+                  diff.local_position, diff.exchange_position);
+  }
+  if (risk_mgr != nullptr) {
+    risk_mgr->set(kalshi::Constraint::kModelDiverge);
+    log->critical("reconcile: {} position mismatch(es) — quoting halted",
+                  result.diffs.size());
+  }
+  return false;
+}
+
+// Standalone --reconcile: compares local (flat at startup) against the exchange
+// and exits non-zero on any mismatch. Useful as a pre-trade / CI sanity check.
+static int run_reconcile_mode(kalshi::RestClient &rest,
+                              const std::vector<std::string> &tickers,
+                              std::shared_ptr<spdlog::logger> &log) {
+  log->info("reconcile mode — comparing local state against exchange");
+  kalshi::OrderManager order_mgr{rest};
+  const bool in_sync =
+      reconcile_against_exchange(rest, order_mgr, tickers, nullptr, log);
+  return in_sync ? 0 : 1;
+}
+
 // ---- PnL persistence ----
 
 static PnlMap load_pnl(const std::filesystem::path &path) {
@@ -336,6 +385,7 @@ static PnlMap load_pnl(const std::filesystem::path &path) {
 struct CliArgs {
   bool paper_mode{false};
   bool scan_mode{false};
+  bool reconcile_mode{false};
   std::filesystem::path config_path{"config.json"};
 };
 
@@ -347,6 +397,8 @@ static CliArgs parse_args(std::span<char *> args) {
       result.paper_mode = true;
     } else if (arg == "--scan") {
       result.scan_mode = true;
+    } else if (arg == "--reconcile") {
+      result.reconcile_mode = true;
     } else {
       result.config_path = std::filesystem::path{args[idx]};
     }
@@ -389,6 +441,10 @@ int main(int argc, char *argv[]) {
 
     if (cli.scan_mode) {
       return run_scan_mode(rest, app_config.scanner, cli.config_path, log);
+    }
+
+    if (cli.reconcile_mode) {
+      return run_reconcile_mode(rest, app_config.target_tickers, log);
     }
 
     if (app_config.target_tickers.empty()) {
@@ -452,6 +508,7 @@ int main(int argc, char *argv[]) {
     constexpr auto kPollInterval = std::chrono::milliseconds{100};
     constexpr int kPositionLogInterval = 600;    // 600 × 100ms = 60s
     constexpr int kStalenessCheckInterval = 300; // 300 × 100ms = 30s
+    constexpr int kReconcileInterval = 1200;     // 1200 × 100ms = 120s
 
     int poll_count = 0;
     bool stale_logged = false;
@@ -468,6 +525,12 @@ int main(int argc, char *argv[]) {
                             prior_pnl, log);
         log_portfolio_snapshot(app_config.target_tickers, order_mgr, ob_map,
                                log);
+      }
+      // Reconcile against the exchange's authoritative positions. Skipped in
+      // paper mode (no real exchange positions to compare against).
+      if (paper_ptr == nullptr && poll_count % kReconcileInterval == 0) {
+        reconcile_against_exchange(rest, order_mgr, app_config.target_tickers,
+                                   &risk_mgr, log);
       }
     }
 
