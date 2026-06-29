@@ -1,0 +1,46 @@
+# systemd unit for Claude Code Remote Control (steer the box from your phone).
+#
+# PREREQUISITES (one-time, interactive — do BEFORE enabling this service):
+#   1. Install Claude Code:  curl -fsSL https://claude.ai/install.sh | bash
+#   2. As REPLACE_USER, run `claude` once in the repo dir:
+#        - accept the workspace-trust dialog
+#        - run /login and complete claude.ai OAuth (paste the code over SSH)
+#      Remote Control needs a Pro/Max plan and a FULL-SCOPE login token.
+#      API keys and `claude setup-token` tokens are REJECTED for Remote Control.
+#   3. Confirm the claude path:  which claude   (adjust ExecStart if needed)
+#
+# Install:
+#   sudo cp deploy/claude-rc.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now claude-rc
+#   journalctl -u claude-rc -f
+#
+# Then: open the Claude mobile app -> Code tab -> pick this session.
+
+[Unit]
+Description=Claude Code Remote Control
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
+[Service]
+Type=simple
+User=REPLACE_USER
+WorkingDirectory=/home/REPLACE_USER/kalshi-market-maker
+
+# Remote Control requires claude.ai OAuth, NOT an API key. Make sure this is unset.
+Environment=ANTHROPIC_API_KEY=
+
+# Adjust the path to match `which claude` (often ~/.local/bin/claude).
+# --spawn worktree: each phone-initiated session gets its own git worktree so
+# parallel sessions don't clobber each other's files.
+ExecStart=/home/REPLACE_USER/.local/bin/claude remote-control --spawn worktree --name "kalshi-vps"
+
+# Note: Remote Control self-exits after ~10 min of no network. Restart=always
+# brings it straight back when connectivity returns (and on reboot).
+Restart=always
+RestartSec=15
+
+[Install]
+WantedBy=multi-user.target

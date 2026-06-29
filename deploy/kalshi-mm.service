@@ -1,0 +1,45 @@
+# systemd unit for the Kalshi market maker.
+#
+# Install:
+#   1. Edit REPLACE_USER below (or run the sed one-liner in deploy/README.md).
+#   2. sudo cp deploy/kalshi-mm.service /etc/systemd/system/
+#   3. sudo systemctl daemon-reload
+#   4. sudo systemctl enable --now kalshi-mm
+#   5. journalctl -u kalshi-mm -f       # or tail logs/kalshi-mm.log
+#
+# SAFETY: this ships in --paper mode. Remove --paper from ExecStart only when
+# you are ready to trade real money.
+
+[Unit]
+Description=Kalshi Market Maker
+After=network-online.target
+Wants=network-online.target
+# Don't thrash-restart on an instant config error: max 5 starts per 5 min.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=REPLACE_USER
+WorkingDirectory=/home/REPLACE_USER/kalshi-market-maker
+
+# Paper mode by default. For live trading: drop --paper.
+ExecStart=/home/REPLACE_USER/kalshi-market-maker/build/source/kalshi_mm --paper config.json
+
+Restart=always
+RestartSec=10
+
+StandardOutput=append:/home/REPLACE_USER/kalshi-market-maker/logs/kalshi-mm.log
+StandardError=append:/home/REPLACE_USER/kalshi-market-maker/logs/kalshi-mm.err.log
+
+# --- Hardening (the live RSA key + config live in WorkingDirectory) ---
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/home/REPLACE_USER/kalshi-market-maker
+ProtectKernelTunables=true
+ProtectControlGroups=true
+PrivateTmp=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target
