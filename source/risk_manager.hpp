@@ -30,6 +30,7 @@ enum class Constraint : uint8_t {
   kConnectivity = 7,
   kOverExposure = 8,  // total capital at risk exceeded the portfolio cap
   kPortfolioLoss = 9, // total PnL (realized + unrealized) breached the loss cap
+  kDrawdown = 10,     // total PnL fell too far from its high-water mark
 };
 
 struct RiskLimits {
@@ -51,6 +52,11 @@ struct RiskLimits {
   // capital-inefficient near-settled extremes. Enforced in check_order.
   static constexpr int kDefaultMinQuotePrice = 10; // cents
   static constexpr int kDefaultMaxQuotePrice = 90; // cents
+  // Drawdown kill-switch: max total PnL (realized + unrealized) we may give
+  // back from its session high-water mark before halting. Unlike max_total_loss
+  // (anchored at break-even), this protects gains — it can fire while still net
+  // profitable. Positive dollars.
+  static constexpr double kDefaultMaxDrawdown = 500.0; // dollars
 
   int max_position_per_market = kDefaultMaxPosition;
   int max_open_orders_per_market = kDefaultMaxOpenOrders;
@@ -60,6 +66,7 @@ struct RiskLimits {
   double max_total_loss_dollars = kDefaultMaxTotalLoss; // dollars (negative)
   int min_quote_price_cents = kDefaultMinQuotePrice;
   int max_quote_price_cents = kDefaultMaxQuotePrice;
+  double max_drawdown_dollars = kDefaultMaxDrawdown; // dollars (positive)
 };
 
 // Pre-trade risk checks for all outgoing orders.
@@ -102,13 +109,16 @@ public:
   void resume(); // clears all constraints
 
 private:
-  static constexpr std::size_t kNumConstraints = 10;
+  static constexpr std::size_t kNumConstraints = 11;
 
   RiskLimits limits_;
   std::bitset<kNumConstraints> constraints_;
   std::unordered_map<std::string, int> cached_position_;
   std::unordered_map<std::string, int> cached_open_order_count_;
   double cached_total_pnl_cents_{0.0};
+  // High-water mark of total PnL (cents) seen by update_portfolio. Starts at
+  // session break-even (0); resume() re-anchors it to the next observation.
+  double peak_total_pnl_cents_{0.0};
 };
 
 } // namespace kalshi

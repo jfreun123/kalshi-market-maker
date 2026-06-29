@@ -72,6 +72,8 @@ AppConfig load_config(const std::filesystem::path &path) {
         "min_quote_price_cents", RiskLimits::kDefaultMinQuotePrice);
     config.risk.max_quote_price_cents = risk_json.value(
         "max_quote_price_cents", RiskLimits::kDefaultMaxQuotePrice);
+    config.risk.max_drawdown_dollars = risk_json.value(
+        "max_drawdown_dollars", RiskLimits::kDefaultMaxDrawdown);
   }
 
   if (json_data.contains("scanner")) {

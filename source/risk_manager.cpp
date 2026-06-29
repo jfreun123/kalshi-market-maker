@@ -2,8 +2,10 @@
 
 #include "logger.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstdlib>
+#include <limits>
 #include <string>
 #include <string_view>
 
@@ -12,10 +14,10 @@ namespace kalshi {
 constexpr double kCentsToDollars = 100.0;
 
 // Human-readable names for each constraint bit — indexed by Constraint value.
-constexpr std::array<std::string_view, 10> kConstraintNames = {
+constexpr std::array<std::string_view, 11> kConstraintNames = {
     "kPnLLimit",     "kPositionLimit", "kOpenOrders", "kHighFillRate",
     "kStaleBook",    "kModelDiverge",  "kManualHalt", "kConnectivity",
-    "kOverExposure", "kPortfolioLoss",
+    "kOverExposure", "kPortfolioLoss", "kDrawdown",
 };
 
 RiskManager::RiskManager(RiskLimits limits) : limits_{limits} {}
@@ -77,9 +79,17 @@ void RiskManager::update_portfolio(const PortfolioSnapshot &snapshot) {
     set(Constraint::kOverExposure);
   }
 
-  if (snapshot.total_pnl_cents() / kCentsToDollars <
-      limits_.max_total_loss_dollars) {
+  const double total_pnl_cents = snapshot.total_pnl_cents();
+  if (total_pnl_cents / kCentsToDollars < limits_.max_total_loss_dollars) {
     set(Constraint::kPortfolioLoss);
+  }
+
+  // Drawdown: track the high-water mark of total PnL and halt if we have given
+  // back more than the limit from it. Fires even while still net profitable.
+  peak_total_pnl_cents_ = std::max(peak_total_pnl_cents_, total_pnl_cents);
+  const double drawdown_cents = peak_total_pnl_cents_ - total_pnl_cents;
+  if (drawdown_cents / kCentsToDollars > limits_.max_drawdown_dollars) {
+    set(Constraint::kDrawdown);
   }
 }
 
@@ -116,6 +126,11 @@ bool RiskManager::is_halted() const { return constraints_.any(); }
 
 void RiskManager::halt() { set(Constraint::kManualHalt); }
 
-void RiskManager::resume() { constraints_.reset(); }
+void RiskManager::resume() {
+  constraints_.reset();
+  // Re-anchor the drawdown high-water mark to the next observation so a manual
+  // resume doesn't immediately re-trip kDrawdown on the still-depressed PnL.
+  peak_total_pnl_cents_ = std::numeric_limits<double>::lowest();
+}
 
 } // namespace kalshi

@@ -182,18 +182,25 @@ detail, for any custom downstream tooling.
 unrealized (mark-to-market) PnL**, **total capital at risk**, and a per-**event**
 breakdown (correlated strikes rolled up). It's logged each status interval.
 
-Three portfolio-level safety checks complement the per-market risk limits. The
-first two form a **global kill-switch**: `RiskManager::update_portfolio()` consumes
-the read-model snapshot (rebuilt ~1s, sub-ms at this scale) and any tripped bit
-halts **all** quoters at once.
+Four portfolio-level safety checks complement the per-market risk limits. The
+first three form a **global kill-switch**: `RiskManager::update_portfolio()`
+consumes the read-model snapshot (rebuilt ~1s, sub-ms at this scale) and any
+tripped bit halts **all** quoters at once.
 
 - **Over-exposure** — `risk.max_total_exposure_dollars` caps total capital at risk
   across all markets. Per-market limits don't bound aggregate exposure; this does.
   A breach trips `kOverExposure` and halts all quoting.
-- **Total-loss drawdown** — `risk.max_total_loss_dollars` caps total PnL including
-  **unrealized** mark-to-market. The realized-only `daily_loss_limit` can't see a
-  book bleeding while holding inventory; a breach trips `kPortfolioLoss`. Both
-  require a manual `resume()` to clear (no auto-resume into a crashing market).
+- **Total-loss floor** — `risk.max_total_loss_dollars` caps total PnL including
+  **unrealized** mark-to-market, anchored at break-even. The realized-only
+  `daily_loss_limit` can't see a book bleeding while holding inventory; a breach
+  trips `kPortfolioLoss`.
+- **Drawdown** — `risk.max_drawdown_dollars` caps how much total PnL may give back
+  from its **session high-water mark**. Unlike the loss floor, it protects gains —
+  it can fire while still net profitable (e.g. peak +$700 → +$100 is a $600
+  drawdown). A breach trips `kDrawdown`; `resume()` re-anchors the peak.
+
+  All three require a manual `resume()` to clear (no auto-resume into a crashing
+  market) and route through the same flatten-on-halt path.
 - **Reconciliation** — local accounting is rebuilt from a WebSocket fill stream,
   which can drift from the exchange (missed messages, reconnects). The bot fetches
   Kalshi's authoritative `GET /portfolio/positions` every ~2 min during live

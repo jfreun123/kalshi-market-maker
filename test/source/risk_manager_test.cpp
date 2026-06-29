@@ -35,6 +35,11 @@ constexpr double kTightExposureLimit = 0.50;
 constexpr double kTightTotalLoss = -0.50;
 constexpr double kNotionalAboveExposureCents = 90.0; // $0.90 > $0.50 cap
 constexpr double kUnrealizedLossCents = -70.0;       // -$0.70 < -$0.50 cap
+// Drawdown: peak +$5.00, give back to +$3.00 = $2.00 drawn down > $1.00 cap.
+constexpr double kTightDrawdown = 1.00;          // dollars (positive)
+constexpr double kPeakPnlCents = 500.0;          // +$5.00 high-water mark
+constexpr double kGivebackPnlCents = 300.0;      // +$3.00 (still net positive)
+constexpr double kSmallGivebackPnlCents = 450.0; // +$4.50 (only $0.50 back)
 constexpr long long kTs1Ns = 1'000'000LL;
 constexpr long long kTs2Ns = 2'000'000LL;
 constexpr int kHttpOk = 200;
@@ -68,6 +73,12 @@ kalshi::RiskLimits tight_loss_limits() {
 kalshi::RiskLimits tight_total_loss_limits() {
   kalshi::RiskLimits limits;
   limits.max_total_loss_dollars = kTightTotalLoss;
+  return limits;
+}
+
+kalshi::RiskLimits tight_drawdown_limits() {
+  kalshi::RiskLimits limits;
+  limits.max_drawdown_dollars = kTightDrawdown;
   return limits;
 }
 
@@ -386,6 +397,42 @@ TEST_F(RiskManagerTest, UpdatePortfolioDefaultLimitsDoNotHalt) {
   risk_mgr.update_portfolio(
       make_snapshot(0.0, kUnrealizedLossCents, kNotionalAboveExposureCents));
 
+  EXPECT_FALSE(risk_mgr.is_halted());
+}
+
+// ---- Drawdown kill-switch (high-water mark) ----
+
+TEST_F(RiskManagerTest, UpdatePortfolioHaltsOnDrawdownFromPeak) {
+  kalshi::RiskManager risk_mgr{tight_drawdown_limits()};
+  // Climb to a +$5.00 high-water mark, then give back $2.00 (> $1.00 cap).
+  risk_mgr.update_portfolio(make_snapshot(kPeakPnlCents, 0.0, 0.0));
+  ASSERT_FALSE(risk_mgr.is_halted());
+  risk_mgr.update_portfolio(make_snapshot(kGivebackPnlCents, 0.0, 0.0));
+
+  EXPECT_TRUE(risk_mgr.is_set(kalshi::Constraint::kDrawdown));
+  // Fires even though total PnL is still net positive — a drawdown, not a loss.
+  EXPECT_FALSE(risk_mgr.is_set(kalshi::Constraint::kPortfolioLoss));
+}
+
+TEST_F(RiskManagerTest, UpdatePortfolioNoDrawdownHaltWithinLimit) {
+  kalshi::RiskManager risk_mgr{tight_drawdown_limits()};
+  risk_mgr.update_portfolio(make_snapshot(kPeakPnlCents, 0.0, 0.0));
+  risk_mgr.update_portfolio(make_snapshot(kSmallGivebackPnlCents, 0.0, 0.0));
+
+  EXPECT_FALSE(risk_mgr.is_set(kalshi::Constraint::kDrawdown));
+}
+
+TEST_F(RiskManagerTest, ResumeReanchorsDrawdownPeak) {
+  kalshi::RiskManager risk_mgr{tight_drawdown_limits()};
+  risk_mgr.update_portfolio(make_snapshot(kPeakPnlCents, 0.0, 0.0));
+  risk_mgr.update_portfolio(make_snapshot(kGivebackPnlCents, 0.0, 0.0));
+  ASSERT_TRUE(risk_mgr.is_set(kalshi::Constraint::kDrawdown));
+
+  risk_mgr.resume();
+  // The same depressed PnL must not immediately re-trip — peak re-anchored.
+  risk_mgr.update_portfolio(make_snapshot(kGivebackPnlCents, 0.0, 0.0));
+
+  EXPECT_FALSE(risk_mgr.is_set(kalshi::Constraint::kDrawdown));
   EXPECT_FALSE(risk_mgr.is_halted());
 }
 

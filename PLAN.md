@@ -97,7 +97,7 @@ strings, timestamps) can only be confirmed once authenticated traffic flows.
 |---|---|---|
 | Ticker Scanner (Phase 31) | ranks markets, writes ready-to-run trade config | `ticker_scanner.*`, `scan_output.*` |
 | Portfolio read-model | total realized + unrealized PnL, per-event risk | `portfolio.*` |
-| Global kill-switch | `kOverExposure` (capital cap) + `kPortfolioLoss` (realized+unrealized drawdown) halt **all** quoting; sampled ~1s | `risk_manager.*`, `RiskManager::update_portfolio` |
+| Global kill-switch | `kOverExposure` (capital cap) + `kPortfolioLoss` (realized+unrealized loss floor) + `kDrawdown` (give-back from PnL high-water mark) halt **all** quoting; sampled ~1s | `risk_manager.*`, `RiskManager::update_portfolio` |
 | Reconciliation | local vs exchange positions; `kModelDiverge` halt; `--reconcile` | `portfolio.cpp::reconcile` |
 | TradingSession engine | domain reactions extracted from `main.cpp` (testable, replayable) | `trading_session.*` |
 | Replay integration test | full-stack replay of a session through the real wiring (gated `KALSHI_INTEGRATION_TESTS`, default ON) | `test/integration/replay_session_test.cpp` |
@@ -415,7 +415,7 @@ the Target architecture above + [ADR-007](docs/adr/007-process-per-strategy-and-
 **Portfolio-level safety (built on top):**
 - **Global halt (kill-switch)** — `RiskManager::update_portfolio(const PortfolioSnapshot&)`
   consumes the read-model (the single aggregation authority) rather than re-summing
-  positions, and trips two bits that halt **all** quoters at once (`check_order`
+  positions, and trips bits that halt **all** quoters at once (`check_order`
   returns false on any set bit):
   - `kOverExposure` when `snapshot.total_notional_cents` exceeds
     `risk.max_total_exposure_dollars` — per-market limits don't bound aggregate
@@ -423,9 +423,14 @@ the Target architecture above + [ADR-007](docs/adr/007-process-per-strategy-and-
   - `kPortfolioLoss` when `snapshot.total_pnl_cents()` (realized **+** unrealized
     mark-to-market) falls below `risk.max_total_loss_dollars`. The realized-only
     `daily_loss_limit` / `kPnLLimit` would miss a book bleeding while holding
-    inventory; this watches the drawdown the read-model exists to surface.
+    inventory; this watches the absolute-loss floor the read-model exists to surface.
+  - `kDrawdown` when total PnL has given back more than `risk.max_drawdown_dollars`
+    from its **session high-water mark**. Unlike the loss floor (anchored at
+    break-even), this protects gains — it can fire while still net profitable. The
+    peak starts at 0 and `resume()` re-anchors it so a manual resume doesn't
+    instantly re-trip.
 
-  Both only set bits; clearing requires `resume()` (don't auto-resume into a
+  All only set bits; clearing requires `resume()` (don't auto-resume into a
   crashing market). The main loop builds the snapshot once and feeds it to both
   the kill-switch (every ~1s, `run_portfolio_tasks`) and the status log (~60s).
   Truly event-driven (recompute on every WS delta) is deferred to Phase 23
@@ -517,7 +522,7 @@ LPs accumulate net directional exposure (`E_win`) that dominates terminal P&L. T
 
 - [x] Phases 1–20 — complete (272 tests passing)
 - [x] Phase 31 — Ticker Scanner
-- [x] Portfolio read-model + global kill-switch (`kOverExposure` + `kPortfolioLoss`) + reconciliation
+- [x] Portfolio read-model + global kill-switch (`kOverExposure` + `kPortfolioLoss` + `kDrawdown`) + reconciliation
 - [x] TradingSession engine extracted from `main.cpp`
 - [x] Full-stack replay integration test + `--capture` mode (paper-mode V2 bug fixed en route)
 - [x] Pre-live fixes — logging, WS staleness, cancel-on-disconnect, PnL persistence
