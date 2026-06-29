@@ -114,6 +114,54 @@ double OrderManager::realized_pnl(std::string_view ticker) const {
   return pnl_it == realized_pnl_.end() ? 0.0 : pnl_it->second;
 }
 
+double OrderManager::unrealized_pnl(std::string_view ticker,
+                                    int yes_mid_cents) const {
+  const std::string key{ticker};
+  double unrealized = 0.0;
+
+  // YES inventory marks at the YES mid: gain = (mid - cost) per contract.
+  auto yes_it = yes_lots_.find(key);
+  if (yes_it != yes_lots_.end()) {
+    for (const Lot &lot : yes_it->second) {
+      unrealized +=
+          static_cast<double>(yes_mid_cents - lot.price_cents) * lot.remaining;
+    }
+  }
+
+  // NO inventory marks at the complement (100 - YES mid).
+  const int no_mark_cents = kContractMaxCents - yes_mid_cents;
+  auto no_it = no_lots_.find(key);
+  if (no_it != no_lots_.end()) {
+    for (const Lot &lot : no_it->second) {
+      unrealized +=
+          static_cast<double>(no_mark_cents - lot.price_cents) * lot.remaining;
+    }
+  }
+
+  return unrealized;
+}
+
+double OrderManager::position_cost(std::string_view ticker) const {
+  const std::string key{ticker};
+  double cost = 0.0;
+
+  auto accumulate =
+      [&cost](const std::unordered_map<std::string, std::deque<Lot>> &lots,
+              const std::string &lookup) {
+        auto iter = lots.find(lookup);
+        if (iter == lots.end()) {
+          return;
+        }
+        for (const Lot &lot : iter->second) {
+          cost += static_cast<double>(lot.price_cents) * lot.remaining;
+        }
+      };
+  accumulate(yes_lots_, key);
+  accumulate(no_lots_, key);
+
+  return cost;
+}
+
 const std::unordered_map<std::string, Order> &
 OrderManager::open_orders() const {
   return open_orders_;

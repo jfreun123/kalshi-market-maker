@@ -5,6 +5,7 @@
 #include "order_manager.hpp"
 #include "orderbook.hpp"
 #include "paper_transport.hpp"
+#include "portfolio.hpp"
 #include "quoter.hpp"
 #include "rest_client.hpp"
 #include "risk_manager.hpp"
@@ -20,6 +21,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <csignal>
 #include <filesystem>
 #include <fstream>
@@ -166,6 +168,52 @@ static void log_status_snapshot(const std::vector<std::string> &tickers,
               ticker, pos, session_pnl / kCentsPerDollar,
               (prior + session_pnl) / kCentsPerDollar, risk_mgr.is_halted(),
               risk_mgr.active_constraints());
+  }
+}
+
+// Builds a mark map (ticker -> YES mid cents) from the live orderbooks,
+// skipping markets with no two-sided book.
+static kalshi::MarkMap build_marks(const std::vector<std::string> &tickers,
+                                   const ObMap &ob_map) {
+  kalshi::MarkMap marks;
+  for (const auto &ticker : tickers) {
+    auto book_it = ob_map.find(ticker);
+    if (book_it == ob_map.end()) {
+      continue;
+    }
+    const double mid = book_it->second.mid_price_cents();
+    if (mid > 0.0) {
+      marks[ticker] = static_cast<int>(std::lround(mid));
+    }
+  }
+  return marks;
+}
+
+// Logs the whole-book aggregate: total realized + unrealized PnL, total capital
+// at risk, and the largest event exposures (concentration view).
+static void log_portfolio_snapshot(const std::vector<std::string> &tickers,
+                                   const kalshi::IOrderManager &order_mgr,
+                                   const ObMap &ob_map,
+                                   std::shared_ptr<spdlog::logger> &log) {
+  const kalshi::Portfolio portfolio{order_mgr};
+  const auto snap = portfolio.snapshot(tickers, build_marks(tickers, ob_map));
+
+  log->info("portfolio realized_dollars={:.2f} unrealized_dollars={:.2f} "
+            "total_pnl_dollars={:.2f} capital_at_risk_dollars={:.2f} events={}",
+            snap.total_realized_cents / kCentsPerDollar,
+            snap.total_unrealized_cents / kCentsPerDollar,
+            snap.total_pnl_cents() / kCentsPerDollar,
+            snap.total_notional_cents / kCentsPerDollar, snap.by_event.size());
+
+  constexpr std::size_t kMaxEventsLogged = 5U;
+  const std::size_t shown = std::min(kMaxEventsLogged, snap.by_event.size());
+  for (std::size_t idx = 0U; idx < shown; ++idx) {
+    const auto &event = snap.by_event[idx];
+    log->info("  event={} markets={} pnl_dollars={:.2f} "
+              "capital_at_risk_dollars={:.2f}",
+              event.event_ticker, event.market_count,
+              event.total_pnl_cents() / kCentsPerDollar,
+              event.notional_cost_cents / kCentsPerDollar);
   }
 }
 
@@ -418,6 +466,8 @@ int main(int argc, char *argv[]) {
       if (poll_count % kPositionLogInterval == 0) {
         log_status_snapshot(app_config.target_tickers, order_mgr, risk_mgr,
                             prior_pnl, log);
+        log_portfolio_snapshot(app_config.target_tickers, order_mgr, ob_map,
+                               log);
       }
     }
 

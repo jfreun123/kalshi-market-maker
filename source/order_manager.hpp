@@ -30,6 +30,16 @@ public:
 
   [[nodiscard]] virtual int net_position(std::string_view ticker) const = 0;
   [[nodiscard]] virtual double realized_pnl(std::string_view ticker) const = 0;
+
+  // Mark-to-market PnL of open inventory at the given YES mid price (cents).
+  // YES lots mark at yes_mid; NO lots mark at (100 - yes_mid).
+  [[nodiscard]] virtual double unrealized_pnl(std::string_view ticker,
+                                              int yes_mid_cents) const = 0;
+
+  // Capital currently at risk in open inventory: sum of (remaining * cost) for
+  // all open lots, in cents. This is the most a long binary position can lose.
+  [[nodiscard]] virtual double position_cost(std::string_view ticker) const = 0;
+
   [[nodiscard]] virtual const std::unordered_map<std::string, Order> &
   open_orders() const = 0;
 };
@@ -58,6 +68,9 @@ public:
 
   [[nodiscard]] int net_position(std::string_view ticker) const override;
   [[nodiscard]] double realized_pnl(std::string_view ticker) const override;
+  [[nodiscard]] double unrealized_pnl(std::string_view ticker,
+                                      int yes_mid_cents) const override;
+  [[nodiscard]] double position_cost(std::string_view ticker) const override;
   [[nodiscard]] const std::unordered_map<std::string, Order> &
   open_orders() const override;
 

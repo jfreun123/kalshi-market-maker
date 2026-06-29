@@ -15,6 +15,7 @@
 
 namespace {
 
+constexpr int kContractCents = 100;
 constexpr int kYesBidPrice = 52;
 constexpr int kNoBidPrice = 44;
 constexpr int kOrderQty = 10;
@@ -361,4 +362,78 @@ TEST_F(OrderManagerTest, PnlIsolatedPerTicker) {
 
   EXPECT_DOUBLE_EQ(mgr.realized_pnl(kTicker), kExpectedPnl5Pairs);
   EXPECT_DOUBLE_EQ(mgr.realized_pnl(kOtherTicker), 0.0);
+}
+
+// ---- unrealized_pnl (mark-to-market of open inventory) ----
+
+TEST_F(OrderManagerTest, UnrealizedPnlZeroWithNoInventory) {
+  auto rest_client = make_rest_client(std::make_unique<FakeTransport>());
+  kalshi::OrderManager mgr{rest_client};
+
+  constexpr int kYesMid = 50;
+  EXPECT_DOUBLE_EQ(mgr.unrealized_pnl(kTicker, kYesMid), 0.0);
+}
+
+TEST_F(OrderManagerTest, UnrealizedPnlOnLongYesInventory) {
+  auto rest_client = make_rest_client(std::make_unique<FakeTransport>());
+  kalshi::OrderManager mgr{rest_client};
+
+  // Hold 5 YES bought @ 52. Mark at YES mid 60 => (60 - 52) * 5 = 40 cents.
+  constexpr int kYesMid = 60;
+  constexpr double kExpectedUnrealized = (kYesMid - kYesFillPrice) * kFillQty;
+  mgr.record_fill(make_fill(kOrderId, kTicker, kalshi::Side::Yes, kYesFillPrice,
+                            kFillQty, kTs1Ns));
+
+  EXPECT_DOUBLE_EQ(mgr.unrealized_pnl(kTicker, kYesMid), kExpectedUnrealized);
+}
+
+TEST_F(OrderManagerTest, UnrealizedPnlOnLongNoInventoryUsesComplementMid) {
+  auto rest_client = make_rest_client(std::make_unique<FakeTransport>());
+  kalshi::OrderManager mgr{rest_client};
+
+  // Hold 5 NO bought @ 44. NO mark = 100 - yes_mid. At yes_mid 50, NO mark
+  // = 50. Unrealized = (50 - 44) * 5 = 30 cents.
+  constexpr int kYesMid = 50;
+  constexpr int kNoMark = kContractCents - kYesMid;
+  constexpr double kExpectedUnrealized = (kNoMark - kNoFillPrice) * kFillQty;
+  mgr.record_fill(make_fill(kOrderId, kTicker, kalshi::Side::No, kNoFillPrice,
+                            kFillQty, kTs1Ns));
+
+  EXPECT_DOUBLE_EQ(mgr.unrealized_pnl(kTicker, kYesMid), kExpectedUnrealized);
+}
+
+TEST_F(OrderManagerTest, UnrealizedPnlExcludesMatchedInventory) {
+  auto rest_client = make_rest_client(std::make_unique<FakeTransport>());
+  kalshi::OrderManager mgr{rest_client};
+
+  // 5 YES @ 52 then 5 NO @ 44 fully match -> no open inventory left.
+  mgr.record_fill(make_fill(kOrderId, kTicker, kalshi::Side::Yes, kYesFillPrice,
+                            kFillQty, kTs1Ns));
+  mgr.record_fill(make_fill(kOrderId2, kTicker, kalshi::Side::No, kNoFillPrice,
+                            kFillQty, kTs2Ns));
+
+  constexpr int kYesMid = 70;
+  EXPECT_DOUBLE_EQ(mgr.unrealized_pnl(kTicker, kYesMid), 0.0);
+}
+
+// ---- position_cost (capital at risk in open inventory) ----
+
+TEST_F(OrderManagerTest, PositionCostIsZeroWithNoInventory) {
+  auto rest_client = make_rest_client(std::make_unique<FakeTransport>());
+  kalshi::OrderManager mgr{rest_client};
+
+  EXPECT_DOUBLE_EQ(mgr.position_cost(kTicker), 0.0);
+}
+
+TEST_F(OrderManagerTest, PositionCostSumsOpenLotCostBasis) {
+  auto rest_client = make_rest_client(std::make_unique<FakeTransport>());
+  kalshi::OrderManager mgr{rest_client};
+
+  // Hold 5 YES @ 52 => capital at risk = 52 * 5 = 260 cents.
+  constexpr double kExpectedCost =
+      static_cast<double>(kYesFillPrice) * kFillQty;
+  mgr.record_fill(make_fill(kOrderId, kTicker, kalshi::Side::Yes, kYesFillPrice,
+                            kFillQty, kTs1Ns));
+
+  EXPECT_DOUBLE_EQ(mgr.position_cost(kTicker), kExpectedCost);
 }

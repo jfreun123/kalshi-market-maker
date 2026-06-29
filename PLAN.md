@@ -326,6 +326,20 @@ Scalability is a goal, but the bottlenecks below only matter once pricing is wor
 | 25 | Cross-Ticker Delta Hedging | Unhedged directional exposure across series |
 | 26+ | Multi-Exchange Support (Polymarket, etc.) | New exchange adapters behind existing interfaces |
 
+### Portfolio aggregation (read-model) — built
+
+`Portfolio` (`source/portfolio.hpp/.cpp`) is a pure read-model over `IOrderManager`:
+given a ticker universe and a mark map (ticker → YES mid cents), `snapshot()`
+returns total realized PnL, total **unrealized** (mark-to-market) PnL, total
+capital at risk, and a per-**event** breakdown (correlated strikes rolled up via
+`event_ticker_of`, sorted by capital at risk). `OrderManager` gained
+`unrealized_pnl(ticker, yes_mid)` and `position_cost(ticker)` to source the
+mark-to-market and capital-at-risk numbers from its open lots. The main loop logs
+the aggregate each status interval. This is the fan-in backbone the sharded
+quoting (Phases 21–22) will report into; the next step on top of it is
+portfolio-level limits + a global halt (a total-loss / total-capital kill-switch
+that stops all quoters at once, complementing the existing per-market checks).
+
 ---
 
 ## Research Findings
