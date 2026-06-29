@@ -31,6 +31,16 @@ Algorithm: RSA-PSS, SHA-256, MGF1 with SHA-256, salt length = digest length.
 
 Keys are generated at kalshi.com → Settings → API Keys. The private key is downloaded once — Kalshi does not retain it. See `source/auth.hpp` for the C++ implementation.
 
+> **⚠️ Known gaps (UAT, 2026-06-29).** A live `--capture` run authenticated
+> nothing: every signed call returned `401 INVALID_PARAMETER`. Two things to
+> settle before this is trusted:
+> 1. **Credential:** `config-demo.json` `api_key` is a placeholder, not a real
+>    access key ID — fill it in first. (This is the current blocker.)
+> 2. **Salt length:** the spec above says *digest length* (32), but
+>    `source/auth.cpp` currently signs with `RSA_PSS_SALTLEN_MAX`. Verify against
+>    a real key once #1 is fixed; switch to `RSA_PSS_SALTLEN_DIGEST` if the 401
+>    persists.
+
 ## Price and Count Representation (current API)
 
 All prices use `_dollars` suffix: fixed-point dollar strings.

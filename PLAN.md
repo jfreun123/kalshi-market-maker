@@ -9,21 +9,32 @@ graph TD
         WS["WebSocket Feed"]
     end
     subgraph Core
-        AUTH["Auth (RSA-SHA256)"]
+        AUTH["Auth (RSA-PSS-SHA256)"]
         HTTP["RestClient"]
         WSCONN["WebSocketClient"]
+        SESS["TradingSession (engine)"]
         OB["LocalOrderbook"]
         OM["OrderManager"]
-        RM["RiskManager"]
+        RM["RiskManager + global kill-switch"]
         FV["FairValueEngine"]
         QE["Quoter"]
+        PF["Portfolio (read-model)"]
     end
     REST <-->|signed| AUTH --> HTTP
-    WS -->|snapshot/delta/fill| WSCONN --> OB
-    OB --> FV --> QE
-    RM --> QE --> OM --> HTTP
+    WS -->|snapshot/delta/fill| WSCONN --> SESS
+    SESS -->|on_delta| OB --> FV --> QE
+    SESS -->|on_fill| OM --> HTTP
+    RM --> QE --> OM
     OM --> RM
+    OM --> PF --> RM
 ```
+
+`main.cpp` does process/IO only (config, logger, signals, transports, WS thread,
+PnL persistence). `TradingSession` (`source/trading_session.hpp/.cpp`) owns the
+domain reactions (snapshot/delta/fill, portfolio kill-switch, status logging) so
+the same wiring runs in production, unit tests, and session replay. Capture (raw
+WS frames + REST responses) is teed by the `CapturingWebSocket` /
+`CapturingHttpTransport` decorators (`source/capture.hpp/.cpp`) via `--capture`.
 
 ---
 
@@ -31,14 +42,25 @@ graph TD
 
 **BLOCKER-1 (resolved):** `IxWebSocket` implemented via FetchContent `machinezone/IXWebSocket`. End-to-end connection to live UAT not yet verified.
 
-**BLOCKER-2 (open):** REST fields not verified against live UAT (`https://demo-api.kalshi.co/trade-api/v2`). Fields most likely to drift: price field names, `count` vs `quantity`, status strings, timestamp format.
+**BLOCKER-2 (open — narrowed 2026-06-29):** A live `--capture` run against demo
+showed network + clock are fine and **public** REST (`GET /orderbook`) returns
+200, but every **authenticated** call (`GET /portfolio/positions`, the WS
+handshake) returns `401 INVALID_PARAMETER`. Root cause: the `api_key` (access key
+ID) in `config-demo.json` is still an unfilled placeholder (`<…>`, not a UUID) —
+the private key `.pem` is real, the access key ID is missing. **Action: paste the
+real demo access key ID into config, then re-run `--capture`.** Secondary suspect
+if 401 persists after that: RSA-PSS salt length in `auth.cpp` uses
+`RSA_PSS_SALTLEN_MAX`; Kalshi's SDK uses digest length (32) — verify live once a
+real key exists. Field-shape drift (price names, `count` vs `quantity`, status
+strings, timestamps) can only be confirmed once authenticated traffic flows.
 
 **Pre-UAT checklist:**
 - [x] `IxWebSocket` implemented and library fetched
-- [ ] Demo account + RSA key pair generated
-- [ ] `config.json` created from `config.example.json` with demo base URL
-- [ ] Raw REST request/response bodies verified against UAT
-- [ ] Paper mode (`--paper`) runs without errors
+- [x] Demo RSA private key present (`/home/jfreun1/kalshi-demo-private-key.pem`)
+- [ ] Real demo **access key ID** filled into `config-demo.json` (`api_key`) — currently a placeholder
+- [x] `config-demo.json` points at demo base/ws URLs
+- [~] Raw REST/WS bodies captured via `--capture` (public REST verified 200; authenticated blocked on the key above)
+- [x] Paper mode (`--paper`) runs without errors (fixed 2026-06-29 — was silently placing zero orders against the V2 API)
 
 ---
 
@@ -67,7 +89,20 @@ graph TD
 | 19 | Paper Trading Mode | `--paper` flag |
 | 20 | Documentation | `docs/`, `docs/adr/` |
 
-216 tests passing. Build clean.
+272 tests passing. Build clean.
+
+### Also shipped (post-phase-20, on top of the table above)
+
+| Area | What | Key files |
+|---|---|---|
+| Ticker Scanner (Phase 31) | ranks markets, writes ready-to-run trade config | `ticker_scanner.*`, `scan_output.*` |
+| Portfolio read-model | total realized + unrealized PnL, per-event risk | `portfolio.*` |
+| Global kill-switch | `kOverExposure` (capital cap) + `kPortfolioLoss` (realized+unrealized drawdown) halt **all** quoting; sampled ~1s | `risk_manager.*`, `RiskManager::update_portfolio` |
+| Reconciliation | local vs exchange positions; `kModelDiverge` halt; `--reconcile` | `portfolio.cpp::reconcile` |
+| TradingSession engine | domain reactions extracted from `main.cpp` (testable, replayable) | `trading_session.*` |
+| Replay integration test | full-stack replay of a session through the real wiring (gated `KALSHI_INTEGRATION_TESTS`, default ON) | `test/integration/replay_session_test.cpp` |
+| Session capture | `--capture <dir>` tees raw WS frames + REST responses for replay/UAT | `capture.*` |
+| Paper-mode V2 fix | `PaperTransport` now speaks the V2 order schema (was silently broken) | `paper_transport.cpp` |
 
 ---
 
@@ -207,20 +242,21 @@ After April 2025, Kalshi charges Makers. Confirm γ_maker from current fee sched
 
 ### Code gaps
 
-| Gap | Fix |
+| Gap | Status |
 |---|---|
-| `main.cpp` has no log calls — process runs blind | Add spdlog calls: every fill, every quote update, every risk state change |
-| WS thread can silently stall (no data, no disconnect) | Track `last_ws_message_time`; set `kStaleBook` if > 30s; log at `critical` |
-| Cancel-all not triggered on WS disconnect | Wire `on_disconnect` callback to `order_mgr.cancel_all()` per ticker |
-| Daily loss limit resets on restart (in-memory only) | Write realized PnL to a small JSON file on every fill; read it back on startup |
+| Structured logging (every fill / quote / risk state change) | ✅ done — spdlog throughout `TradingSession` + `main.cpp` |
+| WS thread can silently stall (no data, no disconnect) | ✅ done — `check_ws_staleness` sets `kStaleBook` after 30s |
+| Cancel-all on WS disconnect | ✅ done — `on_disconnect` → `TradingSession::on_disconnect` → `cancel_all` |
+| PnL persists across restarts | ✅ done — `persist_pnl`/`load_pnl` (`pnl_state.json`), wired as the session's fill listener |
+| Paper mode placed zero orders against V2 API | ✅ fixed 2026-06-29 — `PaperTransport` parses the V2 request + returns the V2 response |
 
 ### Missing tests
 
-| Gap | Fix |
+| Gap | Status |
 |---|---|
-| No contract tests against real API responses | Record one real UAT session; save orderbook + fill JSON to `test/fixtures/`; add parser assertion tests |
-| No integration tests written (framework exists) | Add `GET /markets` + `GET /orderbook` integration tests in `test/integration/` |
-| Replay fixture is hand-crafted, not from live Kalshi | Replace `session_synthetic.jsonl` with a recorded real session after first UAT run |
+| Full-stack integration test | ✅ done — `replay_session_test` drives the real wiring (gated `KALSHI_INTEGRATION_TESTS`, default ON) |
+| Capture real sessions for replay / field-shape checks | ✅ tooling done — `--capture`; **blocked on the placeholder `api_key`** (see BLOCKER-2) for a real demo capture |
+| Replay fixture is hand-crafted, not from live Kalshi | ⏳ pending a real capture — then drop `session.jsonl` into `test/fixtures/` and give `replay_session_test` capture-specific assertions (current ones are tied to the synthetic fixture) |
 
 ### Operational hardening (Phase 32)
 
@@ -441,13 +477,17 @@ LPs accumulate net directional exposure (`E_win`) that dominates terminal P&L. T
 
 ## Phase Checklist
 
-- [x] Phases 1–20 — complete (197 tests passing)
+- [x] Phases 1–20 — complete (272 tests passing)
+- [x] Phase 31 — Ticker Scanner
+- [x] Portfolio read-model + global kill-switch (`kOverExposure` + `kPortfolioLoss`) + reconciliation
+- [x] TradingSession engine extracted from `main.cpp`
+- [x] Full-stack replay integration test + `--capture` mode (paper-mode V2 bug fixed en route)
+- [x] Pre-live fixes — logging, WS staleness, cancel-on-disconnect, PnL persistence
 
 **Immediate (pricing quality, small ticker set):**
-- [ ] UAT Blocker — verify live REST/WS field shapes against demo account
-- [ ] Pre-live fixes — logging, WS staleness, cancel-on-disconnect, PnL persistence
+- [~] UAT Blocker — `--capture` built & run; **blocked on placeholder `api_key` in `config-demo.json`** (fill real access key ID, then capture + verify field shapes). See UAT Blockers.
+- [ ] Real-capture replay — record a demo session, drop into `test/fixtures/`, add capture-specific assertions to `replay_session_test`
 - [ ] Phase 32 — Operational hardening (systemd, logrotate, Telegram alert script)
-- [x] Phase 31 — Ticker Scanner
 - [ ] Phase 29 — Price-Range Gate
 - [ ] Phase 27 — Spread Floor & E_win Tracking
 - [ ] Phase 26 — Flow Imbalance Signal

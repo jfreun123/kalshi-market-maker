@@ -5,28 +5,32 @@ A C++23 automated market maker for [Kalshi](https://kalshi.com) prediction marke
 ## Architecture
 
 ```
-WebSocketClient ──► Quoter ──► OrderManager ──► RestClient ──► Kalshi API
-     │                │              │
-     │            FairValueEngine    └── RiskManager
-     │           (IPricingModel)         (Constraint bitset)
-     │
-     └── AdverseSelectionGuard
+WebSocketClient ──► TradingSession ──► Quoter ──► OrderManager ──► RestClient ──► Kalshi API
+                          │                │            │   │
+                          │            FairValueEngine   │   └── RiskManager (Constraint bitset
+                          │           (IPricingModel)     │        + global kill-switch)
+                          ├── AdverseSelectionGuard       └── Portfolio (read-model) ──► RiskManager
+                          └── (--capture tees raw WS + REST via Capturing* decorators)
 ```
 
 **Key components:**
 
 | Component | File | Responsibility |
 |---|---|---|
-| `RestClient` | `rest_client.hpp` | Place/cancel orders, poll fills (HTTP) |
+| `RestClient` | `rest_client.hpp` | Place/cancel orders, poll fills (V2 HTTP) |
 | `WebSocketClient` | `websocket_client.hpp` | Orderbook snapshots + fill events (WS) |
-| `OrderManager` | `order_manager.hpp` | Track open orders, positions, realized PnL |
-| `RiskManager` | `risk_manager.hpp` | 8-bit constraint bitset; blocks orders when any bit is set |
+| `TradingSession` | `trading_session.hpp` | Owns the domain reactions (snapshot/delta/fill, portfolio kill-switch, status); the seam shared by prod, tests, and replay |
+| `OrderManager` | `order_manager.hpp` | Track open orders, positions, realized + unrealized PnL |
+| `RiskManager` | `risk_manager.hpp` | Constraint bitset; blocks orders when any bit is set; `update_portfolio` is the global kill-switch |
+| `Portfolio` | `portfolio.hpp` | Read-model: total PnL, capital-at-risk, per-event risk; `reconcile()` vs exchange |
 | `FairValueEngine` | `fair_value.hpp` | Delegates to a pluggable `IPricingModel` |
 | `HeuristicModel` | `pricing_model.hpp` | Mid-price + time-decay + inventory skew |
 | `TheoGrid` | `theo_grid.hpp` | Bilinear interpolation table for fast repricing |
 | `Quoter` | `quoter.hpp` | Computes bid/ask, reprices on orderbook delta |
 | `AdverseSelectionGuard` | `adverse_selection.hpp` | Pulls quotes when fill rate exceeds threshold |
-| `Auth` | `auth.hpp` | RSA-SHA256 request signing |
+| `TickerScanner` | `ticker_scanner.hpp` | Ranks markets by volume/spread; writes a trade config |
+| `Capturing{WebSocket,HttpTransport}` | `capture.hpp` | Tee raw WS frames / REST responses for `--capture` replay |
+| `Auth` | `auth.hpp` | RSA-PSS-SHA256 request signing |
 
 ## Prerequisites
 
