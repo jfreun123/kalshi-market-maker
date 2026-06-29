@@ -30,6 +30,7 @@
 #include <iostream>
 #include <iterator>
 #include <memory>
+#include <mutex>
 #include <span>
 #include <string>
 #include <thread>
@@ -68,6 +69,21 @@ static void setup_logger(const std::filesystem::path &log_dir) {
 // ---- Helpers ----
 
 static constexpr double kCentsPerDollar = 100.0;
+
+// Runs a cleanup action when it leaves scope, on every path (return, throw,
+// signal-driven shutdown). Non-copyable, non-movable.
+template <typename Fn> class ScopeGuard {
+public:
+  explicit ScopeGuard(Fn action) : fn_{std::move(action)} {}
+  ScopeGuard(const ScopeGuard &) = delete;
+  ScopeGuard &operator=(const ScopeGuard &) = delete;
+  ScopeGuard(ScopeGuard &&) = delete;
+  ScopeGuard &operator=(ScopeGuard &&) = delete;
+  ~ScopeGuard() { fn_(); }
+
+private:
+  Fn fn_;
+};
 
 // Returns {transport, paper_ptr}. paper_ptr is non-null only in paper mode.
 static auto make_http_transport(bool paper_mode,
@@ -460,23 +476,54 @@ int main(int argc, char *argv[]) {
       ws_client.subscribe(ticker);
     }
 
-    ws_client.on_orderbook_snapshot([&session](const kalshi::Orderbook &snap) {
-      session.on_snapshot(snap);
-    });
+    // The WS callbacks fire on the WebSocket thread and mutate the engine
+    // (orderbook, orders, risk) on every message; the main loop reads and
+    // flattens it. One mutex serializes the two threads so that shared access
+    // is well-defined.
+    std::mutex engine_mtx;
+
+    ws_client.on_orderbook_snapshot(
+        [&session, &engine_mtx](const kalshi::Orderbook &snap) {
+          const std::lock_guard<std::mutex> lock{engine_mtx};
+          session.on_snapshot(snap);
+        });
 
     ws_client.on_orderbook_delta(
-        [&session](const std::string &ticker, kalshi::Side side, int price,
-                   int qty) { session.on_delta(ticker, side, price, qty); });
+        [&session, &engine_mtx](const std::string &ticker, kalshi::Side side,
+                                int price, int qty) {
+          const std::lock_guard<std::mutex> lock{engine_mtx};
+          session.on_delta(ticker, side, price, qty);
+        });
 
-    ws_client.on_fill(
-        [&session](const kalshi::Fill &fill) { session.on_fill(fill); });
+    ws_client.on_fill([&session, &engine_mtx](const kalshi::Fill &fill) {
+      const std::lock_guard<std::mutex> lock{engine_mtx};
+      session.on_fill(fill);
+    });
 
-    ws_client.on_disconnect([&session]() { session.on_disconnect(); });
+    ws_client.on_disconnect([&session, &engine_mtx]() {
+      const std::lock_guard<std::mutex> lock{engine_mtx};
+      session.on_disconnect();
+    });
 
     std::signal(SIGINT, handle_signal);
     std::signal(SIGTERM, handle_signal);
 
     std::thread ws_thread([&ws_client]() { ws_client.run(); });
+
+    // Guarantees that on ANY exit from this scope — normal shutdown, a thrown
+    // exception, or stack unwind — we stop the feed, join the thread, and
+    // cancel every resting quote. cancel_all_quotes is best-effort and never
+    // throws, so it is safe to run from a destructor; it runs after join()
+    // (single-threaded by then) so no lock is needed.
+    ScopeGuard shutdown_guard{[&ws_client, &ws_thread, &session, &log]() {
+      log->info("shutting down — stopping feed, cancelling all quotes");
+      ws_client.stop();
+      if (ws_thread.joinable()) {
+        ws_thread.join();
+      }
+      session.cancel_all_quotes();
+      log->info("shutdown complete");
+    }};
 
     constexpr auto kPollInterval = std::chrono::milliseconds{100};
     constexpr int kStalenessCheckInterval = 300; // 300 × 100ms = 30s
@@ -491,6 +538,8 @@ int main(int argc, char *argv[]) {
       std::this_thread::sleep_for(kPollInterval);
       ++poll_count;
 
+      // Hold the engine lock only for the work, never across the sleep.
+      const std::lock_guard<std::mutex> lock{engine_mtx};
       if (poll_count % kStalenessCheckInterval == 0) {
         check_ws_staleness(ws_client, risk_mgr, log, stale_logged);
       }
@@ -499,6 +548,9 @@ int main(int argc, char *argv[]) {
       if (poll_count % kPortfolioRiskInterval == 0) {
         session.run_portfolio_risk();
       }
+      // Flatten on every iteration if any constraint is set (stale, PnL,
+      // exposure, drawdown, manual) — never leave quotes resting while halted.
+      session.enforce_quote_safety();
       if (poll_count % kPositionLogInterval == 0) {
         session.log_status();
       }
@@ -510,20 +562,10 @@ int main(int argc, char *argv[]) {
       }
     }
 
-    log->info("shutdown signal received — stopping");
-    ws_client.stop();
-    ws_thread.join();
-
-    for (const auto &ticker : app_config.target_tickers) {
-      order_mgr.cancel_all(ticker);
-    }
-
     if (paper_ptr != nullptr) {
       log->info("paper mode: simulated fills={}", paper_ptr->fills().size());
     }
-
-    log->info("shutdown complete");
-    return 0;
+    return 0; // ShutdownGuard stops the feed, joins, and cancels all quotes.
 
   } catch (const std::exception &exception) {
     std::cerr << "fatal: " << exception.what() << '\n';
