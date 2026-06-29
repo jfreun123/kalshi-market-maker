@@ -247,6 +247,74 @@ void WebSocketClient::handle_connect() {
   }
 }
 
+namespace {
+
+// Each dispatcher contains its own parse + callback invocation so that
+// handle_message stays a flat type switch. A malformed body is dropped quietly
+// (json::exception); a throwing callback is logged but contained — never
+// allowed to escape onto the WebSocket thread (which would call
+// std::terminate).
+
+void dispatch_snapshot(const WebSocketClient::SnapshotCallback &callback,
+                       const nlohmann::json &msg_body) {
+  if (!callback) {
+    return;
+  }
+  try {
+    callback(parse_snapshot(msg_body));
+  } catch (const nlohmann::json::exception &ex) {
+    get_logger()->debug("ws dropped malformed snapshot: {}", ex.what());
+  } catch (const std::exception &ex) {
+    get_logger()->error("ws snapshot callback threw: {}", ex.what());
+  }
+}
+
+void dispatch_delta(const WebSocketClient::DeltaCallback &callback,
+                    const nlohmann::json &msg_body) {
+  if (!callback) {
+    return;
+  }
+  try {
+    const std::string ticker = msg_body.at("market_ticker").get<std::string>();
+    const Side side = parse_side(msg_body.at("side").get<std::string>());
+    const int price =
+        dollars_to_cents(msg_body.at("price_dollars").get<std::string>());
+    const int qty = parse_fp_count(msg_body.at("delta_fp").get<std::string>());
+    callback(ticker, side, price, qty);
+  } catch (const nlohmann::json::exception &ex) {
+    get_logger()->debug("ws dropped malformed delta: {}", ex.what());
+  } catch (const std::exception &ex) {
+    get_logger()->error("ws delta callback threw: {}", ex.what());
+  }
+}
+
+void dispatch_fill(const WebSocketClient::FillCallback &callback,
+                   const nlohmann::json &msg_body) {
+  if (!callback) {
+    return;
+  }
+  try {
+    Fill fill;
+    fill.order_id = msg_body.at("order_id").get<std::string>();
+    fill.market_ticker = msg_body.at("market_ticker").get<std::string>();
+    fill.side = parse_side(msg_body.at("side").get<std::string>());
+    fill.price_cents =
+        dollars_to_cents(msg_body.at("yes_price_dollars").get<std::string>());
+    fill.quantity = parse_fp_count(msg_body.at("count_fp").get<std::string>());
+    fill.is_taker = msg_body.at("is_taker").get<bool>();
+    const auto ts_ms = msg_body.at("ts_ms").get<long long>();
+    fill.timestamp =
+        std::chrono::system_clock::time_point(std::chrono::milliseconds(ts_ms));
+    callback(fill);
+  } catch (const nlohmann::json::exception &ex) {
+    get_logger()->debug("ws dropped malformed fill: {}", ex.what());
+  } catch (const std::exception &ex) {
+    get_logger()->error("ws fill callback threw: {}", ex.what());
+  }
+}
+
+} // namespace
+
 void WebSocketClient::handle_message(const std::string &raw) {
   last_message_time_.store(std::chrono::steady_clock::now());
   nlohmann::json parsed;
@@ -268,48 +336,11 @@ void WebSocketClient::handle_message(const std::string &raw) {
   const auto &msg_body = *msg_it;
 
   if (msg_type == "orderbook_snapshot") {
-    if (snapshot_callback_) {
-      try {
-        snapshot_callback_(parse_snapshot(msg_body));
-      } catch (const nlohmann::json::exception &) {
-        return; // Malformed snapshot; drop message.
-      }
-    }
+    dispatch_snapshot(snapshot_callback_, msg_body);
   } else if (msg_type == "orderbook_delta") {
-    if (delta_callback_) {
-      try {
-        const std::string ticker =
-            msg_body.at("market_ticker").get<std::string>();
-        const Side side = parse_side(msg_body.at("side").get<std::string>());
-        const int price =
-            dollars_to_cents(msg_body.at("price_dollars").get<std::string>());
-        const int qty =
-            parse_fp_count(msg_body.at("delta_fp").get<std::string>());
-        delta_callback_(ticker, side, price, qty);
-      } catch (const nlohmann::json::exception &) {
-        return; // Malformed delta; drop message.
-      }
-    }
+    dispatch_delta(delta_callback_, msg_body);
   } else if (msg_type == "fill") {
-    if (fill_callback_) {
-      try {
-        Fill fill;
-        fill.order_id = msg_body.at("order_id").get<std::string>();
-        fill.market_ticker = msg_body.at("market_ticker").get<std::string>();
-        fill.side = parse_side(msg_body.at("side").get<std::string>());
-        fill.price_cents = dollars_to_cents(
-            msg_body.at("yes_price_dollars").get<std::string>());
-        fill.quantity =
-            parse_fp_count(msg_body.at("count_fp").get<std::string>());
-        fill.is_taker = msg_body.at("is_taker").get<bool>();
-        const auto ts_ms = msg_body.at("ts_ms").get<long long>();
-        fill.timestamp = std::chrono::system_clock::time_point(
-            std::chrono::milliseconds(ts_ms));
-        fill_callback_(fill);
-      } catch (const nlohmann::json::exception &) {
-        return; // Malformed fill; drop message.
-      }
-    }
+    dispatch_fill(fill_callback_, msg_body);
   }
   // All other message types are silently ignored.
 }

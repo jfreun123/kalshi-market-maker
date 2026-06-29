@@ -9,6 +9,7 @@
 
 #include <format>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -414,6 +415,22 @@ TEST_F(WebSocketClientTest, FillFieldsParsedCorrectly) {
   EXPECT_EQ(received.price_cents, kFillPrice);
   EXPECT_EQ(received.quantity, kFillCount);
   EXPECT_FALSE(received.is_taker); // default fill_message is maker (passive)
+}
+
+TEST_F(WebSocketClientTest, ThrowingCallbackIsContainedNotPropagated) {
+  auto fake_ws = std::make_unique<kalshi::FakeWebSocket>();
+  kalshi::FakeWebSocket *ws_raw = fake_ws.get();
+  ws_raw->enqueue_message(
+      fill_message("order-abc", kTestTicker, "yes", kFillPrice, kFillCount));
+
+  auto client = make_client(std::move(fake_ws));
+  client.on_fill([](const kalshi::Fill & /*fill*/) {
+    throw std::runtime_error("callback boom");
+  });
+
+  // On the real WS thread an escaping exception would call std::terminate.
+  // handle_message must contain it so the connection survives.
+  EXPECT_NO_THROW(client.run());
 }
 
 TEST_F(WebSocketClientTest, FillIsTakerParsedCorrectly) {
