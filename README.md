@@ -113,6 +113,13 @@ openssl rsa -in kalshi-private-key.pem -pubout -out kalshi-public-key.pem
 # Exits 0 if in sync, non-zero on any position mismatch — good for CI/pre-trade.
 ./build/source/kalshi_mm --reconcile config.json
 
+# Capture a live session for replay (no orders placed). Records raw inbound WS
+# frames to <dir>/session.jsonl (replay-compatible) and seed REST responses to
+# <dir>/rest.jsonl. Runs until Ctrl-C. Point config at demo to capture a UAT run:
+./build/source/kalshi_mm --capture capture/demo-run config-demo.json
+# Replay it through the full stack: drop session.jsonl into test/fixtures/ and
+# point the integration test at it (see test/integration/replay_session_test.cpp).
+
 # Demo / UAT environment
 # Set base_url and ws_url to the demo endpoints in config.json:
 #   "base_url": "https://demo-api.kalshi.co/trade-api/v2"

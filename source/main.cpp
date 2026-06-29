@@ -1,4 +1,5 @@
 #include "auth.hpp"
+#include "capture.hpp"
 #include "config.hpp"
 #include "http_transport.hpp"
 #include "logger.hpp"
@@ -243,6 +244,91 @@ static int run_reconcile_mode(kalshi::RestClient &rest,
   return in_sync ? 0 : 1;
 }
 
+// ---- Capture mode ----
+
+// Records a live exchange session for later replay: raw inbound WS frames are
+// teed to <dir>/session.jsonl (one per line, replay-compatible with the
+// integration test) and the seed REST responses (orderbooks, positions) to
+// <dir>/rest.jsonl for field-shape inspection. Runs until SIGINT/SIGTERM.
+static int run_capture_mode(const kalshi::Auth &auth,
+                            const kalshi::AppConfig &app_config,
+                            const std::filesystem::path &capture_dir,
+                            std::shared_ptr<spdlog::logger> &log) {
+  if (app_config.target_tickers.empty()) {
+    log->critical("capture mode — target_tickers is empty; nothing to record");
+    return 1;
+  }
+
+  std::filesystem::create_directories(capture_dir);
+  const auto ws_path = capture_dir / "session.jsonl";
+  const auto rest_path = capture_dir / "rest.jsonl";
+  std::ofstream ws_file{ws_path};
+  std::ofstream rest_file{rest_path};
+  if (!ws_file || !rest_file) {
+    log->critical("capture mode — cannot open output files in {}",
+                  capture_dir.string());
+    return 1;
+  }
+
+  auto rest_transport = std::make_unique<kalshi::CapturingHttpTransport>(
+      std::make_unique<kalshi::HttpTransport>(), rest_file);
+  auto *rest_capture = rest_transport.get();
+  kalshi::RestClient rest{auth, std::move(rest_transport), app_config.base_url};
+
+  auto ws_transport = std::make_unique<kalshi::CapturingWebSocket>(
+      std::make_unique<kalshi::IxWebSocket>(), ws_file);
+  auto *ws_capture = ws_transport.get();
+  kalshi::WebSocketClient ws_client{auth, std::move(ws_transport),
+                                    app_config.ws_url};
+
+  ws_client.on_orderbook_snapshot([&log](const kalshi::Orderbook &snap) {
+    log->info("capture snapshot ticker={} yes_levels={} no_levels={}",
+              snap.ticker, snap.yes.size(), snap.no.size());
+  });
+
+  // Seed the REST capture and subscribe each ticker to the live WS stream.
+  for (const auto &ticker : app_config.target_tickers) {
+    try {
+      (void)rest.get_orderbook(ticker);
+    } catch (const std::exception &ex) {
+      log->warn("capture — get_orderbook ticker={} failed: {}", ticker,
+                ex.what());
+    }
+    ws_client.subscribe(ticker);
+  }
+  try {
+    (void)rest.get_positions();
+  } catch (const std::exception &ex) {
+    log->warn("capture — get_positions failed: {}", ex.what());
+  }
+
+  std::signal(SIGINT, handle_signal);
+  std::signal(SIGTERM, handle_signal);
+  std::thread ws_thread([&ws_client]() { ws_client.run(); });
+
+  log->info("capturing — ws={} rest={} — Ctrl-C to stop", ws_path.string(),
+            rest_path.string());
+
+  constexpr auto kPollInterval = std::chrono::milliseconds{200};
+  constexpr int kProgressInterval = 50; // 50 × 200ms = 10s
+  int poll_count = 0;
+  while (!g_shutdown.load()) {
+    std::this_thread::sleep_for(kPollInterval);
+    if (++poll_count % kProgressInterval == 0) {
+      log->info("capture progress ws_frames={} rest_calls={}",
+                ws_capture->captured_count(), rest_capture->captured_count());
+    }
+  }
+
+  log->info("capture stopping");
+  ws_client.stop();
+  ws_thread.join();
+  log->info("capture complete ws_frames={} rest_calls={} dir={}",
+            ws_capture->captured_count(), rest_capture->captured_count(),
+            capture_dir.string());
+  return 0;
+}
+
 // ---- PnL persistence ----
 
 static PnlMap load_pnl(const std::filesystem::path &path) {
@@ -269,6 +355,8 @@ struct CliArgs {
   bool paper_mode{false};
   bool scan_mode{false};
   bool reconcile_mode{false};
+  bool capture_mode{false};
+  std::filesystem::path capture_dir{"capture"};
   std::filesystem::path config_path{"config.json"};
 };
 
@@ -282,6 +370,12 @@ static CliArgs parse_args(std::span<char *> args) {
       result.scan_mode = true;
     } else if (arg == "--reconcile") {
       result.reconcile_mode = true;
+    } else if (arg == "--capture") {
+      result.capture_mode = true;
+      // Optional directory argument follows --capture.
+      if (idx + 1U < args.size() && args[idx + 1U][0] != '-') {
+        result.capture_dir = std::filesystem::path{args[++idx]};
+      }
     } else {
       result.config_path = std::filesystem::path{args[idx]};
     }
@@ -328,6 +422,10 @@ int main(int argc, char *argv[]) {
 
     if (cli.reconcile_mode) {
       return run_reconcile_mode(rest, app_config.target_tickers, log);
+    }
+
+    if (cli.capture_mode) {
+      return run_capture_mode(auth, app_config, cli.capture_dir, log);
     }
 
     if (app_config.target_tickers.empty()) {
