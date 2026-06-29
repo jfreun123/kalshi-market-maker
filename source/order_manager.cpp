@@ -3,6 +3,7 @@
 #include "logger.hpp"
 
 #include <algorithm>
+#include <exception>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -42,8 +43,16 @@ void OrderManager::cancel_all(std::string_view ticker) {
       to_cancel.push_back(order_id);
     }
   }
+  // Best-effort: cancel as many as we can. A failure on one order (e.g. a
+  // network error) must not prevent cancelling the rest, and must never throw —
+  // callers rely on this to flatten quotes during shutdown and risk halts.
   for (const auto &order_id : to_cancel) {
-    cancel(order_id);
+    try {
+      cancel(order_id);
+    } catch (const std::exception &ex) {
+      get_logger()->error("cancel_all: failed to cancel order_id={}: {}",
+                          order_id, ex.what());
+    }
   }
 }
 

@@ -8,8 +8,11 @@
 #include <openssl/rsa.h>
 
 #include <chrono>
+#include <map>
 #include <memory>
+#include <stdexcept>
 #include <string>
+#include <string_view>
 
 // ---- Test constants ----
 
@@ -209,6 +212,46 @@ TEST_F(OrderManagerTest, CancelAllCancelsAllOrdersForTicker) {
   // kTicker order cancelled; kOtherTicker order still open.
   EXPECT_EQ(mgr.open_orders().size(), kOneOrder);
   EXPECT_TRUE(mgr.open_orders().contains(kOrderId2));
+}
+
+namespace {
+// A transport that throws on the DELETE for one specific order id, so we can
+// verify cancel_all is best-effort: a failed cancel must not abort the others.
+class ThrowOnCancelTransport : public FakeTransport {
+public:
+  explicit ThrowOnCancelTransport(std::string doomed_order_id)
+      : doomed_order_id_{std::move(doomed_order_id)} {}
+
+  kalshi::HttpResponse
+  delete_(std::string_view url,
+          const std::map<std::string, std::string> &headers) override {
+    if (url.find(doomed_order_id_) != std::string_view::npos) {
+      throw std::runtime_error("simulated network failure during cancel");
+    }
+    return FakeTransport::delete_(url, headers);
+  }
+
+private:
+  std::string doomed_order_id_;
+};
+} // namespace
+
+TEST_F(OrderManagerTest, CancelAllIsBestEffortWhenOneCancelThrows) {
+  auto transport = std::make_unique<ThrowOnCancelTransport>(kOrderId);
+  transport->enqueue({kHttpOk, order_response_json(kOrderId, kOrderQty)});
+  transport->enqueue({kHttpOk, order_response_json(kOrderId2, kOrderQty)});
+
+  auto rest_client = make_rest_client(std::move(transport));
+  kalshi::OrderManager mgr{rest_client};
+  mgr.place(kTicker, kalshi::Side::Yes, kYesBidPrice, kOrderQty); // kOrderId
+  mgr.place(kTicker, kalshi::Side::No, kNoBidPrice, kOrderQty);   // kOrderId2
+
+  // Must not throw even though kOrderId's cancel fails.
+  EXPECT_NO_THROW(mgr.cancel_all(kTicker));
+
+  // kOrderId's cancel threw (still open); kOrderId2's succeeded (removed).
+  EXPECT_EQ(mgr.open_orders().size(), kOneOrder);
+  EXPECT_TRUE(mgr.open_orders().contains(kOrderId));
 }
 
 // ---- record_fill / net_position ----
