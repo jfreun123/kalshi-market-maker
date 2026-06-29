@@ -82,7 +82,9 @@ cp config.example.json config.json
     "max_position_per_market": 100,
     "max_open_orders_per_market": 4,
     "max_order_size": 25,
-    "daily_loss_limit": -500.0
+    "daily_loss_limit": -500.0,
+    "max_total_exposure_dollars": 10000.0,
+    "max_total_loss_dollars": -1000.0
   }
 }
 ```
@@ -169,11 +171,18 @@ detail, for any custom downstream tooling.
 unrealized (mark-to-market) PnL**, **total capital at risk**, and a per-**event**
 breakdown (correlated strikes rolled up). It's logged each status interval.
 
-Two portfolio-level safety checks complement the per-market risk limits:
+Three portfolio-level safety checks complement the per-market risk limits. The
+first two form a **global kill-switch**: `RiskManager::update_portfolio()` consumes
+the read-model snapshot (built once per cycle, ~10s cadence) and any tripped bit
+halts **all** quoters at once.
 
 - **Over-exposure** — `risk.max_total_exposure_dollars` caps total capital at risk
   across all markets. Per-market limits don't bound aggregate exposure; this does.
   A breach trips `kOverExposure` and halts all quoting.
+- **Total-loss drawdown** — `risk.max_total_loss_dollars` caps total PnL including
+  **unrealized** mark-to-market. The realized-only `daily_loss_limit` can't see a
+  book bleeding while holding inventory; a breach trips `kPortfolioLoss`. Both
+  require a manual `resume()` to clear (no auto-resume into a crashing market).
 - **Reconciliation** — local accounting is rebuilt from a WebSocket fill stream,
   which can drift from the exchange (missed messages, reconnects). The bot fetches
   Kalshi's authoritative `GET /portfolio/positions` every ~2 min during live

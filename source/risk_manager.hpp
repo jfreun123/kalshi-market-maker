@@ -1,6 +1,7 @@
 #pragma once
 
 #include "order_manager.hpp"
+#include "portfolio.hpp"
 #include "types.hpp"
 
 #include <bitset>
@@ -27,7 +28,8 @@ enum class Constraint : uint8_t {
   kModelDiverge = 5, // local accounting diverged from exchange (reconciliation)
   kManualHalt = 6,
   kConnectivity = 7,
-  kOverExposure = 8, // total capital at risk exceeded the portfolio cap
+  kOverExposure = 8,  // total capital at risk exceeded the portfolio cap
+  kPortfolioLoss = 9, // total PnL (realized + unrealized) breached the loss cap
 };
 
 struct RiskLimits {
@@ -38,12 +40,18 @@ struct RiskLimits {
   // Portfolio-wide cap on total capital at risk across all markets. Per-market
   // limits don't bound aggregate exposure at scale; this does.
   static constexpr double kDefaultMaxTotalExposure = 10000.0; // dollars
+  // Portfolio-wide kill-switch on total PnL including open-inventory drawdown.
+  // daily_loss_limit only watches realized PnL; this watches realized +
+  // mark-to-market unrealized, so a book bleeding while holding inventory
+  // halts.
+  static constexpr double kDefaultMaxTotalLoss = -1000.0; // dollars
 
   int max_position_per_market = kDefaultMaxPosition;
   int max_open_orders_per_market = kDefaultMaxOpenOrders;
   int max_order_size = kDefaultMaxOrderSize;
   double daily_loss_limit = kDefaultDailyLossLimit; // dollars (negative = loss)
   double max_total_exposure_dollars = kDefaultMaxTotalExposure;
+  double max_total_loss_dollars = kDefaultMaxTotalLoss; // dollars (negative)
 };
 
 // Pre-trade risk checks for all outgoing orders.
@@ -66,6 +74,13 @@ public:
   void update(const IOrderManager &order_mgr,
               const std::vector<std::string> &tickers);
 
+  // Portfolio-level kill-switch. Consumes the Portfolio read-model (the single
+  // aggregation authority) rather than re-summing positions. Sets kOverExposure
+  // when total capital at risk exceeds max_total_exposure_dollars, and
+  // kPortfolioLoss when total PnL (realized + unrealized) falls below
+  // max_total_loss_dollars. Only sets bits; clearing requires resume().
+  void update_portfolio(const PortfolioSnapshot &snapshot);
+
   // Set / clear individual constraint bits. Any set bit causes is_halted().
   void set(Constraint bit);
   void clear(Constraint bit);
@@ -79,7 +94,7 @@ public:
   void resume(); // clears all constraints
 
 private:
-  static constexpr std::size_t kNumConstraints = 9;
+  static constexpr std::size_t kNumConstraints = 10;
 
   RiskLimits limits_;
   std::bitset<kNumConstraints> constraints_;

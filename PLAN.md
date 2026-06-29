@@ -339,9 +339,36 @@ the aggregate each status interval. This is the fan-in backbone the sharded
 quoting (Phases 21–22) will report into.
 
 **Portfolio-level safety (built on top):**
-- **Over-exposure halt** — `RiskManager::update()` sums `position_cost` across all
-  markets; if total capital at risk exceeds `risk.max_total_exposure_dollars` it
-  trips `kOverExposure`. Per-market limits don't bound aggregate exposure at scale.
+- **Global halt (kill-switch)** — `RiskManager::update_portfolio(const PortfolioSnapshot&)`
+  consumes the read-model (the single aggregation authority) rather than re-summing
+  positions, and trips two bits that halt **all** quoters at once (`check_order`
+  returns false on any set bit):
+  - `kOverExposure` when `snapshot.total_notional_cents` exceeds
+    `risk.max_total_exposure_dollars` — per-market limits don't bound aggregate
+    exposure at scale.
+  - `kPortfolioLoss` when `snapshot.total_pnl_cents()` (realized **+** unrealized
+    mark-to-market) falls below `risk.max_total_loss_dollars`. The realized-only
+    `daily_loss_limit` / `kPnLLimit` would miss a book bleeding while holding
+    inventory; this watches the drawdown the read-model exists to surface.
+
+  Both only set bits; clearing requires `resume()` (don't auto-resume into a
+  crashing market). The main loop builds the snapshot once and feeds it to both
+  the kill-switch (every ~10s, `run_portfolio_tasks`) and the status log (~60s).
+
+  ```mermaid
+  graph TD
+    OM[OrderManager<br/>single source of truth] -->|net pos, lots, realized| PF[Portfolio<br/>read-model]
+    OB[Orderbooks] -->|marks| PF
+    PF -->|PortfolioSnapshot| RM[RiskManager.update_portfolio]
+    RM -->|notional > cap| OE[kOverExposure]
+    RM -->|realized+unrealized < loss cap| PL[kPortfolioLoss]
+    OE --> HALT[is_halted = any bit set]
+    PL --> HALT
+    HALT -->|check_order = false| Q[ALL Quoters stop]
+    style OM fill:#555
+    style OB fill:#555
+    style PF fill:#555
+  ```
 - **Reconciliation** — `reconcile()` (portfolio.cpp) diffs local net positions
   against the exchange's authoritative `GET /portfolio/positions`
   (`RestClient::get_positions`, paginated). Checks the union of tracked tickers and
@@ -350,8 +377,8 @@ quoting (Phases 21–22) will report into.
   live; also a standalone `--reconcile` command (exit non-zero on mismatch) for
   pre-trade / CI checks.
 
-Next: a true global kill-switch shared across sharded quoters (Phases 21–22), and
-optional auto-resync of local state from the exchange snapshot.
+Next: optional auto-resync of local state from the exchange snapshot, and wiring
+the shared kill-switch into the sharded quoters once Phases 21–22 land.
 
 ---
 

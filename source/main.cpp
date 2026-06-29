@@ -189,15 +189,37 @@ static kalshi::MarkMap build_marks(const std::vector<std::string> &tickers,
   return marks;
 }
 
+// Aggregates the whole-book read-model: marks open inventory to the current
+// orderbook and rolls positions up into total PnL and per-event exposure.
+static kalshi::PortfolioSnapshot
+make_portfolio_snapshot(const std::vector<std::string> &tickers,
+                        const kalshi::IOrderManager &order_mgr,
+                        const ObMap &ob_map) {
+  const kalshi::Portfolio portfolio{order_mgr};
+  return portfolio.snapshot(tickers, build_marks(tickers, ob_map));
+}
+
+// Portfolio-level kill-switch: feeds the read-model into the RiskManager, which
+// halts ALL quoters at once on aggregate over-exposure or total drawdown.
+// Logs once on the transition into a halted state to avoid per-cycle spam.
+static void check_portfolio_risk(const kalshi::PortfolioSnapshot &snap,
+                                 kalshi::RiskManager &risk_mgr,
+                                 std::shared_ptr<spdlog::logger> &log) {
+  const bool was_halted = risk_mgr.is_halted();
+  risk_mgr.update_portfolio(snap);
+  if (risk_mgr.is_halted() && !was_halted) {
+    log->critical(
+        "portfolio risk halt — constraints={} total_pnl_dollars={:.2f} "
+        "capital_at_risk_dollars={:.2f}",
+        risk_mgr.active_constraints(), snap.total_pnl_cents() / kCentsPerDollar,
+        snap.total_notional_cents / kCentsPerDollar);
+  }
+}
+
 // Logs the whole-book aggregate: total realized + unrealized PnL, total capital
 // at risk, and the largest event exposures (concentration view).
-static void log_portfolio_snapshot(const std::vector<std::string> &tickers,
-                                   const kalshi::IOrderManager &order_mgr,
-                                   const ObMap &ob_map,
+static void log_portfolio_snapshot(const kalshi::PortfolioSnapshot &snap,
                                    std::shared_ptr<spdlog::logger> &log) {
-  const kalshi::Portfolio portfolio{order_mgr};
-  const auto snap = portfolio.snapshot(tickers, build_marks(tickers, ob_map));
-
   log->info("portfolio realized_dollars={:.2f} unrealized_dollars={:.2f} "
             "total_pnl_dollars={:.2f} capital_at_risk_dollars={:.2f} events={}",
             snap.total_realized_cents / kCentsPerDollar,
@@ -214,6 +236,36 @@ static void log_portfolio_snapshot(const std::vector<std::string> &tickers,
               event.event_ticker, event.market_count,
               event.total_pnl_cents() / kCentsPerDollar,
               event.notional_cost_cents / kCentsPerDollar);
+  }
+}
+
+// Periodic portfolio work, driven off the poll counter. The kill-switch runs
+// more often than the 60s status log so the global halt reacts quickly; the
+// snapshot is built once and reused when both intervals coincide
+// (kPositionLogInterval is a multiple of kPortfolioRiskInterval).
+static void
+run_portfolio_tasks(int poll_count, const kalshi::AppConfig &app_config,
+                    const kalshi::IOrderManager &order_mgr, const ObMap &ob_map,
+                    kalshi::RiskManager &risk_mgr, const PnlMap &prior_pnl,
+                    std::shared_ptr<spdlog::logger> &log) {
+  constexpr int kPositionLogInterval = 600;   // 600 × 100ms = 60s
+  constexpr int kPortfolioRiskInterval = 100; // 100 × 100ms = 10s
+
+  const bool do_log = poll_count % kPositionLogInterval == 0;
+  const bool do_risk = poll_count % kPortfolioRiskInterval == 0;
+  if (!do_log && !do_risk) {
+    return;
+  }
+
+  const auto snap =
+      make_portfolio_snapshot(app_config.target_tickers, order_mgr, ob_map);
+  if (do_risk) {
+    check_portfolio_risk(snap, risk_mgr, log);
+  }
+  if (do_log) {
+    log_status_snapshot(app_config.target_tickers, order_mgr, risk_mgr,
+                        prior_pnl, log);
+    log_portfolio_snapshot(snap, log);
   }
 }
 
@@ -506,7 +558,6 @@ int main(int argc, char *argv[]) {
     std::thread ws_thread([&ws_client]() { ws_client.run(); });
 
     constexpr auto kPollInterval = std::chrono::milliseconds{100};
-    constexpr int kPositionLogInterval = 600;    // 600 × 100ms = 60s
     constexpr int kStalenessCheckInterval = 300; // 300 × 100ms = 30s
     constexpr int kReconcileInterval = 1200;     // 1200 × 100ms = 120s
 
@@ -520,12 +571,8 @@ int main(int argc, char *argv[]) {
       if (poll_count % kStalenessCheckInterval == 0) {
         check_ws_staleness(ws_client, risk_mgr, log, stale_logged);
       }
-      if (poll_count % kPositionLogInterval == 0) {
-        log_status_snapshot(app_config.target_tickers, order_mgr, risk_mgr,
-                            prior_pnl, log);
-        log_portfolio_snapshot(app_config.target_tickers, order_mgr, ob_map,
-                               log);
-      }
+      run_portfolio_tasks(poll_count, app_config, order_mgr, ob_map, risk_mgr,
+                          prior_pnl, log);
       // Reconcile against the exchange's authoritative positions. Skipped in
       // paper mode (no real exchange positions to compare against).
       if (paper_ptr == nullptr && poll_count % kReconcileInterval == 0) {
