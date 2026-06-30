@@ -168,6 +168,36 @@ TEST_F(TradingSessionTest, OrderbooksAccessorReflectsSnapshot) {
   EXPECT_TRUE(books.at(kTicker).best_ask().has_value());
 }
 
+TEST_F(TradingSessionTest, CancelPreexistingOrdersCancelsTrackedTickerOrphans) {
+  // Orphans from a prior run: one on the ticker we are about to quote, one on a
+  // market we don't track.
+  kalshi::Order tracked_orphan;
+  tracked_orphan.id = kOrderId1;
+  tracked_orphan.market_ticker = kTicker;
+  kalshi::Order untracked_orphan;
+  untracked_orphan.id = kOrderId2;
+  untracked_orphan.market_ticker = "KXOTHER-MARKET";
+
+  session_.cancel_preexisting_orders({tracked_orphan, untracked_orphan});
+
+  // Exactly one cancel: the orphan on our tracked ticker. The untracked-ticker
+  // order is left alone (it may belong to another strategy or instance).
+  EXPECT_EQ(count_method(transport_, "DELETE"), 1);
+  bool cancelled_tracked = false;
+  for (const auto &request : transport_.recorded_requests()) {
+    if (request.method == "DELETE" &&
+        request.url.find(kOrderId1) != std::string::npos) {
+      cancelled_tracked = true;
+    }
+  }
+  EXPECT_TRUE(cancelled_tracked);
+}
+
+TEST_F(TradingSessionTest, CancelPreexistingOrdersNoOpWhenNoneResting) {
+  session_.cancel_preexisting_orders({});
+  EXPECT_EQ(count_method(transport_, "DELETE"), 0);
+}
+
 TEST_F(TradingSessionTest, FillUpdatesPositionAndNotifiesPnlListener) {
   bool notified = false;
   session_.set_pnl_listener(

@@ -52,6 +52,13 @@ public:
   // throws — safe to call from shutdown / error paths.
   void cancel_all_quotes();
 
+  // Cancel resting orders the exchange reports on our tracked tickers — orphans
+  // from a prior run that we hold no local state for. Call once at startup,
+  // before quoting, so we begin flat and never quote alongside a stale order
+  // that could fill against us or self-cross. Orders on untracked tickers are
+  // left alone (logged). Best-effort; never throws.
+  void cancel_preexisting_orders(const std::vector<Order> &resting_orders);
+
   // Safety net: if risk is halted, cancel all resting quotes so a halt can't
   // leave orders on the book to fill adversely. Idempotent and cheap once flat;
   // call it once per loop iteration.

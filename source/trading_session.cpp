@@ -113,6 +113,41 @@ void TradingSession::enforce_quote_safety() {
   }
 }
 
+void TradingSession::cancel_preexisting_orders(
+    const std::vector<Order> &resting_orders) {
+  int cancelled = 0;
+  int left_untracked = 0;
+  for (const auto &order : resting_orders) {
+    const bool tracked = std::find(tickers_.begin(), tickers_.end(),
+                                   order.market_ticker) != tickers_.end();
+    if (!tracked) {
+      // Not one of our markets — could belong to another strategy or instance.
+      // Surface it loudly rather than cancelling someone else's order.
+      get_logger()->warn(
+          "startup: resting order on untracked ticker={} id={} left in place",
+          order.market_ticker, order.id);
+      ++left_untracked;
+      continue;
+    }
+    try {
+      get_logger()->warn(
+          "startup: cancelling pre-existing order ticker={} id={}",
+          order.market_ticker, order.id);
+      order_mgr_.cancel(order.id);
+      ++cancelled;
+    } catch (const std::exception &ex) {
+      get_logger()->error("startup: failed to cancel orphan id={}: {}",
+                          order.id, ex.what());
+    }
+  }
+  if (cancelled > 0 || left_untracked > 0) {
+    get_logger()->info(
+        "startup: cancelled {} orphan order(s) on tracked tickers; left {} on "
+        "untracked tickers",
+        cancelled, left_untracked);
+  }
+}
+
 void TradingSession::seed_orderbook(const Orderbook &snapshot) {
   get_logger()->info("seeding orderbook ticker={}", snapshot.ticker);
   auto &book = ob_map_[snapshot.ticker];

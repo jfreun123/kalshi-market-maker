@@ -41,7 +41,15 @@
 
 ### P1 — Market-making quality
 
-- [ ] **3. Cancel orphaned orders on startup (and guarantee cancel-on-exit).**
+- [x] **3. Cancel orphaned orders on startup (and guarantee cancel-on-exit).**
+  *(Done: `TradingSession::cancel_preexisting_orders` cancels resting orders the
+  exchange reports on our tracked tickers (orphans from a prior run), called at
+  startup before any quoting via `rest.get_open_orders()` (live only). Orders on
+  untracked tickers are logged, not cancelled. Combined with the graceful-exit
+  ScopeGuard flatten + crash/terminate flatten (P0 #2), this is the full
+  cancel-on-exit story: even an uncatchable SIGKILL is recovered on the next
+  launch. Possible follow-up: flatten on exit via `get_open_orders()` too, so a
+  mid-run local-state drift is caught without waiting for restart.)*
   The bot only knows about orders it placed in the *current* process and never
   cancels pre-existing resting orders at startup. Across restarts, orders pile
   up on the exchange that the running bot is unaware of — observed live on
