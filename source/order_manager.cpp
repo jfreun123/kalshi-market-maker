@@ -172,7 +172,8 @@ double OrderManager::position_cost(std::string_view ticker) const {
   return cost;
 }
 
-ExposureDecomposition OrderManager::exposure(std::string_view ticker) const {
+ExposureDecomposition
+OrderManager::exposure_decomposition(std::string_view ticker) const {
   const std::string key{ticker};
 
   // Sum the open inventory on one side: returns {contracts, total cost cents}.

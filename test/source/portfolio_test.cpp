@@ -45,7 +45,7 @@ struct FakeOrderManager : public kalshi::IOrderManager {
     return iter == cost.end() ? 0.0 : iter->second;
   }
   [[nodiscard]] kalshi::ExposureDecomposition
-  exposure(std::string_view /*ticker*/) const override {
+  exposure_decomposition(std::string_view /*ticker*/) const override {
     return {}; // not exercised by the Portfolio aggregation tests
   }
   [[nodiscard]] const std::unordered_map<std::string, kalshi::Order> &

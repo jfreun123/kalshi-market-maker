@@ -6,6 +6,10 @@
 
 namespace kalshi {
 
+// Floor for the ratio denominator: when the lighter side saw zero flow, divide
+// by one contract instead so the ratio stays finite rather than dividing by 0.
+constexpr std::int64_t kMinRatioDenominator{1};
+
 FlowImbalanceGuard::FlowImbalanceGuard(FlowImbalanceConfig config)
     : config_{config} {}
 
@@ -56,7 +60,7 @@ double FlowImbalanceGuard::imbalance_ratio(std::string_view ticker,
     return 1.0; // no flow → balanced
   }
   return static_cast<double>(high) /
-         static_cast<double>(std::max(low, INT64_C(1)));
+         static_cast<double>(std::max(low, kMinRatioDenominator));
 }
 
 bool FlowImbalanceGuard::is_imbalanced(std::string_view ticker,
@@ -68,7 +72,7 @@ bool FlowImbalanceGuard::is_imbalanced(std::string_view ticker,
   const std::int64_t high = std::max(yes_volume, no_volume);
   const std::int64_t low = std::min(yes_volume, no_volume);
   const double ratio = static_cast<double>(high) /
-                       static_cast<double>(std::max(low, INT64_C(1)));
+                       static_cast<double>(std::max(low, kMinRatioDenominator));
   return ratio > config_.imbalance_ratio_threshold;
 }
 

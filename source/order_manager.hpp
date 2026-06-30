@@ -57,7 +57,7 @@ public:
   // Splits the position into locked spread capture and directional
   // E_win/E_loss.
   [[nodiscard]] virtual ExposureDecomposition
-  exposure(std::string_view ticker) const = 0;
+  exposure_decomposition(std::string_view ticker) const = 0;
 
   [[nodiscard]] virtual const std::unordered_map<std::string, Order> &
   open_orders() const = 0;
@@ -91,7 +91,7 @@ public:
                                       int yes_mid_cents) const override;
   [[nodiscard]] double position_cost(std::string_view ticker) const override;
   [[nodiscard]] ExposureDecomposition
-  exposure(std::string_view ticker) const override;
+  exposure_decomposition(std::string_view ticker) const override;
   [[nodiscard]] const std::unordered_map<std::string, Order> &
   open_orders() const override;
 

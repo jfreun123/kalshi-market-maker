@@ -489,7 +489,7 @@ TEST_F(OrderManagerTest, ExposureZeroWithNoPosition) {
   auto rest_client = make_rest_client(std::make_unique<FakeTransport>());
   kalshi::OrderManager mgr{rest_client};
 
-  const auto exposure = mgr.exposure(kTicker);
+  const auto exposure = mgr.exposure_decomposition(kTicker);
 
   EXPECT_EQ(exposure.net_inventory, 0);
   EXPECT_DOUBLE_EQ(exposure.spread_capture_cents, 0.0);
@@ -503,7 +503,7 @@ TEST_F(OrderManagerTest, ExposureOnNetLongYes) {
   mgr.record_fill(make_fill(kOrderId, kTicker, kalshi::Side::Yes, kYesFillPrice,
                             kFillQty, kTs1Ns));
 
-  const auto exposure = mgr.exposure(kTicker);
+  const auto exposure = mgr.exposure_decomposition(kTicker);
   const double cost = static_cast<double>(kYesFillPrice) * kFillQty; // 260
 
   EXPECT_EQ(exposure.net_inventory, kFillQty);
@@ -520,7 +520,7 @@ TEST_F(OrderManagerTest, ExposureOnNetLongNo) {
   mgr.record_fill(make_fill(kOrderId, kTicker, kalshi::Side::No, kNoFillPrice,
                             kFillQty, kTs1Ns));
 
-  const auto exposure = mgr.exposure(kTicker);
+  const auto exposure = mgr.exposure_decomposition(kTicker);
   const double cost = static_cast<double>(kNoFillPrice) * kFillQty; // 220
 
   EXPECT_EQ(exposure.net_inventory, -kFillQty);
@@ -539,7 +539,7 @@ TEST_F(OrderManagerTest, ExposureSplitsMatchedSpreadFromDirectional) {
   mgr.record_fill(make_fill(kOrderId2, kTicker, kalshi::Side::No, kNoFillPrice,
                             kNoMatchQty, kTs2Ns));
 
-  const auto exposure = mgr.exposure(kTicker);
+  const auto exposure = mgr.exposure_decomposition(kTicker);
   const double spread =
       static_cast<double>(kContractPayout - kNoFillPrice - kYesFillPrice) *
       kNoMatchQty;                              // (100-44-52)*3 = 12

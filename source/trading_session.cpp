@@ -164,7 +164,7 @@ void TradingSession::log_status() const {
               risk_mgr_.active_constraints());
 
     // E_win decomposition: locked spread capture vs. the directional bet.
-    const auto exposure = order_mgr_.exposure(ticker);
+    const auto exposure = order_mgr_.exposure_decomposition(ticker);
     log->info(
         "exposure ticker={} net_inventory={} spread_capture_dollars={:.2f} "
         "e_win_dollars={:.2f} e_loss_dollars={:.2f}",
