@@ -61,10 +61,16 @@
   local state), and make the exit/halt flatten path reliable across SIGINT/kill.
   High priority before any live trading.
 
-- [ ] **4. D1 — non-crossing quote clamp.** Clamp quotes to stay strictly
-  passive vs. the observed BBO (≥1c behind) so latency on fast books can't turn
-  a quote into a `post only cross`. The *systematic* crossing was the orderbook
-  sort bug (now fixed); this is the residual. Detail in *Demo Run Findings*.
+- [x] **4. D1 — non-crossing quote clamp.** *(Done: `Quoter::passive_bid`/
+  `passive_ask` pull each quote ≥1c behind the observed BBO before placing —
+  bid below the market ask, ask above the market bid — and skip a side when the
+  touch is at the extreme (no passive room). Wired into `Quoter::update`; the
+  existing self-cross guard against our own resting quotes stays. Surfaced that
+  extreme inventory skew used to price a crossing ask — the clamp now keeps the
+  skew passive instead.)* Clamp quotes to stay strictly passive vs. the observed
+  BBO (≥1c behind) so latency on fast books can't turn a quote into a `post only
+  cross`. The *systematic* crossing was the orderbook sort bug (now fixed); this
+  is the residual.
 
 - [ ] **5. D2 — align scanner price band with the risk price gate.** The scanner
   admits `[min_price, max_price]` but the quoter only trades `[10,90]`, so the

@@ -41,6 +41,24 @@ std::pair<int, int> Quoter::compute_quotes(double fv_cents, int half_spread,
           std::clamp(ask_val, kAskMinCents, kAskMaxCents)};
 }
 
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
+std::optional<int> Quoter::passive_bid(int desired_bid, int market_ask_cents) {
+  const int max_passive = market_ask_cents - 1; // ≥1c behind the market ask
+  if (max_passive < kBidMinCents) {
+    return std::nullopt; // ask at the floor — no room to bid passively
+  }
+  return std::min(desired_bid, max_passive);
+}
+
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
+std::optional<int> Quoter::passive_ask(int desired_ask, int market_bid_cents) {
+  const int min_passive = market_bid_cents + 1; // ≥1c above the market bid
+  if (min_passive > kAskMaxCents) {
+    return std::nullopt; // bid at the ceiling — no room to ask passively
+  }
+  return std::max(desired_ask, min_passive);
+}
+
 void Quoter::refresh_bid(const std::string &ticker, int desired_bid) {
   auto &live = live_quotes_[ticker];
   if (live.bid_order_id.empty()) {
@@ -115,7 +133,9 @@ void Quoter::refresh_ask(const std::string &ticker, int desired_ask) {
 }
 
 void Quoter::update(std::string_view ticker, const LocalOrderbook &book) {
-  if (!book.best_bid().has_value() || !book.best_ask().has_value()) {
+  const std::optional<Level> best_bid = book.best_bid();
+  const std::optional<Level> best_ask = book.best_ask();
+  if (!best_bid.has_value() || !best_ask.has_value()) {
     return;
   }
 
@@ -151,14 +171,28 @@ void Quoter::update(std::string_view ticker, const LocalOrderbook &book) {
       static_cast<double>(order_mgr_.net_position(ticker_str)) *
       config_.skew_per_contract_cents;
 
-  const auto [desired_bid, desired_ask] =
+  const auto [raw_bid, raw_ask] =
       compute_quotes(fair_val, half_spread, inventory_skew);
 
-  get_logger()->debug("reprice ticker={} mid={:.1f} fv={:.2f} bid={} ask={}",
-                      ticker, mid, fair_val, desired_bid, desired_ask);
+  // Stay strictly passive vs. the observed BBO: never submit a price at or
+  // through the touch.
+  const int market_bid = best_bid->price_cents;
+  const int market_ask = best_ask->price_cents;
+  const std::optional<int> desired_bid = passive_bid(raw_bid, market_ask);
+  const std::optional<int> desired_ask = passive_ask(raw_ask, market_bid);
 
-  refresh_bid(ticker_str, desired_bid);
-  refresh_ask(ticker_str, desired_ask);
+  get_logger()->debug(
+      "reprice ticker={} mid={:.1f} fv={:.2f} raw_bid={} raw_ask={} bid={} "
+      "ask={}",
+      ticker, mid, fair_val, raw_bid, raw_ask, desired_bid.value_or(-1),
+      desired_ask.value_or(-1));
+
+  if (desired_bid.has_value()) {
+    refresh_bid(ticker_str, *desired_bid);
+  }
+  if (desired_ask.has_value()) {
+    refresh_ask(ticker_str, *desired_ask);
+  }
 }
 
 void Quoter::reset_quotes() { live_quotes_.clear(); }
