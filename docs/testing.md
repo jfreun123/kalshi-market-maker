@@ -3,8 +3,9 @@
 ## Layers
 
 ```
-Manual / Live Testing        ← prod/demo account
-Integration Tests            ← demo API, real network (KALSHI_INTEGRATION_TESTS=ON)
+Manual / Live Testing        ← prod/demo account; `--capture` records a real session
+Replay Integration Tests     ← captured/synthetic session → full TradingSession stack
+                               (hermetic, KALSHI_INTEGRATION_TESTS, default ON)
 Contract / Snapshot Tests    ← recorded real API responses in test/fixtures/
 Unit Tests                   ← fakes, no network (default, run by pre-commit hook)
 Sanitizers (ASAN / TSAN)     ← run on unit + integration tests
@@ -29,26 +30,26 @@ ASAN and TSAN cannot run simultaneously. Run before any significant merge.
 
 ## Contract / Snapshot Tests
 
-Capture real API responses into `test/fixtures/`, then assert our parsers handle them. Catches API schema drift without a live connection.
+Record real API responses into `test/fixtures/`, then assert our parsers handle them. Catches API schema drift without a live connection. The repeatable way to record both WS frames and REST responses is `--capture` (below); a one-off REST body can also be grabbed with `curl`.
+
+## Integration Tests (full-stack replay)
+
+`test/integration/replay_session_test.cpp` replays a captured/synthetic session through the **real production wiring** — `WebSocketClient` parser → `TradingSession` → Quoter / OrderManager (over `PaperTransport`) / RiskManager / Portfolio — and asserts end-to-end invariants (valid BBO, fills applied, quotes placed, risk not spuriously halted, portfolio computable). It is **hermetic** (checked-in fixtures, no network) and **gated** behind `KALSHI_INTEGRATION_TESTS` (default **ON**); a future networked test would get its own off-by-default option.
 
 ```bash
-curl -s -H "..." https://demo-api.kalshi.co/trade-api/v2/markets/TICKER/orderbook \
-  > test/fixtures/orderbook_TICKER.json
+cmake --preset=dev && cmake --build --preset=dev
+ctest --preset=dev -R ReplaySession
+# disable: cmake --preset=dev -DKALSHI_INTEGRATION_TESTS=OFF
 ```
 
-## Integration Tests
+This is what validates real demo field shapes: a parser/schema mismatch surfaces here as a broken orderbook or a missing fill. It already caught the broken paper-mode V2 order schema.
 
-Gated behind `-DKALSHI_INTEGRATION_TESTS=ON`. Hit the Kalshi demo environment — same API contract as prod, fake money.
+## Capturing a real session for replay
+
+`--capture <dir>` connects to the configured environment and records the session **without placing orders**: raw inbound WS frames → `<dir>/session.jsonl` (one per line, replay-compatible), and seed REST responses → `<dir>/rest.jsonl`.
 
 ```bash
-cmake --preset=dev -DKALSHI_INTEGRATION_TESTS=ON \
-  -DKALSHI_API_KEY=$KALSHI_API_KEY \
-  -DKALSHI_PRIVATE_KEY_PATH=$KALSHI_PRIVATE_KEY_PATH \
-  -DKALSHI_BASE_URL=https://demo-api.kalshi.co/trade-api/v2
-cmake --build --preset=dev
-ctest --preset=dev -R Integration
+./build/source/kalshi_mm --capture capture/demo-run config-demo.json   # Ctrl-C to stop
 ```
 
-## Replay Testing
-
-Record WebSocket deltas to a `.jsonl` file (see `test/fixtures/session_synthetic.jsonl` for format), then drive the same components offline via `FakeWebSocket::enqueue_message`. Used to tune `QuoterConfig` parameters without risking capital.
+Drop the resulting `session.jsonl` into `test/fixtures/` and drive it through `FakeWebSocket::enqueue_message` in a replay test. Note the existing `ReplaySessionTest` asserts are tied to the synthetic fixture (ticker `REPLAY-TICK`), so a real capture needs its own assertions. Also useful for tuning `QuoterConfig` offline without risking capital.

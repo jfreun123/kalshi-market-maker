@@ -1,9 +1,12 @@
 #include "paper_transport.hpp"
 
+#include "types.hpp"
+
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <string>
 
 namespace kalshi {
@@ -13,6 +16,18 @@ namespace {
 constexpr int kHttpOk = 200;
 constexpr int kHttpCreated = 201;
 constexpr int kOrdersPathSuffix = 7; // length of "/orders"
+constexpr double kCentsPerDollar = 100.0;
+constexpr long long kPaperOrderTsMs = 1735689600000LL; // 2025-01-01T00:00:00Z
+
+// Parses the V2 fixed-point wire strings RestClient sends back to integers:
+// "0.5200" -> 52 cents, "10.00" -> 10 contracts.
+int parse_dollars_to_cents(const std::string &dollars) {
+  return static_cast<int>(std::lround(std::stod(dollars) * kCentsPerDollar));
+}
+
+int parse_count(const std::string &count) {
+  return static_cast<int>(std::lround(std::stod(count)));
+}
 
 std::string order_to_json(const Order &order) {
   nlohmann::json json_order;
@@ -80,19 +95,25 @@ HttpResponse
 PaperTransport::post(std::string_view /*url*/,
                      const std::map<std::string, std::string> & /*headers*/,
                      std::string_view body) {
+  // Parse the V2 create-order body that RestClient::place_order emits: side is
+  // "bid"/"ask" in the YES dimension, price/count are fixed-point strings, and
+  // time_in_force (not an order "type") distinguishes limit from IOC.
   const nlohmann::json request_json = nlohmann::json::parse(body);
 
   const std::string ticker = request_json.at("ticker").get<std::string>();
-  const std::string side_str = request_json.at("side").get<std::string>();
-  const std::string type_str = request_json.at("type").get<std::string>();
-  const int quantity = request_json.at("count").get<int>();
+  const std::string v2_side = request_json.at("side").get<std::string>();
+  const int yes_price_cents =
+      parse_dollars_to_cents(request_json.at("price").get<std::string>());
+  const int quantity = parse_count(request_json.at("count").get<std::string>());
+  const std::string tif =
+      request_json.value("time_in_force", std::string{"good_till_canceled"});
 
-  const Side side = (side_str == "yes") ? Side::Yes : Side::No;
-  const int price_cents = (side == Side::Yes)
-                              ? request_json.at("yes_price").get<int>()
-                              : request_json.at("no_price").get<int>();
+  const Side side = (v2_side == "bid") ? Side::Yes : Side::No;
+  // Store the price in the order's own side dimension (NO = 100 - YES price).
+  const int price_cents =
+      (side == Side::Yes) ? yes_price_cents : complement_price(yes_price_cents);
   const OrderType order_type =
-      (type_str == "limit") ? OrderType::Limit : OrderType::Market;
+      (tif == "immediate_or_cancel") ? OrderType::Market : OrderType::Limit;
 
   Order order;
   order.id = next_order_id();
@@ -107,8 +128,12 @@ PaperTransport::post(std::string_view /*url*/,
 
   open_orders_.push_back(order);
 
-  const std::string response_body = R"({"order":)" + order_to_json(order) + "}";
-  return {kHttpCreated, response_body};
+  // V2 minimal response; RestClient reconstructs the Order from input params.
+  nlohmann::json response_json;
+  response_json["order_id"] = order.id;
+  response_json["fill_count"] = "0.00";
+  response_json["ts_ms"] = kPaperOrderTsMs;
+  return {kHttpCreated, response_json.dump()};
 }
 
 HttpResponse PaperTransport::delete_(

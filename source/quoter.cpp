@@ -1,5 +1,6 @@
 #include "quoter.hpp"
 
+#include "flow_imbalance.hpp"
 #include "logger.hpp"
 
 #include <algorithm>
@@ -16,16 +17,18 @@ constexpr int kBidMaxCents = 98;
 constexpr int kAskMinCents = 2;
 constexpr int kAskMaxCents = 99;
 constexpr int kHalfSpreadMin = 1;
+constexpr double kContractMaxCents = 100.0;
 
 Quoter::Quoter(QuoterConfig config, IOrderManager &order_mgr,
-               RiskManager &risk_mgr)
+               RiskManager &risk_mgr, const FlowImbalanceGuard *flow_guard)
     : Quoter(config, FairValueEngine{std::make_unique<HeuristicModel>()},
-             order_mgr, risk_mgr) {}
+             order_mgr, risk_mgr, flow_guard) {}
 
 Quoter::Quoter(QuoterConfig config, FairValueEngine fv_engine,
-               IOrderManager &order_mgr, RiskManager &risk_mgr)
+               IOrderManager &order_mgr, RiskManager &risk_mgr,
+               const FlowImbalanceGuard *flow_guard)
     : config_{config}, fv_engine_{std::move(fv_engine)}, order_mgr_{order_mgr},
-      risk_mgr_{risk_mgr} {}
+      risk_mgr_{risk_mgr}, flow_guard_{flow_guard} {}
 
 std::pair<int, int> Quoter::compute_quotes(double fv_cents, int half_spread,
                                            double inventory_skew_cents) {
@@ -120,8 +123,25 @@ void Quoter::update(std::string_view ticker, const LocalOrderbook &book) {
   const double fair_val =
       fv_engine_.estimate(FairValueInput{mid, kDefaultTimeToCloseHours, 0, {}});
 
-  const int half_spread =
-      std::max(kHalfSpreadMin, config_.target_spread_cents / 2);
+  int target_spread = config_.target_spread_cents;
+  if (flow_guard_ != nullptr && flow_guard_->is_imbalanced(ticker_str)) {
+    target_spread += config_.imbalance_spread_cents;
+    get_logger()->debug(
+        "flow imbalanced ticker={} ratio={:.2f} — widening spread to {}c",
+        ticker, flow_guard_->imbalance_ratio(ticker_str), target_spread);
+  }
+  // Apply the spread floor: never quote tighter than min_spread_cents.
+  const int base_half_spread = std::max(
+      {kHalfSpreadMin, target_spread / 2, config_.min_spread_cents / 2});
+  // Maker fee: widen so the net-of-fee edge is preserved. Kalshi's per-contract
+  // fee is γ·P·(1−P); estimate P from the fair value.
+  int fee_cents = 0;
+  if (config_.maker_fee_rate > 0.0) {
+    const double prob = fair_val / kContractMaxCents;
+    fee_cents = static_cast<int>(std::round(config_.maker_fee_rate * prob *
+                                            (1.0 - prob) * kContractMaxCents));
+  }
+  const int half_spread = base_half_spread + fee_cents;
   const double inventory_skew =
       static_cast<double>(order_mgr_.net_position(ticker_str)) *
       config_.skew_per_contract_cents;

@@ -33,6 +33,10 @@ kalshi_add_test(logger_test source/logger_test.cpp)
 kalshi_add_test(ticker_scanner_test source/ticker_scanner_test.cpp)
 kalshi_add_test(scan_output_test source/scan_output_test.cpp)
 kalshi_add_test(portfolio_test source/portfolio_test.cpp)
+kalshi_add_test(trading_session_test source/trading_session_test.cpp)
+kalshi_add_test(capture_test source/capture_test.cpp)
+kalshi_add_test(flow_imbalance_test source/flow_imbalance_test.cpp)
+kalshi_add_test(view_based_model_test source/view_based_model_test.cpp)
 
 # ---- Replay tests ----
 
@@ -48,6 +52,28 @@ target_compile_definitions(replay_test PRIVATE
 )
 set_target_properties(replay_test PROPERTIES CXX_CLANG_TIDY "clang-tidy")
 gtest_discover_tests(replay_test)
+
+# ---- Integration tests ----
+#
+# Replay full captured/synthetic exchange sessions through the production
+# TradingSession stack. Hermetic (checked-in fixtures, no network), so on by
+# default; networked capture-validation tests would live behind a separate
+# off-by-default option.
+option(KALSHI_INTEGRATION_TESTS "Build full-stack replay integration tests" ON)
+if(KALSHI_INTEGRATION_TESTS)
+    add_executable(replay_session_test integration/replay_session_test.cpp)
+    target_link_libraries(replay_session_test PRIVATE kalshi_lib GTest::gtest_main OpenSSL::Crypto)
+    target_include_directories(replay_session_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/source"
+        "${PROJECT_SOURCE_DIR}/source"
+    )
+    target_compile_features(replay_session_test PRIVATE cxx_std_23)
+    target_compile_definitions(replay_session_test PRIVATE
+        KALSHI_FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
+    )
+    set_target_properties(replay_session_test PROPERTIES CXX_CLANG_TIDY "clang-tidy")
+    gtest_discover_tests(replay_session_test)
+endif()
 
 # ---- Fuzz targets (KALSHI_FUZZ_TESTS=ON, fuzz preset) ----
 

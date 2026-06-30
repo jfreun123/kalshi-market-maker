@@ -9,21 +9,32 @@ graph TD
         WS["WebSocket Feed"]
     end
     subgraph Core
-        AUTH["Auth (RSA-SHA256)"]
+        AUTH["Auth (RSA-PSS-SHA256)"]
         HTTP["RestClient"]
         WSCONN["WebSocketClient"]
+        SESS["TradingSession (engine)"]
         OB["LocalOrderbook"]
         OM["OrderManager"]
-        RM["RiskManager"]
+        RM["RiskManager + global kill-switch"]
         FV["FairValueEngine"]
         QE["Quoter"]
+        PF["Portfolio (read-model)"]
     end
     REST <-->|signed| AUTH --> HTTP
-    WS -->|snapshot/delta/fill| WSCONN --> OB
-    OB --> FV --> QE
-    RM --> QE --> OM --> HTTP
+    WS -->|snapshot/delta/fill| WSCONN --> SESS
+    SESS -->|on_delta| OB --> FV --> QE
+    SESS -->|on_fill| OM --> HTTP
+    RM --> QE --> OM
     OM --> RM
+    OM --> PF --> RM
 ```
+
+`main.cpp` does process/IO only (config, logger, signals, transports, WS thread,
+PnL persistence). `TradingSession` (`source/trading_session.hpp/.cpp`) owns the
+domain reactions (snapshot/delta/fill, portfolio kill-switch, status logging) so
+the same wiring runs in production, unit tests, and session replay. Capture (raw
+WS frames + REST responses) is teed by the `CapturingWebSocket` /
+`CapturingHttpTransport` decorators (`source/capture.hpp/.cpp`) via `--capture`.
 
 ---
 
@@ -31,14 +42,25 @@ graph TD
 
 **BLOCKER-1 (resolved):** `IxWebSocket` implemented via FetchContent `machinezone/IXWebSocket`. End-to-end connection to live UAT not yet verified.
 
-**BLOCKER-2 (open):** REST fields not verified against live UAT (`https://demo-api.kalshi.co/trade-api/v2`). Fields most likely to drift: price field names, `count` vs `quantity`, status strings, timestamp format.
+**BLOCKER-2 (open — narrowed 2026-06-29):** A live `--capture` run against demo
+showed network + clock are fine and **public** REST (`GET /orderbook`) returns
+200, but every **authenticated** call (`GET /portfolio/positions`, the WS
+handshake) returns `401 INVALID_PARAMETER`. Root cause: the `api_key` (access key
+ID) in `config-demo.json` is still an unfilled placeholder (`<…>`, not a UUID) —
+the private key `.pem` is real, the access key ID is missing. **Action: paste the
+real demo access key ID into config, then re-run `--capture`.** Secondary suspect
+if 401 persists after that: RSA-PSS salt length in `auth.cpp` uses
+`RSA_PSS_SALTLEN_MAX`; Kalshi's SDK uses digest length (32) — verify live once a
+real key exists. Field-shape drift (price names, `count` vs `quantity`, status
+strings, timestamps) can only be confirmed once authenticated traffic flows.
 
 **Pre-UAT checklist:**
 - [x] `IxWebSocket` implemented and library fetched
-- [ ] Demo account + RSA key pair generated
-- [ ] `config.json` created from `config.example.json` with demo base URL
-- [ ] Raw REST request/response bodies verified against UAT
-- [ ] Paper mode (`--paper`) runs without errors
+- [x] Demo RSA private key present (`/home/jfreun1/kalshi-demo-private-key.pem`)
+- [ ] Real demo **access key ID** filled into `config-demo.json` (`api_key`) — currently a placeholder
+- [x] `config-demo.json` points at demo base/ws URLs
+- [~] Raw REST/WS bodies captured via `--capture` (public REST verified 200; authenticated blocked on the key above)
+- [x] Paper mode (`--paper`) runs without errors (fixed 2026-06-29 — was silently placing zero orders against the V2 API)
 
 ---
 
@@ -67,11 +89,92 @@ graph TD
 | 19 | Paper Trading Mode | `--paper` flag |
 | 20 | Documentation | `docs/`, `docs/adr/` |
 
-216 tests passing. Build clean.
+303 tests passing. Build clean.
+
+### Also shipped (post-phase-20, on top of the table above)
+
+| Area | What | Key files |
+|---|---|---|
+| Ticker Scanner (Phase 31) | ranks markets, writes ready-to-run trade config | `ticker_scanner.*`, `scan_output.*` |
+| Portfolio read-model | total realized + unrealized PnL, per-event risk | `portfolio.*` |
+| Global kill-switch | `kOverExposure` (capital cap) + `kPortfolioLoss` (realized+unrealized loss floor) + `kDrawdown` (give-back from PnL high-water mark) halt **all** quoting; sampled ~1s | `risk_manager.*`, `RiskManager::update_portfolio` |
+| Reconciliation | local vs exchange positions; `kModelDiverge` halt; `--reconcile` | `portfolio.cpp::reconcile` |
+| TradingSession engine | domain reactions extracted from `main.cpp` (testable, replayable) | `trading_session.*` |
+| Replay integration test | full-stack replay of a session through the real wiring (gated `KALSHI_INTEGRATION_TESTS`, default ON) | `test/integration/replay_session_test.cpp` |
+| Session capture | `--capture <dir>` tees raw WS frames + REST responses for replay/UAT | `capture.*` |
+| Paper-mode V2 fix | `PaperTransport` now speaks the V2 order schema (was silently broken) | `paper_transport.cpp` |
 
 ---
 
-## Next Steps
+## Code Review Follow-ups (PR #1)
+
+Review of the MOBILE branch (PR #1) surfaced design feedback. Small items were
+fixed in the branch; the larger structural items below are tracked here. Most
+are cross-cutting refactors that should each land as their own TDD phase.
+
+**Addressed in-branch (PR #1):**
+- `flow_imbalance.cpp` — replaced bare `INT64_C(1)` with a named
+  `kMinRatioDenominator` constant that documents the divide-by-zero floor.
+- `OrderManager::exposure(...)` renamed to `exposure_decomposition(...)` (the
+  old name read as a scalar; it returns an `ExposureDecomposition`). Interface,
+  impl, fake, and tests updated.
+
+**Tracked refactors (not yet done):**
+
+- [ ] **R1 — Split `source/` into domain subdirectories.** Cluster files into
+  `Calculations/` (pricing_model, flow_imbalance, future signals), `Quoter/`
+  (quoter, trading_session), `PortfolioManagement/` (portfolio, risk_manager,
+  order_manager), `Networking/` (rest_client, websocket_client, transports),
+  and `Common/` (types, config, auth). Update CMake target sources + include
+  paths; keep `kalshi::` namespace flat. Big mechanical move — do as one commit
+  with no behavior change so the diff is reviewable.
+
+- [ ] **R2 — Break up `main.cpp`.** It has grown too large. Extract
+  `run_capture_mode` into its own translation unit (`capture_mode.{hpp,cpp}`),
+  and pull the live-trading wiring into a small composition-root file so
+  `main()` is just argument parsing + dispatch. Avoid unexplained abbreviations
+  while moving code (`ws_*` → `websocket_*`, `rest_*` stays — REST is a proper
+  noun). Each extraction is independently testable.
+
+- [ ] **R3 — Introduce a `Cents` type.** Replace the `double *_cents` fields
+  (e.g. `ExposureDecomposition::e_win_cents`, spread capture, PnL) with a
+  dedicated strong type wrapping an integer representation, plus arithmetic
+  helpers and explicit dollar conversion. This (a) removes float rounding from
+  money math and (b) localizes the representation so a future move to
+  sub-cent precision (e.g. micro-cents) is a one-type change. Migrate call
+  sites incrementally behind the type's API.
+
+- [ ] **R4 — Constraints vs. Guards abstraction.** `FlowImbalanceGuard` is
+  really one of a family of *constraints* the quoter consults (inventory caps,
+  flow imbalance, price-range band, spread floor). Define a clear seam — a
+  `Constraint` concept/interface that, given market + position context, returns
+  a spread/size adjustment or a reject — so new constraints and guards can be
+  registered without editing the `Quoter` constructor signature each time.
+  Clarify the naming distinction between a "guard" (hard veto) and a
+  "constraint" (soft adjustment).
+
+- [ ] **R5 — `TradingSession` → `KalshiSession` + `Session` concept.** The
+  engine is Kalshi-specific (WS schema, fill accounting). Rename to
+  `KalshiSession` and extract a `Session` concept/interface capturing the
+  contract (subscribe, on-fill, quote, halt) so a future `PolymarketSession`
+  is a drop-in. Pairs with the ADR-007 multi-exchange direction. More broadly:
+  lean on C++20 concepts and strong types across the codebase rather than bare
+  interfaces + primitives.
+
+- [ ] **R6 — Comment convention: verbose code, header-top docs only.** The
+  preferred style is self-documenting code with explanatory prose confined to a
+  block at the top of each `.hpp`. Strip inline/implementation comments that
+  restate what readable code already says (offenders flagged:
+  `pricing_model.{hpp,cpp}`, `quoter.hpp`, `order_manager.hpp`); promote any
+  genuinely useful context to the header preamble. Apply opportunistically as
+  files are touched by R1–R5. (Consider codifying this in `CLAUDE.md`.)
+
+- [ ] **R7 — Document Kalshi message types + revisit self-rate-limiting.**
+  Add `docs/kalshi-messages.md` enumerating the WS/REST message shapes we
+  consume (orderbook snapshot/delta, fills, positions, the `PortfolioSnapshot`
+  we synthesize) so terms like "snapshot" are defined in one place. While there,
+  re-document our outbound rate-limiting story (see the existing **Rate
+  Limiting** section) and confirm the live path honors it.
 
 ### Phase 31 — Ticker Scanner
 
@@ -123,83 +226,110 @@ score = 0.35 × log(volume) / log(max_volume)
 
 ---
 
-### Phase 29 — Price-Range Gate
+### Phase 29 — Price-Range Gate — built
 
-Add to `QuoterConfig`:
-```cpp
-int min_quote_price_cents{15};
-int max_quote_price_cents{85};
-```
+Enforced at the single risk chokepoint rather than in the Quoter: `RiskLimits`
+gained `min_quote_price_cents` / `max_quote_price_cents` (default `[10, 90]`,
+configurable under `risk`), and `RiskManager::check_order` now uses its
+previously-unused `price_cents` arg to reject any order whose **own-side**
+contract price falls outside the band. Because `check_order` runs before every
+`place`, both YES and NO quotes are gated by their own contract price — a YES bid
+at 5c and a NO order at 5c (= YES 95c) are both refused. The low bound avoids
+cheap longshots (Bürgi: maker returns on <10c are significantly negative); the
+high bound caps near-settled extremes. Cancels are unaffected (they don't pass
+through `check_order`), so out-of-band resting orders can always be flattened.
 
-In `Quoter::update()`: if `mid < min_quote_price_cents || mid > max_quote_price_cents`, call `cancel_all(ticker)` and return. Prevents quoting deep-longshot contracts where even Makers lose >35%.
-
-**Files:** `source/quoter.hpp/cpp`, `test/source/quoter_test.cpp` (new `PriceRangeGate` tests)
+**Files:** `source/risk_manager.hpp/cpp`, `source/config.cpp`, `config.example.json`,
+tests in `risk_manager_test` + `config_test` (the extreme-inventory `quoter_test`
+uses a `[1, 99]` band so it still verifies clamping math).
 
 ---
 
-### Phase 27 — Spread Floor & E_win Tracking
+### Phase 27 — Spread Floor & E_win Tracking — built
 
-Add `min_spread_cents{3}` to `QuoterConfig`. In `Quoter::compute_quotes()`:
-```cpp
-half_spread = std::max({kHalfSpreadMin, config_.target_spread_cents / 2,
-                        config_.min_spread_cents / 2});
-```
+**Spread floor:** `QuoterConfig.min_spread_cents` (default 3, configurable). In
+`Quoter::update`, `half_spread = max({kHalfSpreadMin, target_spread / 2,
+min_spread_cents / 2})` so the bot never quotes tighter than the floor (it applies
+on top of the imbalance widening from Phase 26). Don't give away the underwriting
+premium.
 
-Add to `OrderManager`:
+**E_win tracking:** `OrderManager::exposure(ticker)` (added to `IOrderManager`)
+returns an `ExposureDecomposition`:
 ```cpp
 struct ExposureDecomposition {
-  double c_a_cents{};   // net cashflow Yes (spread capture)
-  double c_b_cents{};   // net cashflow No  (spread capture)
-  double e_win_cents{}; // directional exposure on winning outcome
+  double spread_capture_cents; // realized profit from matched YES/NO pairs (outcome-independent)
+  int    net_inventory;        // signed open contracts (+YES / -NO)
+  double e_win_cents;          // payoff if the held side WINS  (qty*100 - cost)
+  double e_loss_cents;         // payoff if it LOSES (≤ 0; = -capital at risk)
 };
-[[nodiscard]] ExposureDecomposition exposure(const std::string &ticker) const;
 ```
+Open inventory sits on one side at a time (offsetting fills realize first), so the
+split is exact: locked spread capture vs. the directional E_win bet that, per
+Palumbo, dominates terminal P&L. `TradingSession::log_status` logs it per ticker.
 
-**Files:** `source/config.hpp`, `source/order_manager.hpp/cpp`
+**Files:** `source/quoter.*`, `source/order_manager.*`, `source/config.cpp`,
+`source/trading_session.cpp`, `config.example.json`, tests in `order_manager_test`
+/ `quoter_test` / `config_test`.
 
 ---
 
-### Phase 26 — Flow Imbalance Signal
+### Phase 26 — Flow Imbalance Signal — built
 
-```cpp
-class FlowImbalanceGuard {
-public:
-  void record_fill(const std::string &ticker, Side side, int quantity,
-                   TimePoint tp = Clock::now());
-  [[nodiscard]] double imbalance_ratio(const std::string &ticker) const; // 1.0 = balanced
-  [[nodiscard]] bool is_imbalanced(const std::string &ticker) const;
-  void reset(const std::string &ticker);
-};
-```
+`FlowImbalanceGuard` (`source/flow_imbalance.hpp/.cpp`) tracks the bot's fill
+volume per side, per ticker, over a rolling time window (`FlowImbalanceConfig`:
+`window_seconds`, `imbalance_ratio_threshold`, `min_flow_volume`; default
+300s/2.0/20). `imbalance_ratio()` = larger-side / smaller-side (1.0 = balanced);
+`is_imbalanced()` is true when the window holds ≥ `min_flow_volume` contracts and
+the ratio exceeds the threshold. Per Palumbo, side-weighted volume imbalance — the
+bot accumulating mostly YES or mostly NO — is the largest predictor of adverse
+terminal directional exposure (`E_win`), so a sustained one-sided fill stream is
+the signal to back off.
 
-`Quoter::update()` adds `imbalance_spread_cents` (a `QuoterConfig` field) when `is_imbalanced()` returns true.
+Wired via an **optional guard pointer** (nullptr disables it, so existing call
+sites are untouched): `TradingSession::on_fill` feeds the guard; `Quoter::update`
+queries `is_imbalanced(ticker)` and adds `quoter.imbalance_spread_cents` (default
+2) to the target spread while imbalanced, demanding more compensation for the
+adverse flow. Read queries take an injectable `now` for deterministic tests.
 
-**Files:** `source/flow_imbalance.hpp/cpp`, `test/source/flow_imbalance_test.cpp`
-
----
-
-### Phase 28 — View-Based Pricing (β=0.09 debiasing)
-
-```cpp
-class ViewBasedModel : public IPricingModel {
-public:
-  explicit ViewBasedModel(double view_probability);
-  void update_view(double new_probability);
-  [[nodiscard]] double estimate(const FairValueInput &input) const override;
-private:
-  double view_probability_;
-};
-```
-
-When bootstrapping from market mid, apply debiasing: `π* = (P − 0.045) / 0.91` (derivation: Bürgi et al. β=0.09 calibration). Clamp to [0.01, 0.99].
-
-**Files:** `source/pricing_model.hpp/cpp`, `test/source/view_based_model_test.cpp`
+**Files:** `source/flow_imbalance.*`, `flow_imbalance_test.cpp`, plus optional-ptr
+integration in `quoter.*` / `trading_session.*` / `main.cpp`, `config.*` (`flow`
+section + `imbalance_spread_cents`).
 
 ---
 
-### Phase 30 — Maker Fee Integration
+### Phase 28 — View-Based Pricing (β=0.09 debiasing) — built
 
-After April 2025, Kalshi charges Makers. Confirm γ_maker from current fee schedule. Add `maker_fee_rate` to `Config`. In `Quoter::compute_quotes()`, subtract `γ_maker × P × (1−P)` from effective half-spread so net-of-fee edge stays positive.
+`ViewBasedModel : IPricingModel` (`source/pricing_model.*`) prices toward the
+bot's probability *view* rather than the raw (biased) market mid. Stateless: the
+view is `FairValueInput::external_prob` when supplied, otherwise the **debiased
+market mid** via the free function `debias_probability(P, β) = (P − β/2)/(1 − β)`,
+clamped to [0.01, 0.99] (β default 0.09 per Bürgi/Deng/Whelan, clamped ≤ 0.95 to
+keep 1−β positive). This pulls longshots down (20c → 17c) and favorites up
+(80c → 83c) — quoting toward true probability is where systematic maker edge
+comes from. Inventory skew / spread stay the Quoter's job (it passes
+`net_position=0` to the model), so the model is pure debiasing.
+
+Selected via `QuoterConfig.use_view_based_pricing` (default **false** — Heuristic
+remains the safe baseline) + `view_debias_beta`; `main` builds the chosen
+`FairValueEngine` and logs which model is active.
+
+**Files:** `source/pricing_model.*`, `view_based_model_test.cpp`, `quoter.hpp`
+(config) + `config.cpp` + `main.cpp` (selection), `config.example.json`.
+
+---
+
+### Phase 30 — Maker Fee Integration — built
+
+`QuoterConfig.maker_fee_rate` (γ, default **0.0** — set to your market's actual
+rate, e.g. 0.07). In `Quoter::update`, the per-contract fee `γ·P·(1−P)` (P
+estimated from fair value, maximal ~1.75c at 50c for γ=0.07) is **added** to the
+half-spread so the net-of-fee edge stays positive. (The original PLAN sketch said
+"subtract from the half-spread" — that's backwards: covering a fee requires
+quoting *wider*, not tighter, so the fee widens the spread.) It stacks on top of
+the spread floor and imbalance widening, and is a no-op at the 0.0 default.
+
+**Files:** `source/quoter.hpp/cpp`, `source/config.cpp`, `config.example.json`,
+tests in `quoter_test` + `config_test`.
 
 ---
 
@@ -207,20 +337,21 @@ After April 2025, Kalshi charges Makers. Confirm γ_maker from current fee sched
 
 ### Code gaps
 
-| Gap | Fix |
+| Gap | Status |
 |---|---|
-| `main.cpp` has no log calls — process runs blind | Add spdlog calls: every fill, every quote update, every risk state change |
-| WS thread can silently stall (no data, no disconnect) | Track `last_ws_message_time`; set `kStaleBook` if > 30s; log at `critical` |
-| Cancel-all not triggered on WS disconnect | Wire `on_disconnect` callback to `order_mgr.cancel_all()` per ticker |
-| Daily loss limit resets on restart (in-memory only) | Write realized PnL to a small JSON file on every fill; read it back on startup |
+| Structured logging (every fill / quote / risk state change) | ✅ done — spdlog throughout `TradingSession` + `main.cpp` |
+| WS thread can silently stall (no data, no disconnect) | ✅ done — `check_ws_staleness` sets `kStaleBook` after 30s |
+| Cancel-all on WS disconnect | ✅ done — `on_disconnect` → `TradingSession::on_disconnect` → `cancel_all` |
+| PnL persists across restarts | ✅ done — `persist_pnl`/`load_pnl` (`pnl_state.json`), wired as the session's fill listener |
+| Paper mode placed zero orders against V2 API | ✅ fixed 2026-06-29 — `PaperTransport` parses the V2 request + returns the V2 response |
 
 ### Missing tests
 
-| Gap | Fix |
+| Gap | Status |
 |---|---|
-| No contract tests against real API responses | Record one real UAT session; save orderbook + fill JSON to `test/fixtures/`; add parser assertion tests |
-| No integration tests written (framework exists) | Add `GET /markets` + `GET /orderbook` integration tests in `test/integration/` |
-| Replay fixture is hand-crafted, not from live Kalshi | Replace `session_synthetic.jsonl` with a recorded real session after first UAT run |
+| Full-stack integration test | ✅ done — `replay_session_test` drives the real wiring (gated `KALSHI_INTEGRATION_TESTS`, default ON) |
+| Capture real sessions for replay / field-shape checks | ✅ tooling done — `--capture`; **blocked on the placeholder `api_key`** (see BLOCKER-2) for a real demo capture |
+| Replay fixture is hand-crafted, not from live Kalshi | ⏳ pending a real capture — then drop `session.jsonl` into `test/fixtures/` and give `replay_session_test` capture-specific assertions (current ones are tied to the synthetic fixture) |
 
 ### Operational hardening (Phase 32)
 
@@ -317,13 +448,45 @@ Kalshi Basic tier: **200 read tokens/s**, **100 write tokens/s**. Each REST requ
 
 Scalability is a goal, but the bottlenecks below only matter once pricing is working and generating edge. Expand to these only after the small-ticker setup is demonstrably profitable. Long-term, the same architecture can extend to **Polymarket and other prediction market exchanges** — the `IHttpTransport` and `IWebSocket` interfaces are designed for exactly this: swap in a Polymarket REST/WS implementation behind the same interfaces, reuse `OrderManager`, `RiskManager`, and `Quoter` unchanged.
 
+### Target architecture: process-per-strategy + an aggregator process (see [ADR-007](docs/adr/007-process-per-strategy-and-aggregator.md))
+
+The end-state for scaling is a **portfolio of strategies** with the quoting layer
+separated from the risk-aggregation layer, as distinct OS processes:
+
+- **Each market maker / Quoter is its own process** — one strategy over a market
+  set, its own exchange connections, enforcing *local* risk. This is exactly a
+  `TradingSession` + its transports.
+- **A "portfolio of portfolios" aggregator is its own process** — consumes every
+  quoter's `RiskReport`, enforces *global* risk + capital allocation, and emits
+  `ControlCommand`s (halt/resume/limit). This is today's in-process global
+  kill-switch (`Portfolio` + `RiskManager::update_portfolio`) promoted to a
+  process with many inputs.
+
+A second driver is **multiple exchanges**: a quoter process targets one venue via
+its own `IHttpTransport`/`IWebSocket` adapter (Kalshi today, **Polymarket** next),
+and the aggregator becomes a cross-exchange risk/arbitrage authority — netting
+exposure and hedging across venues, and acting on the same event priced
+differently on each. Polymarket is on-chain (EVM) with very different auth,
+latency, and settlement, so its own process keeps those quirks off the Kalshi hot
+path while it reports into the same aggregator via the same `RiskReport`.
+
+Boundary: `IRiskPublisher` (quoter → aggregator, payload ≈ `PortfolioSnapshot` +
+`strategy_id` + heartbeat) and `IControlChannel` (aggregator → quoter), in-process
+today, IPC at split time — same interface+fake discipline as `IHttpTransport`.
+**Already positioned:** `TradingSession` is the quoter core, aggregation already
+consumes a `PortfolioSnapshot` DTO (not live objects), and `IPricingModel` is the
+strategy seam. **Don't regress:** keep the aggregator snapshot-only (never reach
+into a quoter's internals); route remote halts through `RiskManager` +
+`enforce_quote_safety` so the cancel-on-halt invariant holds across the wire.
+Phase 24 below *is* the aggregator extraction; Phase 25 lives in it.
+
 | Phase | Component | Bottleneck it solves |
 |---|---|---|
 | 21 | Async HTTP Order Dispatch | REST blocks reprice at ~5 tickers |
 | 22 | Per-Series WS + Thread-per-Series | Single WS thread serializes all repricing |
 | 23 | Incremental RiskManager Update | O(n) scan on every fill |
-| 24 | PortfolioModel (No-Arbitrage Consistency) | Correlated markets drift apart |
-| 25 | Cross-Ticker Delta Hedging | Unhedged directional exposure across series |
+| 24 | Aggregator process (PortfolioModel + global risk) | Portfolio of strategies needs one risk/PnL authority across processes |
+| 25 | Cross-Ticker Delta Hedging (in the aggregator) | Unhedged directional exposure across series/strategies |
 | 26+ | Multi-Exchange Support (Polymarket, etc.) | New exchange adapters behind existing interfaces |
 
 ### Portfolio aggregation (read-model) — built
@@ -335,13 +498,48 @@ capital at risk, and a per-**event** breakdown (correlated strikes rolled up via
 `event_ticker_of`, sorted by capital at risk). `OrderManager` gained
 `unrealized_pnl(ticker, yes_mid)` and `position_cost(ticker)` to source the
 mark-to-market and capital-at-risk numbers from its open lots. The main loop logs
-the aggregate each status interval. This is the fan-in backbone the sharded
-quoting (Phases 21–22) will report into.
+the aggregate each status interval. This is the fan-in backbone the per-strategy
+quoter processes will report into once aggregation moves to its own process (see
+the Target architecture above + [ADR-007](docs/adr/007-process-per-strategy-and-aggregator.md)).
 
 **Portfolio-level safety (built on top):**
-- **Over-exposure halt** — `RiskManager::update()` sums `position_cost` across all
-  markets; if total capital at risk exceeds `risk.max_total_exposure_dollars` it
-  trips `kOverExposure`. Per-market limits don't bound aggregate exposure at scale.
+- **Global halt (kill-switch)** — `RiskManager::update_portfolio(const PortfolioSnapshot&)`
+  consumes the read-model (the single aggregation authority) rather than re-summing
+  positions, and trips bits that halt **all** quoters at once (`check_order`
+  returns false on any set bit):
+  - `kOverExposure` when `snapshot.total_notional_cents` exceeds
+    `risk.max_total_exposure_dollars` — per-market limits don't bound aggregate
+    exposure at scale.
+  - `kPortfolioLoss` when `snapshot.total_pnl_cents()` (realized **+** unrealized
+    mark-to-market) falls below `risk.max_total_loss_dollars`. The realized-only
+    `daily_loss_limit` / `kPnLLimit` would miss a book bleeding while holding
+    inventory; this watches the absolute-loss floor the read-model exists to surface.
+  - `kDrawdown` when total PnL has given back more than `risk.max_drawdown_dollars`
+    from its **session high-water mark**. Unlike the loss floor (anchored at
+    break-even), this protects gains — it can fire while still net profitable. The
+    peak starts at 0 and `resume()` re-anchors it so a manual resume doesn't
+    instantly re-trip.
+
+  All only set bits; clearing requires `resume()` (don't auto-resume into a
+  crashing market). The main loop builds the snapshot once and feeds it to both
+  the kill-switch (every ~1s, `run_portfolio_tasks`) and the status log (~60s).
+  Truly event-driven (recompute on every WS delta) is deferred to Phase 23
+  (Incremental Risk) — full recompute per delta doesn't scale; 1s sampling does.
+
+  ```mermaid
+  graph TD
+    OM[OrderManager<br/>single source of truth] -->|net pos, lots, realized| PF[Portfolio<br/>read-model]
+    OB[Orderbooks] -->|marks| PF
+    PF -->|PortfolioSnapshot| RM[RiskManager.update_portfolio]
+    RM -->|notional > cap| OE[kOverExposure]
+    RM -->|realized+unrealized < loss cap| PL[kPortfolioLoss]
+    OE --> HALT[is_halted = any bit set]
+    PL --> HALT
+    HALT -->|check_order = false| Q[ALL Quoters stop]
+    style OM fill:#555
+    style OB fill:#555
+    style PF fill:#555
+  ```
 - **Reconciliation** — `reconcile()` (portfolio.cpp) diffs local net positions
   against the exchange's authoritative `GET /portfolio/positions`
   (`RestClient::get_positions`, paginated). Checks the union of tracked tickers and
@@ -350,8 +548,26 @@ quoting (Phases 21–22) will report into.
   live; also a standalone `--reconcile` command (exit non-zero on mismatch) for
   pre-trade / CI checks.
 
-Next: a true global kill-switch shared across sharded quoters (Phases 21–22), and
-optional auto-resync of local state from the exchange snapshot.
+**Drawdown kill-switch — deferred refinements (documented, NOT built):**
+
+1. **Persist the high-water mark across restarts.** Today `peak_total_pnl_cents_`
+   is in-memory and resets to 0 on restart (session-scoped). A crash/redeploy
+   mid-session resets the protection — after a restart you could give back a large
+   prior peak without tripping. Fix: persist the peak (alongside `pnl_state.json`)
+   and reload it like realized PnL. Needs a decision on scope (daily vs. session
+   vs. lifetime) and how it composes with carried inventory.
+2. **Reconsider the anchor.** The peak tracks total PnL (realized + unrealized)
+   starting at break-even (0), so early-session losses register as drawdown-from-0
+   — at the $500 default this is *tighter* than the −$1000 loss floor before any
+   profit is banked. Options to weigh: (a) anchor on **realized-only** gains
+   (protect locked profit, ignore volatile marks — fewer false trips from thin/
+   one-sided books where the unrealized mark is noisy, but slower to react to a
+   real bleed); (b) start the peak at the **first observed PnL** instead of 0 so
+   it's a pure give-back-from-high (the loss floor already covers absolute early
+   losses); (c) make the starting anchor configurable.
+
+Next: optional auto-resync of local state from the exchange snapshot, and wiring
+the shared kill-switch into the sharded quoters once Phases 21–22 land.
 
 ---
 
@@ -412,18 +628,22 @@ LPs accumulate net directional exposure (`E_win`) that dominates terminal P&L. T
 
 ## Phase Checklist
 
-- [x] Phases 1–20 — complete (197 tests passing)
+- [x] Phases 1–20 — complete (272 tests passing)
+- [x] Phase 31 — Ticker Scanner
+- [x] Portfolio read-model + global kill-switch (`kOverExposure` + `kPortfolioLoss` + `kDrawdown`) + reconciliation
+- [x] TradingSession engine extracted from `main.cpp`
+- [x] Full-stack replay integration test + `--capture` mode (paper-mode V2 bug fixed en route)
+- [x] Pre-live fixes — logging, WS staleness, cancel-on-disconnect, PnL persistence
 
 **Immediate (pricing quality, small ticker set):**
-- [ ] UAT Blocker — verify live REST/WS field shapes against demo account
-- [ ] Pre-live fixes — logging, WS staleness, cancel-on-disconnect, PnL persistence
+- [~] UAT Blocker — `--capture` built & run; **blocked on placeholder `api_key` in `config-demo.json`** (fill real access key ID, then capture + verify field shapes). See UAT Blockers.
+- [ ] Real-capture replay — record a demo session, drop into `test/fixtures/`, add capture-specific assertions to `replay_session_test`
 - [ ] Phase 32 — Operational hardening (systemd, logrotate, Telegram alert script)
-- [x] Phase 31 — Ticker Scanner
-- [ ] Phase 29 — Price-Range Gate
-- [ ] Phase 27 — Spread Floor & E_win Tracking
-- [ ] Phase 26 — Flow Imbalance Signal
-- [ ] Phase 28 — View-Based Pricing (β=0.09 debiasing)
-- [ ] Phase 30 — Maker Fee Integration
+- [x] Phase 29 — Price-Range Gate (band gate in `check_order`, default [10,90]c)
+- [x] Phase 27 — Spread Floor & E_win Tracking (min_spread floor + OrderManager::exposure)
+- [x] Phase 26 — Flow Imbalance Signal (FlowImbalanceGuard → widen spread under one-sided flow)
+- [x] Phase 28 — View-Based Pricing (β=0.09 favorite-longshot debiasing, opt-in)
+- [x] Phase 30 — Maker Fee Integration (γ·P·(1−P) widens spread; default off)
 
 **Deferred (scaling — after consistent profit on ≤5 tickers):**
 - [ ] Phase 21 — Async HTTP Order Dispatch

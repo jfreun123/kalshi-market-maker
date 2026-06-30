@@ -36,4 +36,25 @@ double HeuristicModel::estimate(const FairValueInput &input) const {
   return std::clamp(value, kMinValidCents, kMaxValidCents);
 }
 
+constexpr double kMinProb = 0.01;
+constexpr double kMaxProb = 0.99;
+constexpr double kBetaMax = 0.95; // keep (1 - beta) safely positive
+
+double debias_probability(double market_prob, double beta) {
+  const double debiased = (market_prob - beta / 2.0) / (1.0 - beta);
+  return std::clamp(debiased, kMinProb, kMaxProb);
+}
+
+ViewBasedModel::ViewBasedModel(double beta)
+    : beta_{std::clamp(beta, 0.0, kBetaMax)} {}
+
+double ViewBasedModel::estimate(const FairValueInput &input) const {
+  // An external view, when supplied, overrides the market-derived one.
+  const double view_prob =
+      input.external_prob.has_value()
+          ? std::clamp(*input.external_prob, kMinProb, kMaxProb)
+          : debias_probability(input.mid_cents / kContractMaxCents, beta_);
+  return view_prob * kContractMaxCents;
+}
+
 } // namespace kalshi

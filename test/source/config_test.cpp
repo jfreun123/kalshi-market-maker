@@ -38,6 +38,18 @@ TEST(ConfigTest, LoadsAllFields) {
   constexpr int kMaxOpenOrders = 2;
   constexpr int kMaxOrderSize = 10;
   constexpr double kDailyLossLimit = -100.0;
+  constexpr double kMaxTotalLoss = -250.0;
+  constexpr int kMinQuotePrice = 12;
+  constexpr int kMaxQuotePrice = 88;
+  constexpr double kMaxDrawdown = 300.0;
+  constexpr int kImbalanceSpread = 3;
+  constexpr int kMinSpread = 5;
+  constexpr bool kUseViewBased = true;
+  constexpr double kViewBeta = 0.08;
+  constexpr double kMakerFee = 0.07;
+  constexpr int kFlowWindowSeconds = 120;
+  constexpr double kFlowRatioThreshold = 1.5;
+  constexpr int kFlowMinVolume = 10;
 
   const nlohmann::json config_json = {
       {"api_key", "my-key"},
@@ -49,12 +61,25 @@ TEST(ConfigTest, LoadsAllFields) {
        {{"target_spread_cents", kSpreadCents},
         {"skew_per_contract_cents", kSkew},
         {"reprice_threshold_cents", kRepriceCents},
-        {"quote_size", kQuoteSize}}},
+        {"quote_size", kQuoteSize},
+        {"imbalance_spread_cents", kImbalanceSpread},
+        {"min_spread_cents", kMinSpread},
+        {"use_view_based_pricing", kUseViewBased},
+        {"view_debias_beta", kViewBeta},
+        {"maker_fee_rate", kMakerFee}}},
+      {"flow",
+       {{"window_seconds", kFlowWindowSeconds},
+        {"imbalance_ratio_threshold", kFlowRatioThreshold},
+        {"min_flow_volume", kFlowMinVolume}}},
       {"risk",
        {{"max_position_per_market", kMaxPosition},
         {"max_open_orders_per_market", kMaxOpenOrders},
         {"max_order_size", kMaxOrderSize},
-        {"daily_loss_limit", kDailyLossLimit}}}};
+        {"daily_loss_limit", kDailyLossLimit},
+        {"max_total_loss_dollars", kMaxTotalLoss},
+        {"min_quote_price_cents", kMinQuotePrice},
+        {"max_quote_price_cents", kMaxQuotePrice},
+        {"max_drawdown_dollars", kMaxDrawdown}}}};
 
   const auto path = write_temp_config(config_json);
   const auto config = kalshi::load_config(path);
@@ -71,10 +96,22 @@ TEST(ConfigTest, LoadsAllFields) {
   EXPECT_DOUBLE_EQ(config.quoter.skew_per_contract_cents, kSkew);
   EXPECT_EQ(config.quoter.reprice_threshold_cents, kRepriceCents);
   EXPECT_EQ(config.quoter.quote_size, kQuoteSize);
+  EXPECT_EQ(config.quoter.imbalance_spread_cents, kImbalanceSpread);
+  EXPECT_EQ(config.quoter.min_spread_cents, kMinSpread);
+  EXPECT_EQ(config.quoter.use_view_based_pricing, kUseViewBased);
+  EXPECT_DOUBLE_EQ(config.quoter.view_debias_beta, kViewBeta);
+  EXPECT_DOUBLE_EQ(config.quoter.maker_fee_rate, kMakerFee);
+  EXPECT_EQ(config.flow.window_seconds, kFlowWindowSeconds);
+  EXPECT_DOUBLE_EQ(config.flow.imbalance_ratio_threshold, kFlowRatioThreshold);
+  EXPECT_EQ(config.flow.min_flow_volume, kFlowMinVolume);
   EXPECT_EQ(config.risk.max_position_per_market, kMaxPosition);
   EXPECT_EQ(config.risk.max_open_orders_per_market, kMaxOpenOrders);
   EXPECT_EQ(config.risk.max_order_size, kMaxOrderSize);
   EXPECT_DOUBLE_EQ(config.risk.daily_loss_limit, kDailyLossLimit);
+  EXPECT_DOUBLE_EQ(config.risk.max_total_loss_dollars, kMaxTotalLoss);
+  EXPECT_EQ(config.risk.min_quote_price_cents, kMinQuotePrice);
+  EXPECT_EQ(config.risk.max_quote_price_cents, kMaxQuotePrice);
+  EXPECT_DOUBLE_EQ(config.risk.max_drawdown_dollars, kMaxDrawdown);
 }
 
 TEST(ConfigTest, LoadsScannerSection) {
@@ -124,6 +161,20 @@ TEST(ConfigTest, DefaultsAppliedWhenOptionalSectionsAbsent) {
   EXPECT_EQ(config.quoter.reprice_threshold_cents,
             kalshi::QuoterConfig::kDefaultRepriceThresholdCents);
   EXPECT_EQ(config.quoter.quote_size, kalshi::QuoterConfig::kDefaultQuoteSize);
+  EXPECT_EQ(config.quoter.imbalance_spread_cents,
+            kalshi::QuoterConfig::kDefaultImbalanceSpreadCents);
+  EXPECT_EQ(config.quoter.min_spread_cents,
+            kalshi::QuoterConfig::kDefaultMinSpreadCents);
+  EXPECT_FALSE(config.quoter.use_view_based_pricing);
+  EXPECT_DOUBLE_EQ(config.quoter.view_debias_beta,
+                   kalshi::ViewBasedModel::kDefaultBeta);
+  EXPECT_DOUBLE_EQ(config.quoter.maker_fee_rate, 0.0);
+  EXPECT_EQ(config.flow.window_seconds,
+            kalshi::FlowImbalanceConfig::kDefaultWindowSeconds);
+  EXPECT_DOUBLE_EQ(config.flow.imbalance_ratio_threshold,
+                   kalshi::FlowImbalanceConfig::kDefaultRatioThreshold);
+  EXPECT_EQ(config.flow.min_flow_volume,
+            kalshi::FlowImbalanceConfig::kDefaultMinFlowVolume);
   EXPECT_EQ(config.risk.max_position_per_market,
             kalshi::RiskLimits::kDefaultMaxPosition);
   EXPECT_EQ(config.risk.max_open_orders_per_market,
@@ -132,6 +183,16 @@ TEST(ConfigTest, DefaultsAppliedWhenOptionalSectionsAbsent) {
             kalshi::RiskLimits::kDefaultMaxOrderSize);
   EXPECT_DOUBLE_EQ(config.risk.daily_loss_limit,
                    kalshi::RiskLimits::kDefaultDailyLossLimit);
+  EXPECT_DOUBLE_EQ(config.risk.max_total_exposure_dollars,
+                   kalshi::RiskLimits::kDefaultMaxTotalExposure);
+  EXPECT_DOUBLE_EQ(config.risk.max_total_loss_dollars,
+                   kalshi::RiskLimits::kDefaultMaxTotalLoss);
+  EXPECT_EQ(config.risk.min_quote_price_cents,
+            kalshi::RiskLimits::kDefaultMinQuotePrice);
+  EXPECT_EQ(config.risk.max_quote_price_cents,
+            kalshi::RiskLimits::kDefaultMaxQuotePrice);
+  EXPECT_DOUBLE_EQ(config.risk.max_drawdown_dollars,
+                   kalshi::RiskLimits::kDefaultMaxDrawdown);
 }
 
 TEST(ConfigTest, ThrowsOnMissingApiKey) {

@@ -52,6 +52,27 @@ AppConfig load_config(const std::filesystem::path &path) {
         "reprice_threshold_cents", QuoterConfig::kDefaultRepriceThresholdCents);
     config.quoter.quote_size =
         quoter_json.value("quote_size", QuoterConfig::kDefaultQuoteSize);
+    config.quoter.imbalance_spread_cents = quoter_json.value(
+        "imbalance_spread_cents", QuoterConfig::kDefaultImbalanceSpreadCents);
+    config.quoter.min_spread_cents = quoter_json.value(
+        "min_spread_cents", QuoterConfig::kDefaultMinSpreadCents);
+    config.quoter.use_view_based_pricing =
+        quoter_json.value("use_view_based_pricing", false);
+    config.quoter.view_debias_beta =
+        quoter_json.value("view_debias_beta", ViewBasedModel::kDefaultBeta);
+    config.quoter.maker_fee_rate =
+        quoter_json.value("maker_fee_rate", QuoterConfig{}.maker_fee_rate);
+  }
+
+  if (json_data.contains("flow")) {
+    const auto &flow_json = json_data.at("flow");
+    config.flow.window_seconds = flow_json.value(
+        "window_seconds", FlowImbalanceConfig::kDefaultWindowSeconds);
+    config.flow.imbalance_ratio_threshold =
+        flow_json.value("imbalance_ratio_threshold",
+                        FlowImbalanceConfig::kDefaultRatioThreshold);
+    config.flow.min_flow_volume = flow_json.value(
+        "min_flow_volume", FlowImbalanceConfig::kDefaultMinFlowVolume);
   }
 
   if (json_data.contains("risk")) {
@@ -66,6 +87,14 @@ AppConfig load_config(const std::filesystem::path &path) {
         risk_json.value("daily_loss_limit", RiskLimits::kDefaultDailyLossLimit);
     config.risk.max_total_exposure_dollars = risk_json.value(
         "max_total_exposure_dollars", RiskLimits::kDefaultMaxTotalExposure);
+    config.risk.max_total_loss_dollars = risk_json.value(
+        "max_total_loss_dollars", RiskLimits::kDefaultMaxTotalLoss);
+    config.risk.min_quote_price_cents = risk_json.value(
+        "min_quote_price_cents", RiskLimits::kDefaultMinQuotePrice);
+    config.risk.max_quote_price_cents = risk_json.value(
+        "max_quote_price_cents", RiskLimits::kDefaultMaxQuotePrice);
+    config.risk.max_drawdown_dollars = risk_json.value(
+        "max_drawdown_dollars", RiskLimits::kDefaultMaxDrawdown);
   }
 
   if (json_data.contains("scanner")) {

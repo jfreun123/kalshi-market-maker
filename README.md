@@ -5,28 +5,34 @@ A C++23 automated market maker for [Kalshi](https://kalshi.com) prediction marke
 ## Architecture
 
 ```
-WebSocketClient ──► Quoter ──► OrderManager ──► RestClient ──► Kalshi API
-     │                │              │
-     │            FairValueEngine    └── RiskManager
-     │           (IPricingModel)         (Constraint bitset)
-     │
-     └── AdverseSelectionGuard
+WebSocketClient ──► TradingSession ──► Quoter ──► OrderManager ──► RestClient ──► Kalshi API
+                          │                │            │   │
+                          │            FairValueEngine   │   └── RiskManager (Constraint bitset
+                          │           (IPricingModel)     │        + global kill-switch)
+                          ├── AdverseSelectionGuard       └── Portfolio (read-model) ──► RiskManager
+                          └── (--capture tees raw WS + REST via Capturing* decorators)
 ```
 
 **Key components:**
 
 | Component | File | Responsibility |
 |---|---|---|
-| `RestClient` | `rest_client.hpp` | Place/cancel orders, poll fills (HTTP) |
+| `RestClient` | `rest_client.hpp` | Place/cancel orders, poll fills (V2 HTTP) |
 | `WebSocketClient` | `websocket_client.hpp` | Orderbook snapshots + fill events (WS) |
-| `OrderManager` | `order_manager.hpp` | Track open orders, positions, realized PnL |
-| `RiskManager` | `risk_manager.hpp` | 8-bit constraint bitset; blocks orders when any bit is set |
+| `TradingSession` | `trading_session.hpp` | Owns the domain reactions (snapshot/delta/fill, portfolio kill-switch, status); the seam shared by prod, tests, and replay |
+| `OrderManager` | `order_manager.hpp` | Track open orders, positions, realized + unrealized PnL |
+| `RiskManager` | `risk_manager.hpp` | Constraint bitset; blocks orders when any bit is set; `update_portfolio` is the global kill-switch |
+| `Portfolio` | `portfolio.hpp` | Read-model: total PnL, capital-at-risk, per-event risk; `reconcile()` vs exchange |
 | `FairValueEngine` | `fair_value.hpp` | Delegates to a pluggable `IPricingModel` |
-| `HeuristicModel` | `pricing_model.hpp` | Mid-price + time-decay + inventory skew |
+| `HeuristicModel` | `pricing_model.hpp` | Mid-price + time-decay + inventory skew (default) |
+| `ViewBasedModel` | `pricing_model.hpp` | Favorite-longshot debiasing `π*=(P−β/2)/(1−β)`; opt-in via `use_view_based_pricing` |
 | `TheoGrid` | `theo_grid.hpp` | Bilinear interpolation table for fast repricing |
 | `Quoter` | `quoter.hpp` | Computes bid/ask, reprices on orderbook delta |
 | `AdverseSelectionGuard` | `adverse_selection.hpp` | Pulls quotes when fill rate exceeds threshold |
-| `Auth` | `auth.hpp` | RSA-SHA256 request signing |
+| `FlowImbalanceGuard` | `flow_imbalance.hpp` | Tracks one-sided fill flow; Quoter widens spread when imbalanced (Palumbo E_win signal) |
+| `TickerScanner` | `ticker_scanner.hpp` | Ranks markets by volume/spread; writes a trade config |
+| `Capturing{WebSocket,HttpTransport}` | `capture.hpp` | Tee raw WS frames / REST responses for `--capture` replay |
+| `Auth` | `auth.hpp` | RSA-PSS-SHA256 request signing |
 
 ## Prerequisites
 
@@ -82,7 +88,9 @@ cp config.example.json config.json
     "max_position_per_market": 100,
     "max_open_orders_per_market": 4,
     "max_order_size": 25,
-    "daily_loss_limit": -500.0
+    "daily_loss_limit": -500.0,
+    "max_total_exposure_dollars": 10000.0,
+    "max_total_loss_dollars": -1000.0
   }
 }
 ```
@@ -110,6 +118,13 @@ openssl rsa -in kalshi-private-key.pem -pubout -out kalshi-public-key.pem
 # Reconcile local accounting against the exchange (no orders placed).
 # Exits 0 if in sync, non-zero on any position mismatch — good for CI/pre-trade.
 ./build/source/kalshi_mm --reconcile config.json
+
+# Capture a live session for replay (no orders placed). Records raw inbound WS
+# frames to <dir>/session.jsonl (replay-compatible) and seed REST responses to
+# <dir>/rest.jsonl. Runs until Ctrl-C. Point config at demo to capture a UAT run:
+./build/source/kalshi_mm --capture capture/demo-run config-demo.json
+# Replay it through the full stack: drop session.jsonl into test/fixtures/ and
+# point the integration test at it (see test/integration/replay_session_test.cpp).
 
 # Demo / UAT environment
 # Set base_url and ws_url to the demo endpoints in config.json:
@@ -169,11 +184,25 @@ detail, for any custom downstream tooling.
 unrealized (mark-to-market) PnL**, **total capital at risk**, and a per-**event**
 breakdown (correlated strikes rolled up). It's logged each status interval.
 
-Two portfolio-level safety checks complement the per-market risk limits:
+Four portfolio-level safety checks complement the per-market risk limits. The
+first three form a **global kill-switch**: `RiskManager::update_portfolio()`
+consumes the read-model snapshot (rebuilt ~1s, sub-ms at this scale) and any
+tripped bit halts **all** quoters at once.
 
 - **Over-exposure** — `risk.max_total_exposure_dollars` caps total capital at risk
   across all markets. Per-market limits don't bound aggregate exposure; this does.
   A breach trips `kOverExposure` and halts all quoting.
+- **Total-loss floor** — `risk.max_total_loss_dollars` caps total PnL including
+  **unrealized** mark-to-market, anchored at break-even. The realized-only
+  `daily_loss_limit` can't see a book bleeding while holding inventory; a breach
+  trips `kPortfolioLoss`.
+- **Drawdown** — `risk.max_drawdown_dollars` caps how much total PnL may give back
+  from its **session high-water mark**. Unlike the loss floor, it protects gains —
+  it can fire while still net profitable (e.g. peak +$700 → +$100 is a $600
+  drawdown). A breach trips `kDrawdown`; `resume()` re-anchors the peak.
+
+  All three require a manual `resume()` to clear (no auto-resume into a crashing
+  market) and route through the same flatten-on-halt path.
 - **Reconciliation** — local accounting is rebuilt from a WebSocket fill stream,
   which can drift from the exchange (missed messages, reconnects). The bot fetches
   Kalshi's authoritative `GET /portfolio/positions` every ~2 min during live

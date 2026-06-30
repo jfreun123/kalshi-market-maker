@@ -30,6 +30,16 @@ constexpr double kTightDailyLossLimit = -0.50;
 // A YES@90 qty-1 fill costs 90 cents = $0.90 in capital at risk.
 // kTightExposureLimit = $0.50, so a single such fill trips over-exposure.
 constexpr double kTightExposureLimit = 0.50;
+// kTightTotalLoss = -$0.50; a -70c mark-to-market loss trips the portfolio
+// halt.
+constexpr double kTightTotalLoss = -0.50;
+constexpr double kNotionalAboveExposureCents = 90.0; // $0.90 > $0.50 cap
+constexpr double kUnrealizedLossCents = -70.0;       // -$0.70 < -$0.50 cap
+// Drawdown: peak +$5.00, give back to +$3.00 = $2.00 drawn down > $1.00 cap.
+constexpr double kTightDrawdown = 1.00;          // dollars (positive)
+constexpr double kPeakPnlCents = 500.0;          // +$5.00 high-water mark
+constexpr double kGivebackPnlCents = 300.0;      // +$3.00 (still net positive)
+constexpr double kSmallGivebackPnlCents = 450.0; // +$4.50 (only $0.50 back)
 constexpr long long kTs1Ns = 1'000'000LL;
 constexpr long long kTs2Ns = 2'000'000LL;
 constexpr int kHttpOk = 200;
@@ -58,6 +68,29 @@ kalshi::RiskLimits tight_loss_limits() {
   kalshi::RiskLimits limits;
   limits.daily_loss_limit = kTightDailyLossLimit;
   return limits;
+}
+
+kalshi::RiskLimits tight_total_loss_limits() {
+  kalshi::RiskLimits limits;
+  limits.max_total_loss_dollars = kTightTotalLoss;
+  return limits;
+}
+
+kalshi::RiskLimits tight_drawdown_limits() {
+  kalshi::RiskLimits limits;
+  limits.max_drawdown_dollars = kTightDrawdown;
+  return limits;
+}
+
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
+kalshi::PortfolioSnapshot make_snapshot(double realized_cents,
+                                        double unrealized_cents,
+                                        double notional_cents) {
+  kalshi::PortfolioSnapshot snapshot;
+  snapshot.total_realized_cents = realized_cents;
+  snapshot.total_unrealized_cents = unrealized_cents;
+  snapshot.total_notional_cents = notional_cents;
+  return snapshot;
 }
 
 std::string generate_rsa_pem() {
@@ -143,6 +176,33 @@ TEST_F(RiskManagerTest, AcceptsOrderAtExactMaxSize) {
   kalshi::RiskManager risk_mgr{default_limits()};
   EXPECT_TRUE(risk_mgr.check_order(kTicker, kalshi::Side::Yes, kValidPrice,
                                    kMaxOrderSize));
+}
+
+// ---- Price-range gate ----
+
+TEST_F(RiskManagerTest, RejectsOrderBelowMinQuotePrice) {
+  const kalshi::RiskLimits limits;
+  kalshi::RiskManager risk_mgr{limits};
+  const int below = limits.min_quote_price_cents - 1; // cheap longshot
+  EXPECT_FALSE(
+      risk_mgr.check_order(kTicker, kalshi::Side::Yes, below, kSmallQty));
+}
+
+TEST_F(RiskManagerTest, RejectsOrderAboveMaxQuotePrice) {
+  const kalshi::RiskLimits limits;
+  kalshi::RiskManager risk_mgr{limits};
+  const int above = limits.max_quote_price_cents + 1;
+  EXPECT_FALSE(
+      risk_mgr.check_order(kTicker, kalshi::Side::No, above, kSmallQty));
+}
+
+TEST_F(RiskManagerTest, AcceptsOrderAtQuotePriceBandEdges) {
+  const kalshi::RiskLimits limits;
+  kalshi::RiskManager risk_mgr{limits};
+  EXPECT_TRUE(risk_mgr.check_order(kTicker, kalshi::Side::Yes,
+                                   limits.min_quote_price_cents, kSmallQty));
+  EXPECT_TRUE(risk_mgr.check_order(kTicker, kalshi::Side::Yes,
+                                   limits.max_quote_price_cents, kSmallQty));
 }
 
 // ---- Position limit (from zero, no update() needed) ----
@@ -292,31 +352,88 @@ TEST_F(RiskManagerTest, UpdateDoesNotHaltWithinLimits) {
   EXPECT_FALSE(risk_mgr.is_halted());
 }
 
-// ---- Over-exposure via update() ----
+// ---- Over-exposure via update_portfolio() ----
 
-TEST_F(RiskManagerTest, UpdateHaltsWhenTotalExposureExceeded) {
-  // A single YES@90 qty-1 fill leaves 90c = $0.90 capital at risk, above the
-  // $0.50 cap → over-exposure halt.
-  auto rest = make_rest_client(std::make_unique<FakeTransport>());
-  kalshi::OrderManager order_mgr{rest};
-  order_mgr.record_fill(make_fill(kOrderId1, kTicker, kalshi::Side::Yes,
-                                  kLossPriceYes, 1, kTs1Ns));
-
+TEST_F(RiskManagerTest, UpdatePortfolioHaltsWhenTotalExposureExceeded) {
+  // $0.90 capital at risk, above the $0.50 cap → over-exposure halt.
   kalshi::RiskManager risk_mgr{tight_exposure_limits()};
-  risk_mgr.update(order_mgr, {kTicker});
+  risk_mgr.update_portfolio(
+      make_snapshot(0.0, 0.0, kNotionalAboveExposureCents));
 
   EXPECT_TRUE(risk_mgr.is_halted());
   EXPECT_TRUE(risk_mgr.is_set(kalshi::Constraint::kOverExposure));
 }
 
-TEST_F(RiskManagerTest, UpdateDoesNotHaltWhenExposureWithinLimit) {
-  auto rest = make_rest_client(std::make_unique<FakeTransport>());
-  kalshi::OrderManager order_mgr{rest};
-
+TEST_F(RiskManagerTest, UpdatePortfolioDoesNotHaltWhenExposureWithinLimit) {
   kalshi::RiskManager risk_mgr{tight_exposure_limits()};
-  risk_mgr.update(order_mgr, {kTicker});
+  risk_mgr.update_portfolio(make_snapshot(0.0, 0.0, 0.0));
 
   EXPECT_FALSE(risk_mgr.is_set(kalshi::Constraint::kOverExposure));
+}
+
+// ---- Portfolio total-loss kill-switch via update_portfolio() ----
+
+TEST_F(RiskManagerTest, UpdatePortfolioHaltsOnUnrealizedDrawdown) {
+  // No realized loss, but -$0.70 mark-to-market on open inventory trips the
+  // -$0.50 portfolio loss cap. The realized-only daily limit would miss this.
+  kalshi::RiskManager risk_mgr{tight_total_loss_limits()};
+  risk_mgr.update_portfolio(make_snapshot(0.0, kUnrealizedLossCents, 0.0));
+
+  EXPECT_TRUE(risk_mgr.is_halted());
+  EXPECT_TRUE(risk_mgr.is_set(kalshi::Constraint::kPortfolioLoss));
+}
+
+TEST_F(RiskManagerTest, UpdatePortfolioDoesNotHaltWhenTotalPnlWithinLimit) {
+  kalshi::RiskManager risk_mgr{tight_total_loss_limits()};
+  risk_mgr.update_portfolio(make_snapshot(0.0, 0.0, 0.0));
+
+  EXPECT_FALSE(risk_mgr.is_set(kalshi::Constraint::kPortfolioLoss));
+}
+
+TEST_F(RiskManagerTest, UpdatePortfolioDefaultLimitsDoNotHalt) {
+  // Modest exposure and a small unrealized loss stay within the generous
+  // defaults → no portfolio constraint set.
+  kalshi::RiskManager risk_mgr{default_limits()};
+  risk_mgr.update_portfolio(
+      make_snapshot(0.0, kUnrealizedLossCents, kNotionalAboveExposureCents));
+
+  EXPECT_FALSE(risk_mgr.is_halted());
+}
+
+// ---- Drawdown kill-switch (high-water mark) ----
+
+TEST_F(RiskManagerTest, UpdatePortfolioHaltsOnDrawdownFromPeak) {
+  kalshi::RiskManager risk_mgr{tight_drawdown_limits()};
+  // Climb to a +$5.00 high-water mark, then give back $2.00 (> $1.00 cap).
+  risk_mgr.update_portfolio(make_snapshot(kPeakPnlCents, 0.0, 0.0));
+  ASSERT_FALSE(risk_mgr.is_halted());
+  risk_mgr.update_portfolio(make_snapshot(kGivebackPnlCents, 0.0, 0.0));
+
+  EXPECT_TRUE(risk_mgr.is_set(kalshi::Constraint::kDrawdown));
+  // Fires even though total PnL is still net positive — a drawdown, not a loss.
+  EXPECT_FALSE(risk_mgr.is_set(kalshi::Constraint::kPortfolioLoss));
+}
+
+TEST_F(RiskManagerTest, UpdatePortfolioNoDrawdownHaltWithinLimit) {
+  kalshi::RiskManager risk_mgr{tight_drawdown_limits()};
+  risk_mgr.update_portfolio(make_snapshot(kPeakPnlCents, 0.0, 0.0));
+  risk_mgr.update_portfolio(make_snapshot(kSmallGivebackPnlCents, 0.0, 0.0));
+
+  EXPECT_FALSE(risk_mgr.is_set(kalshi::Constraint::kDrawdown));
+}
+
+TEST_F(RiskManagerTest, ResumeReanchorsDrawdownPeak) {
+  kalshi::RiskManager risk_mgr{tight_drawdown_limits()};
+  risk_mgr.update_portfolio(make_snapshot(kPeakPnlCents, 0.0, 0.0));
+  risk_mgr.update_portfolio(make_snapshot(kGivebackPnlCents, 0.0, 0.0));
+  ASSERT_TRUE(risk_mgr.is_set(kalshi::Constraint::kDrawdown));
+
+  risk_mgr.resume();
+  // The same depressed PnL must not immediately re-trip — peak re-anchored.
+  risk_mgr.update_portfolio(make_snapshot(kGivebackPnlCents, 0.0, 0.0));
+
+  EXPECT_FALSE(risk_mgr.is_set(kalshi::Constraint::kDrawdown));
+  EXPECT_FALSE(risk_mgr.is_halted());
 }
 
 TEST_F(RiskManagerTest, ResumeRestoresAfterAutoHalt) {

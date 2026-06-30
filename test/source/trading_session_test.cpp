@@ -1,0 +1,243 @@
+#include "fake_transport.hpp"
+#include "order_manager.hpp"
+#include "quoter.hpp"
+#include "rest_client.hpp"
+#include "risk_manager.hpp"
+#include "trading_session.hpp"
+#include "types.hpp"
+
+#include <gtest/gtest.h>
+
+#include <openssl/pem.h>
+#include <openssl/rsa.h>
+
+#include <algorithm>
+#include <chrono>
+#include <memory>
+#include <string>
+#include <vector>
+
+// ---- Test constants ----
+
+namespace {
+
+// Orderbook: YES bid=51, NO bid=47 → YES ask=53, mid=(51+53)/2=52.
+constexpr int kYesBid = 51;
+constexpr int kNoBid = 47;
+constexpr int kObQty = 100;
+
+// Delta below best bid — keeps a valid BBO so the quoter places quotes.
+constexpr int kSubBboDeltaPrice = 50;
+constexpr int kSubBboDeltaQty = 100;
+constexpr int kDefaultQuoteSize = kalshi::QuoterConfig::kDefaultQuoteSize;
+
+// A YES@90 qty-1 fill leaves 90c = $0.90 capital at risk.
+constexpr int kHighYesPrice = 90;
+constexpr int kOneLot = 1;
+constexpr double kTightExposureDollars = 0.50; // $0.50 < $0.90 → over-exposed
+
+const std::string kTicker = "KXBTCD";
+const std::string kOrderId1 = "order-001";
+const std::string kOrderId2 = "order-002";
+const std::string kFillOrderId = "fill-001";
+const std::string kApiKey = "test-key-id";
+const std::string kBaseUrl = "https://trading-api.kalshi.com/trade-api/v2";
+constexpr int kHttpOk = 200;
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+std::string kPemPrivateKey;
+
+std::string generate_rsa_pem() {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-cstyle-cast)
+  EVP_PKEY *pkey = EVP_RSA_gen(2048U);
+  if (pkey == nullptr) {
+    return "";
+  }
+  BIO *bio = BIO_new(BIO_s_mem());
+  PEM_write_bio_PrivateKey(bio, pkey, nullptr, nullptr, 0, nullptr, nullptr);
+  char *pem_data = nullptr;
+  long pem_len = BIO_get_mem_data(bio, &pem_data); // NOLINT(runtime/int)
+  std::string pem(pem_data, static_cast<std::size_t>(pem_len));
+  BIO_free(bio);
+  EVP_PKEY_free(pkey);
+  return pem;
+}
+
+// Minimal V2 order response so OrderManager tracks the placed order.
+std::string order_json(const std::string &order_id, int qty) {
+  return R"({"order_id":")" + order_id +
+         R"(","fill_count":"0.00","remaining_count":")" + std::to_string(qty) +
+         R"(.00","ts_ms":1718000000000})";
+}
+
+// NOLINTBEGIN(bugprone-easily-swappable-parameters)
+kalshi::Orderbook make_orderbook(const std::string &ticker, int yes_bid,
+                                 int no_bid, int qty) {
+  kalshi::Orderbook book;
+  book.ticker = ticker;
+  book.yes = {kalshi::Level{yes_bid, qty}};
+  book.no = {kalshi::Level{no_bid, qty}};
+  return book;
+}
+
+kalshi::Fill make_fill(const std::string &order_id, const std::string &ticker,
+                       kalshi::Side side, int price_cents, int quantity) {
+  kalshi::Fill fill;
+  fill.order_id = order_id;
+  fill.market_ticker = ticker;
+  fill.side = side;
+  fill.price_cents = price_cents;
+  fill.quantity = quantity;
+  fill.timestamp = std::chrono::system_clock::time_point{};
+  return fill;
+}
+// NOLINTEND(bugprone-easily-swappable-parameters)
+
+int count_method(const FakeTransport &transport, const std::string &method) {
+  const auto &requests = transport.recorded_requests();
+  return static_cast<int>(
+      std::count_if(requests.begin(), requests.end(),
+                    [&method](const FakeTransport::RecordedRequest &request) {
+                      return request.method == method;
+                    }));
+}
+
+} // namespace
+
+// ---- Fixture: bundles the full domain stack over a FakeTransport ----
+
+class TradingSessionTest : public ::testing::Test {
+public:
+  static void SetUpTestSuite() { kPemPrivateKey = generate_rsa_pem(); }
+
+  explicit TradingSessionTest(kalshi::RiskLimits limits = kalshi::RiskLimits{})
+      : transport_owner_{std::make_unique<FakeTransport>()},
+        transport_{*transport_owner_},
+        rest_{kalshi::Auth{kApiKey, kPemPrivateKey},
+              std::move(transport_owner_), kBaseUrl},
+        order_mgr_{rest_}, risk_mgr_{limits},
+        quoter_{kalshi::QuoterConfig{}, order_mgr_, risk_mgr_},
+        session_{std::vector<std::string>{kTicker}, order_mgr_, risk_mgr_,
+                 quoter_} {}
+
+  // Public so TEST_F bodies (generated subclasses) reach them; all members
+  // public keeps the fixture exempt from the member-visibility check.
+  std::unique_ptr<FakeTransport> transport_owner_;
+  FakeTransport &transport_;
+  kalshi::RestClient rest_;
+  kalshi::OrderManager order_mgr_;
+  kalshi::RiskManager risk_mgr_;
+  kalshi::Quoter quoter_;
+  kalshi::TradingSession session_;
+};
+
+class TradingSessionTightExposureTest : public TradingSessionTest {
+protected:
+  TradingSessionTightExposureTest() : TradingSessionTest{tight_limits()} {}
+
+private:
+  static kalshi::RiskLimits tight_limits() {
+    kalshi::RiskLimits limits;
+    limits.max_total_exposure_dollars = kTightExposureDollars;
+    return limits;
+  }
+};
+
+// ---- Tests ----
+
+TEST_F(TradingSessionTest, SnapshotThenDeltaPlacesQuotes) {
+  transport_.enqueue({kHttpOk, order_json(kOrderId1, kDefaultQuoteSize)});
+  transport_.enqueue({kHttpOk, order_json(kOrderId2, kDefaultQuoteSize)});
+
+  session_.on_snapshot(make_orderbook(kTicker, kYesBid, kNoBid, kObQty));
+  session_.on_delta(kTicker, kalshi::Side::Yes, kSubBboDeltaPrice,
+                    kSubBboDeltaQty);
+
+  // One bid POST + one ask POST.
+  EXPECT_EQ(count_method(transport_, "POST"), 2);
+}
+
+TEST_F(TradingSessionTest, OrderbooksAccessorReflectsSnapshot) {
+  session_.on_snapshot(make_orderbook(kTicker, kYesBid, kNoBid, kObQty));
+
+  const auto &books = session_.orderbooks();
+  ASSERT_TRUE(books.contains(kTicker));
+  EXPECT_TRUE(books.at(kTicker).best_bid().has_value());
+  EXPECT_TRUE(books.at(kTicker).best_ask().has_value());
+}
+
+TEST_F(TradingSessionTest, FillUpdatesPositionAndNotifiesPnlListener) {
+  bool notified = false;
+  session_.set_pnl_listener(
+      [&notified](const kalshi::TradingSession::PnlMap &) { notified = true; });
+
+  session_.on_fill(make_fill(kFillOrderId, kTicker, kalshi::Side::Yes,
+                             kHighYesPrice, kOneLot));
+
+  EXPECT_EQ(order_mgr_.net_position(kTicker), kOneLot);
+  EXPECT_TRUE(notified);
+  EXPECT_TRUE(session_.prior_pnl().contains(kTicker));
+}
+
+TEST_F(TradingSessionTightExposureTest, RunPortfolioRiskHaltsOnOverExposure) {
+  session_.on_fill(make_fill(kFillOrderId, kTicker, kalshi::Side::Yes,
+                             kHighYesPrice, kOneLot));
+  ASSERT_FALSE(risk_mgr_.is_halted()); // fill alone does not over-expose
+
+  session_.run_portfolio_risk();
+
+  EXPECT_TRUE(risk_mgr_.is_halted());
+  EXPECT_TRUE(risk_mgr_.is_set(kalshi::Constraint::kOverExposure));
+}
+
+TEST_F(TradingSessionTest, DisconnectCancelsRestingOrders) {
+  transport_.enqueue({kHttpOk, order_json(kOrderId1, kDefaultQuoteSize)});
+  transport_.enqueue({kHttpOk, order_json(kOrderId2, kDefaultQuoteSize)});
+  session_.on_snapshot(make_orderbook(kTicker, kYesBid, kNoBid, kObQty));
+  session_.on_delta(kTicker, kalshi::Side::Yes, kSubBboDeltaPrice,
+                    kSubBboDeltaQty);
+  ASSERT_EQ(order_mgr_.open_orders().size(), 2U);
+
+  session_.on_disconnect();
+
+  EXPECT_EQ(count_method(transport_, "DELETE"), 2);
+  EXPECT_TRUE(order_mgr_.open_orders().empty());
+}
+
+TEST_F(TradingSessionTest, EnforceQuoteSafetyFlattensWhenHalted) {
+  transport_.enqueue({kHttpOk, order_json(kOrderId1, kDefaultQuoteSize)});
+  transport_.enqueue({kHttpOk, order_json(kOrderId2, kDefaultQuoteSize)});
+  session_.on_snapshot(make_orderbook(kTicker, kYesBid, kNoBid, kObQty));
+  session_.on_delta(kTicker, kalshi::Side::Yes, kSubBboDeltaPrice,
+                    kSubBboDeltaQty);
+  ASSERT_EQ(order_mgr_.open_orders().size(), 2U);
+
+  risk_mgr_.halt();
+  session_.enforce_quote_safety();
+
+  EXPECT_TRUE(order_mgr_.open_orders().empty());
+  EXPECT_EQ(count_method(transport_, "DELETE"), 2);
+}
+
+TEST_F(TradingSessionTest, EnforceQuoteSafetyIsNoOpWhenNotHalted) {
+  transport_.enqueue({kHttpOk, order_json(kOrderId1, kDefaultQuoteSize)});
+  transport_.enqueue({kHttpOk, order_json(kOrderId2, kDefaultQuoteSize)});
+  session_.on_snapshot(make_orderbook(kTicker, kYesBid, kNoBid, kObQty));
+  session_.on_delta(kTicker, kalshi::Side::Yes, kSubBboDeltaPrice,
+                    kSubBboDeltaQty);
+  ASSERT_EQ(order_mgr_.open_orders().size(), 2U);
+
+  session_.enforce_quote_safety(); // not halted
+
+  EXPECT_EQ(order_mgr_.open_orders().size(), 2U);
+  EXPECT_EQ(count_method(transport_, "DELETE"), 0);
+}
+
+TEST_F(TradingSessionTest, SeedOrderbookPlacesInitialQuotes) {
+  transport_.enqueue({kHttpOk, order_json(kOrderId1, kDefaultQuoteSize)});
+  transport_.enqueue({kHttpOk, order_json(kOrderId2, kDefaultQuoteSize)});
+
+  session_.seed_orderbook(make_orderbook(kTicker, kYesBid, kNoBid, kObQty));
+
+  EXPECT_EQ(count_method(transport_, "POST"), 2);
+}

@@ -1,4 +1,5 @@
 #include "fake_transport.hpp"
+#include "flow_imbalance.hpp"
 #include "order_manager.hpp"
 #include "orderbook.hpp"
 #include "quoter.hpp"
@@ -44,6 +45,19 @@ constexpr std::string_view kBidPriceMid52Short20 = R"("price":"0.5100")";
 constexpr std::string_view kBidPriceExtremeClamp = R"("price":"0.0100")";
 constexpr std::string_view kAskPriceExtremeClamp =
     R"("price":"0.0400")"; // YES=100-96=4
+// Flow imbalance: default spread 4 → half 2 → bid 50; +2 imbalance → half 3 →
+// bid 49.
+constexpr std::string_view kBidPriceImbalanced = R"("price":"0.4900")";
+constexpr int kImbalanceYesQty = 30;
+constexpr int kImbalanceNoQty = 5;
+// Spread floor: target 2 (half 1 → bid 51) is overridden by min_spread 8
+// (half 4 → bid 48 at mid 52).
+constexpr int kLowTargetSpread = 2;
+constexpr int kHighMinSpread = 8;
+constexpr std::string_view kBidPriceFloored = R"("price":"0.4800")";
+// Maker fee: at fv 52 and γ=0.07, fee = round(0.07*0.52*0.48*100) = 2c, so the
+// default spread 4 (half 2) widens to half 4 → bid 48 ("0.4800").
+constexpr double kMakerFeeRate = 0.07;
 
 constexpr int kObLevelQty = 100;
 constexpr int kFillPrice = 52;
@@ -397,7 +411,15 @@ TEST_F(QuoterTest, AskAlwaysHigherThanBidWithExtremeInventory) {
   record_position_fill(order_mgr, kOrderId1, kalshi::Side::Yes,
                        kExtremeLongPosition);
 
-  kalshi::RiskManager risk_mgr{kalshi::RiskLimits{}};
+  // This test verifies clamping math (ask > bid at extreme skew), not the
+  // price-range gate — open the band to the full valid range so the clamped
+  // quotes are placed.
+  constexpr int kWidestBandMin = 1;
+  constexpr int kWidestBandMax = 99;
+  kalshi::RiskLimits limits;
+  limits.min_quote_price_cents = kWidestBandMin;
+  limits.max_quote_price_cents = kWidestBandMax;
+  kalshi::RiskManager risk_mgr{limits};
   kalshi::Quoter quoter{kalshi::QuoterConfig{}, order_mgr, risk_mgr};
   quoter.update(kTicker, make_ob(kYesBid52, kNoBid52));
 
@@ -412,4 +434,86 @@ TEST_F(QuoterTest, AskAlwaysHigherThanBidWithExtremeInventory) {
   EXPECT_NE(ask_body.find("\"side\":\"ask\""), std::string::npos);
   EXPECT_NE(ask_body.find(std::string(kAskPriceExtremeClamp)),
             std::string::npos);
+}
+
+TEST_F(QuoterTest, ImbalancedFlowWidensSpread) {
+  auto transport_ptr = std::make_unique<FakeTransport>();
+  FakeTransport &transport = *transport_ptr;
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId1, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId2, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  kalshi::RestClient rest{kalshi::Auth{kApiKey, kPemPrivateKey},
+                          std::move(transport_ptr), kBaseUrl};
+  kalshi::OrderManager order_mgr{rest};
+  kalshi::RiskManager risk_mgr{kalshi::RiskLimits{}};
+
+  // Heavy one-sided flow → imbalanced (30 vs 5, ratio 6 > 2, vol 35 ≥ 20).
+  kalshi::FlowImbalanceGuard flow_guard{kalshi::FlowImbalanceConfig{}};
+  flow_guard.record_fill(kTicker, kalshi::Side::Yes, kImbalanceYesQty);
+  flow_guard.record_fill(kTicker, kalshi::Side::No, kImbalanceNoQty);
+  ASSERT_TRUE(flow_guard.is_imbalanced(kTicker));
+
+  kalshi::Quoter quoter{kalshi::QuoterConfig{}, order_mgr, risk_mgr,
+                        &flow_guard};
+  quoter.update(kTicker, make_ob(kYesBid52, kNoBid52)); // mid 52
+
+  // Spread 4 → bid 50 normally; +2 imbalance spread → half 3 → bid 49.
+  ASSERT_EQ(transport.recorded_requests().size(), 2U);
+  const std::string &bid_body = transport.recorded_requests().at(0).body;
+  EXPECT_NE(bid_body.find(std::string(kBidPriceImbalanced)), std::string::npos);
+}
+
+TEST_F(QuoterTest, SpreadFloorWidensTooTightTarget) {
+  auto transport_ptr = std::make_unique<FakeTransport>();
+  FakeTransport &transport = *transport_ptr;
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId1, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId2, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  kalshi::RestClient rest{kalshi::Auth{kApiKey, kPemPrivateKey},
+                          std::move(transport_ptr), kBaseUrl};
+  kalshi::OrderManager order_mgr{rest};
+  kalshi::RiskManager risk_mgr{kalshi::RiskLimits{}};
+
+  // Target spread 2 would quote bid 51, but the min-spread floor of 8 forces
+  // it.
+  kalshi::QuoterConfig config;
+  config.target_spread_cents = kLowTargetSpread;
+  config.min_spread_cents = kHighMinSpread;
+  kalshi::Quoter quoter{config, order_mgr, risk_mgr};
+  quoter.update(kTicker, make_ob(kYesBid52, kNoBid52)); // mid 52
+
+  ASSERT_EQ(transport.recorded_requests().size(), 2U);
+  const std::string &bid_body = transport.recorded_requests().at(0).body;
+  EXPECT_NE(bid_body.find(std::string(kBidPriceFloored)), std::string::npos);
+}
+
+TEST_F(QuoterTest, MakerFeeWidensSpread) {
+  auto transport_ptr = std::make_unique<FakeTransport>();
+  FakeTransport &transport = *transport_ptr;
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId1, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId2, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  kalshi::RestClient rest{kalshi::Auth{kApiKey, kPemPrivateKey},
+                          std::move(transport_ptr), kBaseUrl};
+  kalshi::OrderManager order_mgr{rest};
+  kalshi::RiskManager risk_mgr{kalshi::RiskLimits{}};
+
+  // Default spread 4 → bid 50; a 2c maker fee at fv 52 widens it → bid 48.
+  kalshi::QuoterConfig config;
+  config.maker_fee_rate = kMakerFeeRate;
+  kalshi::Quoter quoter{config, order_mgr, risk_mgr};
+  quoter.update(kTicker, make_ob(kYesBid52, kNoBid52)); // mid 52
+
+  ASSERT_EQ(transport.recorded_requests().size(), 2U);
+  const std::string &bid_body = transport.recorded_requests().at(0).body;
+  EXPECT_NE(bid_body.find(std::string(kBidPriceFloored)), std::string::npos);
 }
