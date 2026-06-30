@@ -106,7 +106,75 @@ strings, timestamps) can only be confirmed once authenticated traffic flows.
 
 ---
 
-## Next Steps
+## Code Review Follow-ups (PR #1)
+
+Review of the MOBILE branch (PR #1) surfaced design feedback. Small items were
+fixed in the branch; the larger structural items below are tracked here. Most
+are cross-cutting refactors that should each land as their own TDD phase.
+
+**Addressed in-branch (PR #1):**
+- `flow_imbalance.cpp` — replaced bare `INT64_C(1)` with a named
+  `kMinRatioDenominator` constant that documents the divide-by-zero floor.
+- `OrderManager::exposure(...)` renamed to `exposure_decomposition(...)` (the
+  old name read as a scalar; it returns an `ExposureDecomposition`). Interface,
+  impl, fake, and tests updated.
+
+**Tracked refactors (not yet done):**
+
+- [ ] **R1 — Split `source/` into domain subdirectories.** Cluster files into
+  `Calculations/` (pricing_model, flow_imbalance, future signals), `Quoter/`
+  (quoter, trading_session), `PortfolioManagement/` (portfolio, risk_manager,
+  order_manager), `Networking/` (rest_client, websocket_client, transports),
+  and `Common/` (types, config, auth). Update CMake target sources + include
+  paths; keep `kalshi::` namespace flat. Big mechanical move — do as one commit
+  with no behavior change so the diff is reviewable.
+
+- [ ] **R2 — Break up `main.cpp`.** It has grown too large. Extract
+  `run_capture_mode` into its own translation unit (`capture_mode.{hpp,cpp}`),
+  and pull the live-trading wiring into a small composition-root file so
+  `main()` is just argument parsing + dispatch. Avoid unexplained abbreviations
+  while moving code (`ws_*` → `websocket_*`, `rest_*` stays — REST is a proper
+  noun). Each extraction is independently testable.
+
+- [ ] **R3 — Introduce a `Cents` type.** Replace the `double *_cents` fields
+  (e.g. `ExposureDecomposition::e_win_cents`, spread capture, PnL) with a
+  dedicated strong type wrapping an integer representation, plus arithmetic
+  helpers and explicit dollar conversion. This (a) removes float rounding from
+  money math and (b) localizes the representation so a future move to
+  sub-cent precision (e.g. micro-cents) is a one-type change. Migrate call
+  sites incrementally behind the type's API.
+
+- [ ] **R4 — Constraints vs. Guards abstraction.** `FlowImbalanceGuard` is
+  really one of a family of *constraints* the quoter consults (inventory caps,
+  flow imbalance, price-range band, spread floor). Define a clear seam — a
+  `Constraint` concept/interface that, given market + position context, returns
+  a spread/size adjustment or a reject — so new constraints and guards can be
+  registered without editing the `Quoter` constructor signature each time.
+  Clarify the naming distinction between a "guard" (hard veto) and a
+  "constraint" (soft adjustment).
+
+- [ ] **R5 — `TradingSession` → `KalshiSession` + `Session` concept.** The
+  engine is Kalshi-specific (WS schema, fill accounting). Rename to
+  `KalshiSession` and extract a `Session` concept/interface capturing the
+  contract (subscribe, on-fill, quote, halt) so a future `PolymarketSession`
+  is a drop-in. Pairs with the ADR-007 multi-exchange direction. More broadly:
+  lean on C++20 concepts and strong types across the codebase rather than bare
+  interfaces + primitives.
+
+- [ ] **R6 — Comment convention: verbose code, header-top docs only.** The
+  preferred style is self-documenting code with explanatory prose confined to a
+  block at the top of each `.hpp`. Strip inline/implementation comments that
+  restate what readable code already says (offenders flagged:
+  `pricing_model.{hpp,cpp}`, `quoter.hpp`, `order_manager.hpp`); promote any
+  genuinely useful context to the header preamble. Apply opportunistically as
+  files are touched by R1–R5. (Consider codifying this in `CLAUDE.md`.)
+
+- [ ] **R7 — Document Kalshi message types + revisit self-rate-limiting.**
+  Add `docs/kalshi-messages.md` enumerating the WS/REST message shapes we
+  consume (orderbook snapshot/delta, fills, positions, the `PortfolioSnapshot`
+  we synthesize) so terms like "snapshot" are defined in one place. While there,
+  re-document our outbound rate-limiting story (see the existing **Rate
+  Limiting** section) and confirm the live path honors it.
 
 ### Phase 31 — Ticker Scanner
 
