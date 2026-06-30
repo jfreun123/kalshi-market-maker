@@ -302,16 +302,23 @@ were found and fixed, plus several environment/strategy learnings.
 
 **Candidate invariants to seed the rollout:**
 
-- order price ∈ [1,99], quantity > 0, `complement_price` ∈ [1,99]
-- `best_bid < best_ask` when both sides present; no negative level sizes
-- fair value is finite (not NaN/inf) and ∈ [1,99] before quoting
-- net position and open-order counts within the configured hard caps
-- config values sane at load (spreads ≥ 0, price band `min < max`)
-- realized/unrealized PnL and marks are finite
+- [x] order price ∈ [1,99], quantity > 0 (`OrderManager::place`)
+- [x] fair value is finite before quoting (`Quoter::update`)
+- [x] portfolio notional + PnL finite before the kill-switch (`RiskManager::update_portfolio`)
+- [ ] `complement_price` ∈ [1,99]
+- [ ] `best_bid < best_ask` when both sides present; no negative level sizes
+      (careful: real books lock/cross transiently — may not be a hard invariant)
+- [ ] net position and open-order counts within hard caps (careful: a fill can
+      legitimately push net position past a cap — likely not an `ensure`)
+- [ ] config values sane at load (spreads ≥ 0, price band `min < max`) — note
+      config is *operator input*, so a thrown error may fit better than `ensure`
+- [ ] realized/unrealized PnL and marks are finite at the source (order_manager)
 
 **Rollout:** land the primitive + its tests first, then introduce `ensure`
 calls incrementally — one subsystem per commit — so every new invariant ships
-with a test that exercises both the pass and the flatten-then-crash path.
+with a test that exercises both the pass and the flatten-then-crash path. *Done
+so far (branch MOBILE2): the primitive + the three guards checked above, each
+with pass + flatten-then-crash tests.*
 
 ---
 
