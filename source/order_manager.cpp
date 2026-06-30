@@ -4,6 +4,7 @@
 #include "logger.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <exception>
 #include <string>
 #include <string_view>
@@ -70,6 +71,14 @@ std::string OrderManager::fill_key(const Fill &fill) {
 }
 
 void OrderManager::record_fill(const Fill &fill) {
+  // A malformed fill (non-finite/non-positive size, out-of-range price) would
+  // corrupt net position, realized PnL, and the FIFO lots below — and a NaN
+  // there silently disables the portfolio kill-switch. Our state would no
+  // longer match the exchange, so flatten and crash; a restart reconciles.
+  ensure(is_valid_price(fill.price_cents), "fill price outside [1,99]");
+  ensure(std::isfinite(fill.quantity) && fill.quantity > 0,
+         "fill quantity must be finite and positive");
+
   if (!seen_fills_.insert(fill_key(fill)).second) {
     return; // Duplicate fill; ignore.
   }

@@ -9,6 +9,7 @@
 #include <openssl/rsa.h>
 
 #include <chrono>
+#include <limits>
 #include <map>
 #include <memory>
 #include <stdexcept>
@@ -248,6 +249,44 @@ TEST_F(OrderManagerTest, PlaceWithNegativeQuantityFlattensAndAborts) {
   EXPECT_THROW(
       mgr.place(kTicker, kalshi::Side::Yes, kYesBidPrice, kNegativeQuantity),
       EnsureAborted);
+}
+
+// ---- record_fill() invariant guards (ensure → flatten → abort) ----
+
+TEST_F(OrderManagerTest, RecordFillWithInvalidPriceFlattensAndAborts) {
+  auto rest_client = make_rest_client(std::make_unique<FakeTransport>());
+  kalshi::OrderManager mgr{rest_client};
+
+  EnsureAbortGuard guard;
+  const auto bad_fill = make_fill(kOrderId, kTicker, kalshi::Side::Yes,
+                                  kInvalidPriceZero, kFillQty);
+  EXPECT_THROW(mgr.record_fill(bad_fill), EnsureAborted);
+  EXPECT_TRUE(guard.flattened());
+}
+
+TEST_F(OrderManagerTest, RecordFillWithZeroQuantityFlattensAndAborts) {
+  auto rest_client = make_rest_client(std::make_unique<FakeTransport>());
+  kalshi::OrderManager mgr{rest_client};
+
+  EnsureAbortGuard guard;
+  const auto bad_fill = make_fill(kOrderId, kTicker, kalshi::Side::Yes,
+                                  kYesFillPrice, kZeroQuantity);
+  EXPECT_THROW(mgr.record_fill(bad_fill), EnsureAborted);
+}
+
+TEST_F(OrderManagerTest, RecordFillWithNonFiniteQuantityFlattensAndAborts) {
+  auto rest_client = make_rest_client(std::make_unique<FakeTransport>());
+  kalshi::OrderManager mgr{rest_client};
+
+  // A NaN size (e.g. a malformed "count_fp" parsed by std::stod) would poison
+  // realized PnL and net position, and a NaN PnL silently disables the
+  // portfolio kill-switch downstream. Crash at the source instead.
+  kalshi::Fill nan_fill =
+      make_fill(kOrderId, kTicker, kalshi::Side::Yes, kYesFillPrice, kFillQty);
+  nan_fill.quantity = std::numeric_limits<kalshi::Quantity>::quiet_NaN();
+
+  EnsureAbortGuard guard;
+  EXPECT_THROW(mgr.record_fill(nan_fill), EnsureAborted);
 }
 
 // ---- cancel() ----
