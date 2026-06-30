@@ -2,38 +2,107 @@
 
 ## Architecture
 
+The binary is one executable with four modes selected by CLI flag. **Scanning
+and trading are separate runs**: `--scan` writes a config file, and you re-run
+the bot pointed at it to actually make markets. There is no loop that "sets up
+and trades each market in turn" — after a one-time per-ticker setup loop the bot
+is entirely **event-driven** (WebSocket callbacks) with a periodic safety timer.
+
+### 1. Startup, mode dispatch, and the per-ticker setup loop
+
 ```mermaid
 graph TD
-    subgraph Exchange
-        REST["REST API"]
-        WS["WebSocket Feed"]
-    end
-    subgraph Core
-        AUTH["Auth (RSA-PSS-SHA256)"]
-        HTTP["RestClient"]
-        WSCONN["WebSocketClient"]
-        SESS["TradingSession (engine)"]
-        OB["LocalOrderbook"]
-        OM["OrderManager"]
-        RM["RiskManager + global kill-switch"]
-        FV["FairValueEngine"]
-        QE["Quoter"]
-        PF["Portfolio (read-model)"]
-    end
-    REST <-->|signed| AUTH --> HTTP
-    WS -->|snapshot/delta/fill| WSCONN --> SESS
-    SESS -->|on_delta| OB --> FV --> QE
-    SESS -->|on_fill| OM --> HTTP
-    RM --> QE --> OM
-    OM --> RM
-    OM --> PF --> RM
+    START["main()"] --> BOOT["parse_args, load_config, setup_logger<br/>load private key, Auth, RestClient (live or paper)"]
+    BOOT --> MODE{"which mode?"}
+
+    MODE -->|"--scan"| SCAN["run_scan_mode:<br/>TickerScanner.scan(top 20)"]
+    SCAN --> SCANOUT["write scan_results.json<br/>+ config.trade.json with top-N tickers"]
+    SCANOUT --> RERUN(["operator re-runs:<br/>kalshi_mm config.trade.json"])
+    RERUN -.->|new process| MODE
+
+    MODE -->|"--reconcile"| REC["compare local vs exchange positions, exit"]
+    MODE -->|"--capture"| CAP["tee WS frames + REST to disk, exit"]
+
+    MODE -->|"default = trade"| WIRE["wire the engine once:<br/>OrderManager, RiskManager, FlowImbalanceGuard,<br/>FairValueEngine (view or heuristic), Quoter, TradingSession"]
+    WIRE --> PNL["load pnl_state.json, set PnL listener"]
+    PNL --> SETUP["per-ticker SETUP LOOP:<br/>for each ticker -> get_orderbook<br/>-> seed_orderbook (applies + quotes once)<br/>-> ws_client.subscribe(ticker)"]
+    SETUP --> CBS["register WS callbacks (snapshot/delta/fill/disconnect),<br/>all guarded by engine_mtx"]
+    CBS --> THREAD["start WS thread: ws_client.run()"]
+    THREAD --> LOOP["enter main poll loop (100ms) — see diagram 3"]
 ```
 
-`main.cpp` does process/IO only (config, logger, signals, transports, WS thread,
-PnL persistence). `TradingSession` (`source/trading_session.hpp/.cpp`) owns the
-domain reactions (snapshot/delta/fill, portfolio kill-switch, status logging) so
-the same wiring runs in production, unit tests, and session replay. Capture (raw
-WS frames + REST responses) is teed by the `CapturingWebSocket` /
+So the answer to "I have a list of markets, then what?": each ticker is **seeded
+and subscribed once** (`main.cpp` setup loop). Seeding already places the first
+pair of quotes. From then on the book moves and fills arrive asynchronously —
+the code path below runs once **per inbound message**, not once per market.
+
+### 2. The hot path — one book update becomes a quote
+
+```mermaid
+sequenceDiagram
+    participant WS as WebSocketClient (WS thread)
+    participant S as TradingSession
+    participant OB as LocalOrderbook
+    participant Q as Quoter
+    participant FV as FairValueEngine
+    participant F as FlowImbalanceGuard
+    participant R as RiskManager
+    participant OM as OrderManager
+    participant EX as Exchange
+
+    WS->>S: on_delta(ticker, side, px, qty) (under engine_mtx)
+    S->>OB: apply_delta()
+    S->>Q: update(ticker, book)
+    Q->>OB: best_bid / best_ask / mid (skip if one-sided)
+    Q->>FV: estimate(mid) -> fair value
+    Q->>F: is_imbalanced(ticker)? -> widen target spread
+    Note over Q: half_spread = max(floor, target/2, min_spread/2)<br/>+ maker fee (gamma * P * (1-P))<br/>skew = net_position * skew_per_contract
+    Q->>Q: compute_quotes(fv, half_spread, skew) -> desired bid/ask
+    loop bid (YES) and ask (NO complement)
+        Q->>R: check_order(side, price, size)
+        Note over R: reject if halted, price outside [min,max],<br/>or position / open-order / size cap breached
+        R-->>Q: ok / reject
+        Q->>OM: place() (only if new, or moved > reprice_threshold)
+        OM->>EX: signed REST POST /orders
+    end
+```
+
+### 3. The two steady-state drivers (fills + periodic safety)
+
+```mermaid
+sequenceDiagram
+    participant WS as WebSocketClient
+    participant ML as Main loop (100ms)
+    participant S as TradingSession
+    participant OM as OrderManager
+    participant F as FlowImbalanceGuard
+    participant R as RiskManager
+    participant P as Portfolio
+    participant DISK as pnl_state.json
+
+    WS->>S: on_fill(fill) (under engine_mtx)
+    S->>OM: record_fill() -> FIFO match, realized PnL
+    S->>R: update(om, tickers)
+    S->>F: record_fill() (flow window)
+    S->>DISK: pnl_listener persists carried PnL
+
+    ML->>S: run_portfolio_risk() every 1s
+    S->>P: snapshot(tickers, marks)
+    P-->>S: total PnL, capital-at-risk
+    S->>R: update_portfolio(snapshot)
+    Note over R: set kOverExposure / kPortfolioLoss / kDrawdown
+    ML->>S: enforce_quote_safety() every tick
+    Note over S: if RiskManager halted -> cancel_all_quotes()
+    ML->>ML: also: WS-staleness (30s), status log (60s),<br/>reconcile vs exchange (120s, live only)
+```
+
+`main.cpp` does process/IO only (config, logger, signals, transports, the WS
+thread, and the 100ms poll loop). `TradingSession`
+(`source/trading_session.hpp/.cpp`) owns the domain reactions (snapshot/delta/
+fill, portfolio kill-switch, status logging) so the same wiring runs in
+production, unit tests, and session replay. The WS callback thread and the main
+loop both touch the engine, serialized by a single `engine_mtx`. Capture (raw WS
+frames + REST responses) is teed by the `CapturingWebSocket` /
 `CapturingHttpTransport` decorators (`source/capture.hpp/.cpp`) via `--capture`.
 
 ---
