@@ -30,35 +30,54 @@
 
 ### P1 — Market-making quality
 
-- [ ] **3. D1 — non-crossing quote clamp.** Clamp quotes to stay strictly
+- [ ] **3. Cancel orphaned orders on startup (and guarantee cancel-on-exit).**
+  The bot only knows about orders it placed in the *current* process and never
+  cancels pre-existing resting orders at startup. Across restarts, orders pile
+  up on the exchange that the running bot is unaware of — observed live on
+  `KXWCADVANCE-…-NED`: a `Sell Yes @ 61c` from a prior buggy-mid run was still
+  resting alongside the current quotes (3 resting orders where there should be
+  2). That is uncontrolled exposure: a stale order can fill against us while we
+  believe we are flat, and it creates self-cross risk. Fix: at startup fetch our
+  resting orders for the target tickers and cancel them (or adopt them into
+  local state), and make the exit/halt flatten path reliable across SIGINT/kill.
+  High priority before any live trading.
+
+- [ ] **4. D1 — non-crossing quote clamp.** Clamp quotes to stay strictly
   passive vs. the observed BBO (≥1c behind) so latency on fast books can't turn
   a quote into a `post only cross`. The *systematic* crossing was the orderbook
   sort bug (now fixed); this is the residual. Detail in *Demo Run Findings*.
 
-- [ ] **4. D2 — align scanner price band with the risk price gate.** The scanner
+- [ ] **5. D2 — align scanner price band with the risk price gate.** The scanner
   admits `[min_price, max_price]` but the quoter only trades `[10,90]`, so the
   scanner's top picks are un-quotable longshots. Derive one band from the other.
 
-### P2 — Operational robustness
+### P2 — Operational robustness & strategy
 
-- [ ] **5. D3 — staleness flapping on quiet markets.** Thin markets send no WS
+- [ ] **6. D3 — staleness flapping on quiet markets.** Thin markets send no WS
   traffic for >30s and trip `kStaleBook` repeatedly → flatten/re-quote churn.
   Count heartbeats toward freshness, or lengthen the threshold for low-activity
   markets (don't loosen blindly — it weakens staleness protection on active
   markets).
 
+- [ ] **7. Queue-position awareness (strategy).** Orders join a price-time FIFO
+  queue; at a deep level a small quote sits at the back (observed queue position
+  ~115,081 behind a ~115k-contract level) and only fills on adverse selection —
+  i.e. when the market runs *through* us. Consider level choice / quote sizing /
+  pulling when the queue ahead is too deep. Lower priority; noted so it isn't
+  lost.
+
 ### P3 — Structural refactors (PR #1 review — detail in *Code Review Follow-ups*)
 
-- [ ] **6. R3 — `Cents` / strong quantity type.** Bumped up: the P0 #1 precision
+- [ ] **8. R3 — `Cents` / strong quantity type.** Bumped up: the P0 #1 precision
   fix wants a non-`int`, fractional size type.
-- [ ] **7. R2 — break up `main.cpp`** (also flagged by clang-tidy:
+- [ ] **9. R2 — break up `main.cpp`** (also flagged by clang-tidy:
   cognitive complexity 27 > 25).
-- [ ] **8. R1 — split `source/`** into `Calculations/ Quoter/
+- [ ] **10. R1 — split `source/`** into `Calculations/ Quoter/
   PortfolioManagement/ Networking/ Common/`.
-- [ ] **9. R4 — Constraints-vs-Guards framework.**
-- [ ] **10. R5 — `KalshiSession` + a `Session` concept** (multi-exchange).
-- [ ] **11. R6 — comment convention** (prose only at the top of each `.hpp`).
-- [ ] **12. R7 — `docs/kalshi-messages.md` + rate-limiting review.**
+- [ ] **11. R4 — Constraints-vs-Guards framework.**
+- [ ] **12. R5 — `KalshiSession` + a `Session` concept** (multi-exchange).
+- [ ] **13. R6 — comment convention** (prose only at the top of each `.hpp`).
+- [ ] **14. R7 — `docs/kalshi-messages.md` + rate-limiting review.**
 
 **Recently fixed this session (committed):** orderbook ascending-sort → correct
 BBO/mid (was the reason we weren't making markets); quoter resync on flatten
