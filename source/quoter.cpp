@@ -1,5 +1,6 @@
 #include "quoter.hpp"
 
+#include "ensure.hpp"
 #include "flow_imbalance.hpp"
 #include "logger.hpp"
 
@@ -122,6 +123,10 @@ void Quoter::update(std::string_view ticker, const LocalOrderbook &book) {
   const double mid = book.mid_price_cents();
   const double fair_val =
       fv_engine_.estimate(FairValueInput{mid, kDefaultTimeToCloseHours, 0, {}});
+  // A non-finite fair value (NaN/inf from broken model math) would be cast to
+  // int in compute_quotes — undefined behavior that yields a garbage price.
+  // This must be impossible; flatten and crash rather than quote on it.
+  ensure(std::isfinite(fair_val), "fair value is not finite");
 
   int target_spread = config_.target_spread_cents;
   if (flow_guard_ != nullptr && flow_guard_->is_imbalanced(ticker_str)) {

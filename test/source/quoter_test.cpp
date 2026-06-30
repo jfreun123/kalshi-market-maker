@@ -1,7 +1,10 @@
+#include "ensure.hpp"
+#include "fair_value.hpp"
 #include "fake_transport.hpp"
 #include "flow_imbalance.hpp"
 #include "order_manager.hpp"
 #include "orderbook.hpp"
+#include "pricing_model.hpp"
 #include "quoter.hpp"
 #include "rest_client.hpp"
 #include "risk_manager.hpp"
@@ -12,7 +15,9 @@
 #include <openssl/rsa.h>
 
 #include <chrono>
+#include <limits>
 #include <memory>
+#include <stdexcept>
 #include <string>
 
 // ---- Test constants ----
@@ -127,6 +132,41 @@ void record_position_fill(kalshi::OrderManager &order_mgr,
   order_mgr.record_fill(fill);
 }
 
+// A pricing model that returns NaN, to exercise the quoter's finiteness guard.
+class NanModel : public kalshi::IPricingModel {
+public:
+  [[nodiscard]] double
+  estimate(const kalshi::FairValueInput & /*input*/) const override {
+    return std::numeric_limits<double>::quiet_NaN();
+  }
+};
+
+struct EnsureAborted : std::exception {};
+
+// Routes ensure() failures to a thrown exception so the fail path is testable,
+// recording whether the flatten hook ran; restores defaults on scope exit.
+class EnsureAbortGuard {
+public:
+  EnsureAbortGuard() {
+    kalshi::reset_panic_state();
+    kalshi::set_panic_handler([this] { flattened_ = true; });
+    kalshi::set_abort_fn([] { throw EnsureAborted{}; });
+  }
+  EnsureAbortGuard(const EnsureAbortGuard &) = delete;
+  EnsureAbortGuard &operator=(const EnsureAbortGuard &) = delete;
+  EnsureAbortGuard(EnsureAbortGuard &&) = delete;
+  EnsureAbortGuard &operator=(EnsureAbortGuard &&) = delete;
+  ~EnsureAbortGuard() {
+    kalshi::set_panic_handler(nullptr);
+    kalshi::set_abort_fn(nullptr);
+    kalshi::reset_panic_state();
+  }
+  [[nodiscard]] bool flattened() const { return flattened_; }
+
+private:
+  bool flattened_ = false;
+};
+
 } // namespace
 
 // ---- Test fixture ----
@@ -135,6 +175,26 @@ class QuoterTest : public ::testing::Test {
 public:
   static void SetUpTestSuite() { kPemPrivateKey = generate_rsa_pem(); }
 };
+
+TEST_F(QuoterTest, NonFiniteFairValueFlattensAndAborts) {
+  auto transport_ptr = std::make_unique<FakeTransport>();
+  auto *transport = transport_ptr.get();
+  kalshi::RestClient rest{kalshi::Auth{kApiKey, kPemPrivateKey},
+                          std::move(transport_ptr), kBaseUrl};
+  kalshi::OrderManager order_mgr{rest};
+  kalshi::RiskManager risk_mgr{kalshi::RiskLimits{}};
+  kalshi::Quoter quoter{kalshi::QuoterConfig{},
+                        kalshi::FairValueEngine{std::make_unique<NanModel>()},
+                        order_mgr, risk_mgr};
+
+  EnsureAbortGuard guard;
+  // A NaN fair value would otherwise be cast to int (UB) and produce a garbage
+  // quote — the quoter must flatten and crash instead of quoting.
+  EXPECT_THROW(quoter.update(kTicker, make_ob(kYesBid52, kNoBid52)),
+               EnsureAborted);
+  EXPECT_TRUE(guard.flattened());
+  EXPECT_TRUE(transport->recorded_requests().empty());
+}
 
 // ---- Tests ----
 
