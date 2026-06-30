@@ -104,6 +104,66 @@
 - [ ] **13. R6 — comment convention** (prose only at the top of each `.hpp`).
 - [ ] **14. R7 — `docs/kalshi-messages.md` + rate-limiting review.**
 
+### P4 — Latency & async order submission (EXPLORE LATER — do not build now)
+
+Order round-trip was ~255ms; the persistent keep-alive HTTP client cut it to
+**~22ms steady-state** (one-time ~144ms cold handshake on the first request).
+That captured most of the available win, so everything below is lower priority.
+
+- [ ] **15. Cheaper remaining latency levers (before any async work).**
+  - **Co-locate** near the exchange (Kalshi = AWS us-east-1). Dev runs in WSL on
+    a home box; residential RTT is 40–100ms one-way vs. low-single-digit ms from
+    the same region. Pure deploy change, likely the biggest remaining win.
+  - **Warm the connection** — the first order after an idle gap re-handshakes
+    (~144ms). A periodic lightweight request keeps the socket hot.
+
+- [ ] **16. Async order submission (deferred — revisit only with the event-loop
+  rewrite).** Today `order_mgr.place()` blocks the WS thread under `engine_mtx`
+  for the round-trip. At 22ms that's tolerable, so this is about throughput / not
+  stalling book processing during one slow order, NOT per-order latency. It is a
+  large change with real correctness surface — write it down, don't build it yet.
+  - **Prerequisite, useful on its own: `client_order_id`.** We send no client
+    order id today, so an order is identifiable only by the exchange id in the
+    response. Async needs a client tag to correlate a response/fill to our intent
+    before the exchange id returns. Worth adding when we next touch reconcile,
+    even while still synchronous.
+  - **What full async requires:** an I/O worker thread + command queue; pending
+    states in the quoter (`none → pending-place → resting → pending-cancel`);
+    coalescing stale quote intents (collapse to the newest desired price) +
+    bounded-queue backpressure; completion results applied back under
+    `engine_mtx` (now three actors contend, not two); **out-of-order fill
+    handling** (a fill can arrive before the place response — today impossible;
+    collides with the `record_fill` `ensure()` guard, which would need to
+    tolerate "unknown order, pending"); cancel-before-id ordering; a rate-limiter
+    (none today); and the safety flatten (`ensure()`/ScopeGuard) must drain or
+    bypass the queue so cancel-on-exit stays guaranteed.
+  - **"Async-lite" middle ground:** compute the order decision under the lock,
+    release it, do the HTTP, re-acquire to record the result. Shrinks lock-hold
+    without a worker/queue — but still opens the out-of-order-fill race, so it
+    needs `client_order_id` + fill buffering anyway.
+
+- [ ] **17. Coroutines — only as part of an event-loop engine rewrite, not a
+  bolt-on.** Coroutines (`co_await place(...)`) would linearize the pending-state
+  machine — the ugliest part of #16 — making the reprice path read synchronously
+  while not blocking the thread. BUT: (a) they are only *suspension syntax*, not
+  I/O — cpp-httplib is purely blocking, so you'd either run blocking calls on a
+  thread pool behind a hand-written `task<T>`/executor (same threading model,
+  nicer syntax, modest win) or adopt an async stack (Asio+Beast / libcurl-multi
+  = big new dependency + transport/TLS rewrite); (b) the domain-hard problems
+  (out-of-order fills, correlation, coalescing, rate limit, flatten-drain) are
+  unchanged; (c) they add new costs — manual lifetime/cancellation of suspended
+  frames (use-after-free risk on shutdown / `ensure()` abort), poor gdb
+  visibility into suspended frames (bad when chasing the very races this is
+  about), no std executor yet (write your own or pull stdexec/Asio), and harder
+  hermetic testing vs. the current `FakeTransport` mock-the-IO approach.
+  **Verdict:** coroutines fit *if* we rebuild the engine around a single reactor
+  thread driving WS + timers + order I/O cooperatively (target-architecture
+  territory — see [[target_architecture]]); as a graft onto today's threaded
+  design a plain worker thread + queue is lower-risk for the same benefit. A
+  contained way to feel out the ergonomics first: a tiny `task<T>` + single-
+  thread executor running blocking httplib on a thread pool, on a throwaway
+  branch — no Asio.
+
 **Recently fixed this session (committed):** orderbook ascending-sort → correct
 BBO/mid (was the reason we weren't making markets); quoter resync on flatten
 (re-quotes after halt/disconnect); seed order-error containment (one bad market
