@@ -107,6 +107,44 @@ frames + REST responses) is teed by the `CapturingWebSocket` /
 
 ---
 
+## Demo Run Findings (2026-06-29)
+
+First sustained market-making run on the Kalshi **demo** environment
+(`config.json` → `demo-api.kalshi.co`, real access key + demo key). The engine
+works end-to-end (auth, seed, quote, WS, risk, portfolio, reconcile). Two bugs
+were found and fixed, plus several environment/strategy learnings.
+
+**Fixed (committed):**
+- **Quoter not resynced on flatten** — a flatten (staleness/disconnect/halt)
+  cancelled the resting orders but left the `Quoter`'s `live_quotes_` ids stale,
+  so on feed recovery it tried to cancel dead ids and **never re-quoted**.
+  `Quoter::reset_quotes()` now called from `TradingSession::cancel_all_quotes`.
+- **Order rejection crashed startup** — a single `place` returning HTTP 400
+  (e.g. `"post only cross"`) threw out of the unguarded seed loop and killed the
+  whole process. `seed_orderbook` now contains quote errors and the `main.cpp`
+  seed loop skips a failing ticker. (`on_delta` was already guarded.)
+
+**Open follow-ups (tracked):**
+- [ ] **D1 — Don't place crossing quotes.** Orders are post-only; on tight (1c)
+  books our computed bid/ask crosses the inside market and the exchange rejects
+  with `post only cross`. The quoter should clamp quotes to not cross the
+  current BBO (join/sit-behind) rather than rely on rejection. Until then,
+  tight-spread markets simply won't rest quotes (no longer fatal, just noisy).
+- [ ] **D2 — Scanner price band vs. risk price gate are misaligned.** Scanner
+  admits `[min_price, max_price]` (was `[2,98]`) but the risk gate only quotes
+  `[10,90]`, so the scanner's top picks (2–5c longshots) are un-quotable and
+  also the longshots Bürgi/Deng/Whelan say to avoid. Align the scanner's
+  `min/max_price_cents` to the risk gate (or derive one from the other).
+- [ ] **D3 — Staleness flapping on quiet markets.** Thin demo markets (e.g. the
+  CPI tickers) send no WS traffic for >30s, tripping `kStaleBook` repeatedly →
+  flatten/re-quote churn. Consider counting heartbeats/pings toward freshness,
+  or a longer threshold for low-activity markets. Don't loosen blindly — it
+  weakens staleness protection on active markets.
+- Ops note: background launches need `setsid` (a bare `&` under the tooling gets
+  killed when the parent shell exits).
+
+---
+
 ## UAT Blockers
 
 **BLOCKER-1 (resolved):** `IxWebSocket` implemented via FetchContent `machinezone/IXWebSocket`. End-to-end connection to live UAT not yet verified.
