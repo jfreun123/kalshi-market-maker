@@ -1,5 +1,72 @@
 # Kalshi Market Maker — Build Plan
 
+## Things to Fix — Prioritized
+
+> Highest priority at the top. Ordering: bugs that corrupt the book or risk
+> money first, then market-making quality, then operational robustness, then
+> structural refactors. Detailed write-ups for several items live in the
+> sections further down (referenced by name).
+
+### P0 — Correctness & safety (do these first)
+
+- [ ] **1. Orderbook deltas are applied wrong — the book corrupts on every
+  update.** `orderbook_delta.delta_fp` is an *increment* to the resting size at
+  a price level, but `LocalOrderbook::apply_delta` treats it as the *absolute*
+  new quantity (`existing->quantity = new_quantity`, not `+=`). Confirmed from
+  captured frames: deltas are signed (`-0.16`, `-1.47`, `680.27`). Two failure
+  modes today: a shrink like `-1.47` rounds to `-1` and *sets* the level
+  negative; a small shrink like `-0.16` rounds to `0` and our zero-branch
+  **erases the whole level**. Also the exchange uses *fractional* contract
+  counts and `parse_fp_count` rounds to `int`, so sub-unit changes vanish.
+  Fix: apply as `quantity += delta`, remove a level only when it reaches ≤ 0,
+  and carry fractional size (ties to the quantity-type work, R3). Tests:
+  snapshot + a stream of incremental deltas, assert the book matches the
+  exchange. **Top priority — every quote is computed against this book, so it
+  silently re-corrupts within seconds even after the snapshot-sort fix.**
+
+- [ ] **2. `ensure()` fail-fast invariant primitive.** Flatten all orders, then
+  crash, on a broken invariant. Safety-critical and explicitly requested. Full
+  design in *Safety: `ensure()` Fail-Fast Invariant Checks* below.
+
+### P1 — Market-making quality
+
+- [ ] **3. D1 — non-crossing quote clamp.** Clamp quotes to stay strictly
+  passive vs. the observed BBO (≥1c behind) so latency on fast books can't turn
+  a quote into a `post only cross`. The *systematic* crossing was the orderbook
+  sort bug (now fixed); this is the residual. Detail in *Demo Run Findings*.
+
+- [ ] **4. D2 — align scanner price band with the risk price gate.** The scanner
+  admits `[min_price, max_price]` but the quoter only trades `[10,90]`, so the
+  scanner's top picks are un-quotable longshots. Derive one band from the other.
+
+### P2 — Operational robustness
+
+- [ ] **5. D3 — staleness flapping on quiet markets.** Thin markets send no WS
+  traffic for >30s and trip `kStaleBook` repeatedly → flatten/re-quote churn.
+  Count heartbeats toward freshness, or lengthen the threshold for low-activity
+  markets (don't loosen blindly — it weakens staleness protection on active
+  markets).
+
+### P3 — Structural refactors (PR #1 review — detail in *Code Review Follow-ups*)
+
+- [ ] **6. R3 — `Cents` / strong quantity type.** Bumped up: the P0 #1 precision
+  fix wants a non-`int`, fractional size type.
+- [ ] **7. R2 — break up `main.cpp`** (also flagged by clang-tidy:
+  cognitive complexity 27 > 25).
+- [ ] **8. R1 — split `source/`** into `Calculations/ Quoter/
+  PortfolioManagement/ Networking/ Common/`.
+- [ ] **9. R4 — Constraints-vs-Guards framework.**
+- [ ] **10. R5 — `KalshiSession` + a `Session` concept** (multi-exchange).
+- [ ] **11. R6 — comment convention** (prose only at the top of each `.hpp`).
+- [ ] **12. R7 — `docs/kalshi-messages.md` + rate-limiting review.**
+
+**Recently fixed this session (committed):** orderbook ascending-sort → correct
+BBO/mid (was the reason we weren't making markets); quoter resync on flatten
+(re-quotes after halt/disconnect); seed order-error containment (one bad market
+can't crash startup). See *Demo Run Findings*.
+
+---
+
 ## Architecture
 
 The binary is one executable with four modes selected by CLI flag. **Scanning
