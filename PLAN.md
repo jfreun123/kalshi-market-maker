@@ -9,8 +9,12 @@
 
 ### P0 — Correctness & safety (do these first)
 
-- [ ] **1. Orderbook deltas are applied wrong — the book corrupts on every
-  update.** `orderbook_delta.delta_fp` is an *increment* to the resting size at
+- [x] **1. Orderbook deltas are applied wrong — the book corrupts on every
+  update.** *(Fixed: `Quantity=double`, `apply_delta` now `+= delta` with
+  epsilon removal, `parse_fp_count` no longer rounds; fractional size carried
+  through the PnL/risk core. Also fixed a `main.cpp` delta lambda that truncated
+  the fractional delta back to `int`.)* `orderbook_delta.delta_fp` is an
+  *increment* to the resting size at
   a price level, but `LocalOrderbook::apply_delta` treats it as the *absolute*
   new quantity (`existing->quantity = new_quantity`, not `+=`). Confirmed from
   captured frames: deltas are signed (`-0.16`, `-1.47`, `680.27`). Two failure
@@ -24,9 +28,16 @@
   exchange. **Top priority — every quote is computed against this book, so it
   silently re-corrupts within seconds even after the snapshot-sort fix.**
 
-- [ ] **2. `ensure()` fail-fast invariant primitive.** Flatten all orders, then
-  crash, on a broken invariant. Safety-critical and explicitly requested. Full
-  design in *Safety: `ensure()` Fail-Fast Invariant Checks* below.
+- [x] **2. `ensure()` fail-fast invariant primitive.** *(Done: `source/ensure.{hpp,cpp}`
+  with `ensure(cond, what, source_location)` → log critical, run the registered
+  panic handler (flatten) once via an atomic reentrancy guard, then abort
+  (injectable for tests). `install_crash_flatten_handlers()` wires fatal signals
+  (SIGSEGV/SIGABRT/SIGFPE/SIGILL/SIGBUS) + `std::set_terminate` so orders are
+  cancelled even on a crash — proven by death tests. main registers the handler
+  to `cancel_all_quotes` (lock-free, best-effort) and clears it on clean
+  shutdown. Next: seed actual `ensure` calls into subsystems, one per commit.)*
+  Flatten all orders, then crash, on a broken invariant. Full design in
+  *Safety: `ensure()` Fail-Fast Invariant Checks* below.
 
 ### P1 — Market-making quality
 
