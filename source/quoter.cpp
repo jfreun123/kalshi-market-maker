@@ -156,4 +156,6 @@ void Quoter::update(std::string_view ticker, const LocalOrderbook &book) {
   refresh_ask(ticker_str, desired_ask);
 }
 
+void Quoter::reset_quotes() { live_quotes_.clear(); }
+
 } // namespace kalshi

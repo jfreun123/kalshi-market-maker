@@ -87,21 +87,24 @@ void TradingSession::on_disconnect() {
 }
 
 void TradingSession::cancel_all_quotes() {
-  if (order_mgr_.open_orders().empty()) {
-    return;
-  }
-  get_logger()->warn("flattening — cancelling all resting quotes ({} open)",
-                     order_mgr_.open_orders().size());
-  for (const auto &ticker : tickers_) {
-    // OrderManager::cancel_all is itself best-effort; the extra guard keeps a
-    // surprise from one ticker from skipping the others.
-    try {
-      order_mgr_.cancel_all(ticker);
-    } catch (const std::exception &ex) {
-      get_logger()->error("cancel_all_quotes: ticker={} failed: {}", ticker,
-                          ex.what());
+  if (!order_mgr_.open_orders().empty()) {
+    get_logger()->warn("flattening — cancelling all resting quotes ({} open)",
+                       order_mgr_.open_orders().size());
+    for (const auto &ticker : tickers_) {
+      // OrderManager::cancel_all is itself best-effort; the extra guard keeps a
+      // surprise from one ticker from skipping the others.
+      try {
+        order_mgr_.cancel_all(ticker);
+      } catch (const std::exception &ex) {
+        get_logger()->error("cancel_all_quotes: ticker={} failed: {}", ticker,
+                            ex.what());
+      }
     }
   }
+  // Resync the quoter to "no resting quotes". Its live-order ids point at the
+  // orders we just cancelled; without this it would try to cancel dead ids and
+  // never re-quote when the feed recovers.
+  quoter_.reset_quotes();
 }
 
 void TradingSession::enforce_quote_safety() {

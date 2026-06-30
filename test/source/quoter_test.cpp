@@ -295,6 +295,44 @@ TEST_F(QuoterTest, QuoteReplacedWhenExceedingRepriceThreshold) {
   EXPECT_EQ(transport.recorded_requests().size(), 6U);
 }
 
+TEST_F(QuoterTest, ResetQuotesForgetsLiveStateSoNextUpdatePlacesFresh) {
+  // After an out-of-band flatten (risk halt / disconnect cancels the resting
+  // orders), the quoter must be told to forget them. Otherwise it believes its
+  // quotes are still live, tries to cancel dead ids, and never re-quotes.
+  auto transport_ptr = std::make_unique<FakeTransport>();
+  FakeTransport &transport = *transport_ptr;
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId1, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId2, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId3, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId4, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  kalshi::RestClient rest{kalshi::Auth{kApiKey, kPemPrivateKey},
+                          std::move(transport_ptr), kBaseUrl};
+  kalshi::OrderManager order_mgr{rest};
+  kalshi::RiskManager risk_mgr{kalshi::RiskLimits{}};
+  kalshi::Quoter quoter{kalshi::QuoterConfig{}, order_mgr, risk_mgr};
+
+  quoter.update(kTicker, make_ob(kYesBid52, kNoBid52)); // 2 POSTs (bid + ask)
+  ASSERT_EQ(transport.recorded_requests().size(), 2U);
+
+  quoter.reset_quotes();
+
+  // Same mid: without the reset the quoter would think it is already quoting at
+  // the right price and do nothing; after the reset it places a fresh pair.
+  quoter.update(kTicker, make_ob(kYesBid52, kNoBid52));
+
+  EXPECT_EQ(transport.recorded_requests().size(), 4U);
+  EXPECT_EQ(transport.recorded_requests().at(2).method, "POST");
+  EXPECT_EQ(transport.recorded_requests().at(3).method, "POST");
+}
+
 TEST_F(QuoterTest, LongPositionShiftsBidDown) {
   // pos=+20: inv_skew=1.0 → bid = round(52-2-1) = 49, ask = round(52+2-1) = 53.
   auto transport_ptr = std::make_unique<FakeTransport>();

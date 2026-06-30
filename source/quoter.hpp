@@ -60,6 +60,12 @@ public:
 
   void update(std::string_view ticker, const LocalOrderbook &book);
 
+  // Forget all tracked resting quotes. Call this after the resting orders have
+  // been cancelled out-of-band (risk halt, disconnect, shutdown): the quoter's
+  // live-order ids would otherwise be stale, so it would try to cancel dead ids
+  // and never re-quote once the feed recovers.
+  void reset_quotes();
+
 private:
   struct LiveQuote {
     std::string bid_order_id;

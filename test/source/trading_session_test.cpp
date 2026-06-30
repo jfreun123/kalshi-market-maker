@@ -39,6 +39,8 @@ constexpr double kTightExposureDollars = 0.50; // $0.50 < $0.90 → over-exposed
 const std::string kTicker = "KXBTCD";
 const std::string kOrderId1 = "order-001";
 const std::string kOrderId2 = "order-002";
+const std::string kOrderId3 = "order-003";
+const std::string kOrderId4 = "order-004";
 const std::string kFillOrderId = "fill-001";
 const std::string kApiKey = "test-key-id";
 const std::string kBaseUrl = "https://trading-api.kalshi.com/trade-api/v2";
@@ -202,6 +204,32 @@ TEST_F(TradingSessionTest, DisconnectCancelsRestingOrders) {
 
   EXPECT_EQ(count_method(transport_, "DELETE"), 2);
   EXPECT_TRUE(order_mgr_.open_orders().empty());
+}
+
+TEST_F(TradingSessionTest, ReQuotesAfterFlattenOnFeedRecovery) {
+  // Regression: a flatten (disconnect/halt) cancels the resting orders, but if
+  // the quoter is not resynced it keeps the dead order ids, believes it is
+  // still quoting, and never re-quotes when the feed recovers.
+  transport_.enqueue({kHttpOk, order_json(kOrderId1, kDefaultQuoteSize)});
+  transport_.enqueue({kHttpOk, order_json(kOrderId2, kDefaultQuoteSize)});
+  session_.on_snapshot(make_orderbook(kTicker, kYesBid, kNoBid, kObQty));
+  session_.on_delta(kTicker, kalshi::Side::Yes, kSubBboDeltaPrice,
+                    kSubBboDeltaQty);
+  ASSERT_EQ(order_mgr_.open_orders().size(), 2U);
+
+  session_.on_disconnect(); // flatten + resync the quoter
+  ASSERT_TRUE(order_mgr_.open_orders().empty());
+  const int deletes_after_flatten = count_method(transport_, "DELETE");
+
+  // Feed recovers; a fresh book update must re-establish quotes (and must not
+  // attempt to cancel the already-dead order ids).
+  transport_.enqueue({kHttpOk, order_json(kOrderId3, kDefaultQuoteSize)});
+  transport_.enqueue({kHttpOk, order_json(kOrderId4, kDefaultQuoteSize)});
+  session_.on_delta(kTicker, kalshi::Side::Yes, kSubBboDeltaPrice,
+                    kSubBboDeltaQty);
+
+  EXPECT_EQ(order_mgr_.open_orders().size(), 2U);
+  EXPECT_EQ(count_method(transport_, "DELETE"), deletes_after_flatten);
 }
 
 TEST_F(TradingSessionTest, EnforceQuoteSafetyFlattensWhenHalted) {
