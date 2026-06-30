@@ -117,7 +117,15 @@ void TradingSession::seed_orderbook(const Orderbook &snapshot) {
   get_logger()->info("seeding orderbook ticker={}", snapshot.ticker);
   auto &book = ob_map_[snapshot.ticker];
   book.apply_snapshot(snapshot);
-  quoter_.update(snapshot.ticker, book);
+  // Contain quoting failures (e.g. the exchange rejecting an initial quote that
+  // would cross a tight book): seeding one market must never abort startup. The
+  // book is still recorded, so the live feed can quote it later.
+  try {
+    quoter_.update(snapshot.ticker, book);
+  } catch (const std::exception &ex) {
+    get_logger()->error("seed quote error ticker={}: {}", snapshot.ticker,
+                        ex.what());
+  }
 }
 
 MarkMap TradingSession::build_marks() const {

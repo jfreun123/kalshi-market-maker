@@ -486,9 +486,16 @@ int main(int argc, char *argv[]) {
     });
 
     for (const auto &ticker : app_config.target_tickers) {
-      auto snap = rest.get_orderbook(ticker);
-      session.seed_orderbook(snap);
-      ws_client.subscribe(ticker);
+      // Contain per-ticker startup failures (closed/invalid market, transient
+      // REST error): skip that ticker rather than aborting the whole session.
+      try {
+        auto snap = rest.get_orderbook(ticker);
+        session.seed_orderbook(snap);
+        ws_client.subscribe(ticker);
+      } catch (const std::exception &ex) {
+        log->error("startup seed failed ticker={}: {} — skipping", ticker,
+                   ex.what());
+      }
     }
 
     // The WS callbacks fire on the WebSocket thread and mutate the engine

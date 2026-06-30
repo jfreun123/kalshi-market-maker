@@ -206,6 +206,19 @@ TEST_F(TradingSessionTest, DisconnectCancelsRestingOrders) {
   EXPECT_TRUE(order_mgr_.open_orders().empty());
 }
 
+TEST_F(TradingSessionTest, SeedOrderbookContainsOrderRejection) {
+  // The exchange rejects the seed quote (e.g. "post only cross" on a tight
+  // book). Seeding must not throw — one un-quotable market cannot abort
+  // startup — and the book must still be recorded for the live feed.
+  transport_.enqueue(
+      {400,
+       R"({"error":{"code":"invalid_order","message":"post only cross"}})"});
+
+  EXPECT_NO_THROW(session_.seed_orderbook(
+      make_orderbook(kTicker, kYesBid, kNoBid, kObQty)));
+  EXPECT_TRUE(session_.orderbooks().contains(kTicker));
+}
+
 TEST_F(TradingSessionTest, ReQuotesAfterFlattenOnFeedRecovery) {
   // Regression: a flatten (disconnect/halt) cancels the resting orders, but if
   // the quoter is not resynced it keeps the dead order ids, believes it is
