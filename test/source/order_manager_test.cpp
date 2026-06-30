@@ -1,3 +1,4 @@
+#include "ensure.hpp"
 #include "fake_transport.hpp"
 #include "order_manager.hpp"
 #include "rest_client.hpp"
@@ -163,6 +164,90 @@ TEST_F(OrderManagerTest, PlaceReturnsOrderWithCorrectTicker) {
   EXPECT_EQ(order.id, kOrderId);
   EXPECT_EQ(order.price_cents, kYesBidPrice);
   EXPECT_EQ(order.quantity, kOrderQty);
+}
+
+// ---- place() invariant guards (ensure → flatten → abort) ----
+
+namespace {
+
+struct EnsureAborted : std::exception {};
+
+// Routes ensure() failures to a thrown exception (instead of std::abort) so the
+// fail path is testable, and records whether the flatten hook ran. Restores the
+// defaults and clears the one-shot panic guard on scope exit.
+class EnsureAbortGuard {
+public:
+  EnsureAbortGuard() {
+    kalshi::reset_panic_state();
+    kalshi::set_panic_handler([this] { flattened_ = true; });
+    kalshi::set_abort_fn([] { throw EnsureAborted{}; });
+  }
+  EnsureAbortGuard(const EnsureAbortGuard &) = delete;
+  EnsureAbortGuard &operator=(const EnsureAbortGuard &) = delete;
+  EnsureAbortGuard(EnsureAbortGuard &&) = delete;
+  EnsureAbortGuard &operator=(EnsureAbortGuard &&) = delete;
+  ~EnsureAbortGuard() {
+    kalshi::set_panic_handler(nullptr);
+    kalshi::set_abort_fn(nullptr);
+    kalshi::reset_panic_state();
+  }
+  [[nodiscard]] bool flattened() const { return flattened_; }
+
+private:
+  bool flattened_ = false;
+};
+
+constexpr int kInvalidPriceZero = 0;
+constexpr int kInvalidPriceHundred = 100;
+constexpr int kZeroQuantity = 0;
+constexpr int kNegativeQuantity = -5;
+
+} // namespace
+
+TEST_F(OrderManagerTest, PlaceWithPriceBelowRangeFlattensAndAborts) {
+  auto transport = std::make_unique<FakeTransport>();
+  auto *transport_ptr = transport.get();
+  auto rest_client = make_rest_client(std::move(transport));
+  kalshi::OrderManager mgr{rest_client};
+
+  EnsureAbortGuard guard;
+  EXPECT_THROW(
+      mgr.place(kTicker, kalshi::Side::Yes, kInvalidPriceZero, kOrderQty),
+      EnsureAborted);
+  EXPECT_TRUE(guard.flattened());
+  // The guard fires before the order ever reaches the exchange.
+  EXPECT_TRUE(transport_ptr->recorded_requests().empty());
+  EXPECT_TRUE(mgr.open_orders().empty());
+}
+
+TEST_F(OrderManagerTest, PlaceWithPriceAtOrAboveHundredFlattensAndAborts) {
+  auto rest_client = make_rest_client(std::make_unique<FakeTransport>());
+  kalshi::OrderManager mgr{rest_client};
+
+  EnsureAbortGuard guard;
+  EXPECT_THROW(
+      mgr.place(kTicker, kalshi::Side::No, kInvalidPriceHundred, kOrderQty),
+      EnsureAborted);
+}
+
+TEST_F(OrderManagerTest, PlaceWithZeroQuantityFlattensAndAborts) {
+  auto rest_client = make_rest_client(std::make_unique<FakeTransport>());
+  kalshi::OrderManager mgr{rest_client};
+
+  EnsureAbortGuard guard;
+  EXPECT_THROW(
+      mgr.place(kTicker, kalshi::Side::Yes, kYesBidPrice, kZeroQuantity),
+      EnsureAborted);
+}
+
+TEST_F(OrderManagerTest, PlaceWithNegativeQuantityFlattensAndAborts) {
+  auto rest_client = make_rest_client(std::make_unique<FakeTransport>());
+  kalshi::OrderManager mgr{rest_client};
+
+  EnsureAbortGuard guard;
+  EXPECT_THROW(
+      mgr.place(kTicker, kalshi::Side::Yes, kYesBidPrice, kNegativeQuantity),
+      EnsureAborted);
 }
 
 // ---- cancel() ----

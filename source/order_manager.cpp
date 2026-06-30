@@ -1,5 +1,6 @@
 #include "order_manager.hpp"
 
+#include "ensure.hpp"
 #include "logger.hpp"
 
 #include <algorithm>
@@ -19,6 +20,12 @@ OrderManager::OrderManager(RestClient &rest_client)
 // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
 Order OrderManager::place(std::string_view ticker, Side side, int price_cents,
                           int quantity) {
+  // Last line of defense before a value becomes a live order. A bad price or
+  // size here means the quoter/risk logic upstream is broken, not a recoverable
+  // input error — flatten and crash rather than send a malformed order.
+  ensure(is_valid_price(price_cents), "order price outside [1,99]");
+  ensure(quantity > 0, "order quantity must be positive");
+
   Order order = rest_client_.place_order(ticker, side, price_cents, quantity,
                                          OrderType::Limit);
   get_logger()->info("place ticker={} side={} price={} qty={} order_id={}",
