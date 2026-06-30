@@ -123,13 +123,24 @@ were found and fixed, plus several environment/strategy learnings.
   (e.g. `"post only cross"`) threw out of the unguarded seed loop and killed the
   whole process. `seed_orderbook` now contains quote errors and the `main.cpp`
   seed loop skips a failing ticker. (`on_delta` was already guarded.)
+- **Orderbook stored in the wrong order → garbage mid (THE reason we weren't
+  making markets).** The exchange sends levels in *ascending* price order (a 1c
+  dust level first), but `best_bid`/`best_ask`/`find_level` all assume
+  *descending* (best at `front()`). `apply_snapshot` copied the wire order
+  verbatim, so `best_bid` was the 1c dust level, `best_ask` its complement
+  (99c), and `mid` was pinned near 50 regardless of the real market. Quotes were
+  priced *through* the true book → rejected as `post only cross`. Proven on the
+  liquid `KXWCADVANCE-…-NED` market: **21 cross-rejections → 0** after sorting
+  levels descending on ingest. This was a correctness bug masked because every
+  unit test used single-level (already-sorted) books.
 
 **Open follow-ups (tracked):**
-- [ ] **D1 — Don't place crossing quotes.** Orders are post-only; on tight (1c)
-  books our computed bid/ask crosses the inside market and the exchange rejects
-  with `post only cross`. The quoter should clamp quotes to not cross the
-  current BBO (join/sit-behind) rather than rely on rejection. Until then,
-  tight-spread markets simply won't rest quotes (no longer fatal, just noisy).
+- [ ] **D1 — Belt-and-braces non-crossing clamp.** The orderbook fix removed the
+  systematic crossing. Residual risk remains on very fast books: a quote priced
+  near the touch can cross by the time the ~300ms REST round-trip lands. Clamp
+  quotes to stay strictly passive vs. the observed BBO (≥1c behind) so latency
+  jitter can't produce a `post only cross`. Lower priority now that mid is
+  correct, but still worth doing.
 - [ ] **D2 — Scanner price band vs. risk price gate are misaligned.** Scanner
   admits `[min_price, max_price]` (was `[2,98]`) but the risk gate only quotes
   `[10,90]`, so the scanner's top picks (2–5c longshots) are un-quotable and
