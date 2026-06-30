@@ -15,7 +15,8 @@
     "imbalance_spread_cents": 2,
     "min_spread_cents": 3,
     "use_view_based_pricing": false,
-    "view_debias_beta": 0.09
+    "view_debias_beta": 0.09,
+    "maker_fee_rate": 0.0
   },
   "flow": {
     "window_seconds": 300,

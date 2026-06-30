@@ -35,6 +35,10 @@ struct QuoterConfig {
   // Off by default (HeuristicModel is the safe baseline); β per Bürgi et al.
   bool use_view_based_pricing = false;
   double view_debias_beta = ViewBasedModel::kDefaultBeta;
+  // Maker fee rate γ; the per-contract fee is γ·P·(1−P). The quoted spread is
+  // widened to cover it so net-of-fee edge stays positive. 0 = no maker fee
+  // (default — set to your market's actual rate, e.g. 0.07).
+  double maker_fee_rate = 0.0;
 };
 
 // Maintains one bid (YES buy) and one ask (NO buy) per subscribed ticker.

@@ -46,6 +46,7 @@ TEST(ConfigTest, LoadsAllFields) {
   constexpr int kMinSpread = 5;
   constexpr bool kUseViewBased = true;
   constexpr double kViewBeta = 0.08;
+  constexpr double kMakerFee = 0.07;
   constexpr int kFlowWindowSeconds = 120;
   constexpr double kFlowRatioThreshold = 1.5;
   constexpr int kFlowMinVolume = 10;
@@ -64,7 +65,8 @@ TEST(ConfigTest, LoadsAllFields) {
         {"imbalance_spread_cents", kImbalanceSpread},
         {"min_spread_cents", kMinSpread},
         {"use_view_based_pricing", kUseViewBased},
-        {"view_debias_beta", kViewBeta}}},
+        {"view_debias_beta", kViewBeta},
+        {"maker_fee_rate", kMakerFee}}},
       {"flow",
        {{"window_seconds", kFlowWindowSeconds},
         {"imbalance_ratio_threshold", kFlowRatioThreshold},
@@ -98,6 +100,7 @@ TEST(ConfigTest, LoadsAllFields) {
   EXPECT_EQ(config.quoter.min_spread_cents, kMinSpread);
   EXPECT_EQ(config.quoter.use_view_based_pricing, kUseViewBased);
   EXPECT_DOUBLE_EQ(config.quoter.view_debias_beta, kViewBeta);
+  EXPECT_DOUBLE_EQ(config.quoter.maker_fee_rate, kMakerFee);
   EXPECT_EQ(config.flow.window_seconds, kFlowWindowSeconds);
   EXPECT_DOUBLE_EQ(config.flow.imbalance_ratio_threshold, kFlowRatioThreshold);
   EXPECT_EQ(config.flow.min_flow_volume, kFlowMinVolume);
@@ -165,6 +168,7 @@ TEST(ConfigTest, DefaultsAppliedWhenOptionalSectionsAbsent) {
   EXPECT_FALSE(config.quoter.use_view_based_pricing);
   EXPECT_DOUBLE_EQ(config.quoter.view_debias_beta,
                    kalshi::ViewBasedModel::kDefaultBeta);
+  EXPECT_DOUBLE_EQ(config.quoter.maker_fee_rate, 0.0);
   EXPECT_EQ(config.flow.window_seconds,
             kalshi::FlowImbalanceConfig::kDefaultWindowSeconds);
   EXPECT_DOUBLE_EQ(config.flow.imbalance_ratio_threshold,

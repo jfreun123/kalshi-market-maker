@@ -60,6 +60,8 @@ AppConfig load_config(const std::filesystem::path &path) {
         quoter_json.value("use_view_based_pricing", false);
     config.quoter.view_debias_beta =
         quoter_json.value("view_debias_beta", ViewBasedModel::kDefaultBeta);
+    config.quoter.maker_fee_rate =
+        quoter_json.value("maker_fee_rate", QuoterConfig{}.maker_fee_rate);
   }
 
   if (json_data.contains("flow")) {

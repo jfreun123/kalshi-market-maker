@@ -17,6 +17,7 @@ constexpr int kBidMaxCents = 98;
 constexpr int kAskMinCents = 2;
 constexpr int kAskMaxCents = 99;
 constexpr int kHalfSpreadMin = 1;
+constexpr double kContractMaxCents = 100.0;
 
 Quoter::Quoter(QuoterConfig config, IOrderManager &order_mgr,
                RiskManager &risk_mgr, const FlowImbalanceGuard *flow_guard)
@@ -130,8 +131,17 @@ void Quoter::update(std::string_view ticker, const LocalOrderbook &book) {
         ticker, flow_guard_->imbalance_ratio(ticker_str), target_spread);
   }
   // Apply the spread floor: never quote tighter than min_spread_cents.
-  const int half_spread = std::max(
+  const int base_half_spread = std::max(
       {kHalfSpreadMin, target_spread / 2, config_.min_spread_cents / 2});
+  // Maker fee: widen so the net-of-fee edge is preserved. Kalshi's per-contract
+  // fee is γ·P·(1−P); estimate P from the fair value.
+  int fee_cents = 0;
+  if (config_.maker_fee_rate > 0.0) {
+    const double prob = fair_val / kContractMaxCents;
+    fee_cents = static_cast<int>(std::round(config_.maker_fee_rate * prob *
+                                            (1.0 - prob) * kContractMaxCents));
+  }
+  const int half_spread = base_half_spread + fee_cents;
   const double inventory_skew =
       static_cast<double>(order_mgr_.net_position(ticker_str)) *
       config_.skew_per_contract_cents;

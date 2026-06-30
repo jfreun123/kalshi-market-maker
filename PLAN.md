@@ -89,7 +89,7 @@ strings, timestamps) can only be confirmed once authenticated traffic flows.
 | 19 | Paper Trading Mode | `--paper` flag |
 | 20 | Documentation | `docs/`, `docs/adr/` |
 
-302 tests passing. Build clean.
+303 tests passing. Build clean.
 
 ### Also shipped (post-phase-20, on top of the table above)
 
@@ -250,9 +250,18 @@ remains the safe baseline) + `view_debias_beta`; `main` builds the chosen
 
 ---
 
-### Phase 30 — Maker Fee Integration
+### Phase 30 — Maker Fee Integration — built
 
-After April 2025, Kalshi charges Makers. Confirm γ_maker from current fee schedule. Add `maker_fee_rate` to `Config`. In `Quoter::compute_quotes()`, subtract `γ_maker × P × (1−P)` from effective half-spread so net-of-fee edge stays positive.
+`QuoterConfig.maker_fee_rate` (γ, default **0.0** — set to your market's actual
+rate, e.g. 0.07). In `Quoter::update`, the per-contract fee `γ·P·(1−P)` (P
+estimated from fair value, maximal ~1.75c at 50c for γ=0.07) is **added** to the
+half-spread so the net-of-fee edge stays positive. (The original PLAN sketch said
+"subtract from the half-spread" — that's backwards: covering a fee requires
+quoting *wider*, not tighter, so the fee widens the spread.) It stacks on top of
+the spread floor and imbalance widening, and is a no-op at the 0.0 default.
+
+**Files:** `source/quoter.hpp/cpp`, `source/config.cpp`, `config.example.json`,
+tests in `quoter_test` + `config_test`.
 
 ---
 
@@ -566,7 +575,7 @@ LPs accumulate net directional exposure (`E_win`) that dominates terminal P&L. T
 - [x] Phase 27 — Spread Floor & E_win Tracking (min_spread floor + OrderManager::exposure)
 - [x] Phase 26 — Flow Imbalance Signal (FlowImbalanceGuard → widen spread under one-sided flow)
 - [x] Phase 28 — View-Based Pricing (β=0.09 favorite-longshot debiasing, opt-in)
-- [ ] Phase 30 — Maker Fee Integration
+- [x] Phase 30 — Maker Fee Integration (γ·P·(1−P) widens spread; default off)
 
 **Deferred (scaling — after consistent profit on ≤5 tickers):**
 - [ ] Phase 21 — Async HTTP Order Dispatch
