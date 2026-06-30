@@ -11,13 +11,15 @@ namespace kalshi {
 // Kalshi YES/NO mechanics: the YES ask is implied by the NO book.
 //   best_ask_yes_cents = 100 - best_bid_no_cents
 //
-// Delta protocol: apply_delta with new_quantity=0 removes the level.
+// Delta protocol: apply_delta applies a SIGNED INCREMENT to the resting size at
+// a price level. A level is removed once its cumulative size reaches zero.
 class LocalOrderbook {
 public:
   void apply_snapshot(const Orderbook &snap);
 
-  // Upserts or removes one level. new_quantity=0 removes the level.
-  void apply_delta(Side side, int price_cents, int new_quantity);
+  // Adds `delta` (signed) to the size at price_cents, creating the level if
+  // needed. Removes the level when its size reaches <= 0.
+  void apply_delta(Side side, int price_cents, Quantity delta);
 
   // Best bid = highest YES price. nullopt if YES book is empty.
   [[nodiscard]] std::optional<Level> best_bid() const;

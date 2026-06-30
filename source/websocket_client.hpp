@@ -82,8 +82,8 @@ private:
 class WebSocketClient {
 public:
   using SnapshotCallback = std::function<void(const Orderbook &)>;
-  using DeltaCallback =
-      std::function<void(const std::string &ticker, Side, int price, int qty)>;
+  using DeltaCallback = std::function<void(const std::string &ticker, Side,
+                                           int price, Quantity delta)>;
   using FillCallback = std::function<void(const Fill &)>;
   using DisconnectCallback = std::function<void()>;
 

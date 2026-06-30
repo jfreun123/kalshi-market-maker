@@ -38,7 +38,7 @@ void TradingSession::on_snapshot(const Orderbook &snapshot) {
 }
 
 void TradingSession::on_delta(const std::string &ticker, Side side,
-                              int price_cents, int qty) {
+                              int price_cents, Quantity qty) {
   auto &book = ob_map_[ticker];
   book.apply_delta(side, price_cents, qty);
   get_logger()->debug("delta ticker={} side={} price={} qty={} mid={:.1f}",
@@ -165,7 +165,7 @@ void TradingSession::run_portfolio_risk() {
 void TradingSession::log_status() const {
   auto log = get_logger();
   for (const auto &ticker : tickers_) {
-    const int pos = order_mgr_.net_position(ticker);
+    const Quantity pos = order_mgr_.net_position(ticker);
     const double session_pnl = order_mgr_.realized_pnl(ticker);
     const double prior = prior_pnl_for(prior_pnl_, ticker);
     log->info("status ticker={} net_pos={} session_pnl_dollars={:.2f} "

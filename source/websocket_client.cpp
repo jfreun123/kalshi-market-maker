@@ -144,10 +144,8 @@ int dollars_to_cents(const std::string &dollars_str) {
   return static_cast<int>(std::round(std::stod(dollars_str) * kCentsPerDollar));
 }
 
-// "10.00" -> 10
-int parse_fp_count(const std::string &fp_str) {
-  return static_cast<int>(std::round(std::stod(fp_str)));
-}
+// "680.27" -> 680.27. Sizes are fractional and signed (deltas); do not round.
+Quantity parse_fp_count(const std::string &fp_str) { return std::stod(fp_str); }
 
 Side parse_side(const std::string &side_str) {
   if (side_str == "yes") {
@@ -164,12 +162,12 @@ Orderbook parse_snapshot(const nlohmann::json &msg) {
 
   for (const auto &entry : msg.at("yes_dollars_fp")) {
     const int price = dollars_to_cents(entry.at(0).get<std::string>());
-    const int qty = parse_fp_count(entry.at(1).get<std::string>());
+    const Quantity qty = parse_fp_count(entry.at(1).get<std::string>());
     book.yes.push_back({price, qty});
   }
   for (const auto &entry : msg.at("no_dollars_fp")) {
     const int price = dollars_to_cents(entry.at(0).get<std::string>());
-    const int qty = parse_fp_count(entry.at(1).get<std::string>());
+    const Quantity qty = parse_fp_count(entry.at(1).get<std::string>());
     book.no.push_back({price, qty});
   }
   return book;
@@ -279,7 +277,8 @@ void dispatch_delta(const WebSocketClient::DeltaCallback &callback,
     const Side side = parse_side(msg_body.at("side").get<std::string>());
     const int price =
         dollars_to_cents(msg_body.at("price_dollars").get<std::string>());
-    const int qty = parse_fp_count(msg_body.at("delta_fp").get<std::string>());
+    const Quantity qty =
+        parse_fp_count(msg_body.at("delta_fp").get<std::string>());
     callback(ticker, side, price, qty);
   } catch (const nlohmann::json::exception &ex) {
     get_logger()->debug("ws dropped malformed delta: {}", ex.what());

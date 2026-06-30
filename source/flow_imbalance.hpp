@@ -40,7 +40,7 @@ public:
   explicit FlowImbalanceGuard(FlowImbalanceConfig config);
 
   // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
-  void record_fill(std::string_view ticker, Side side, int quantity,
+  void record_fill(std::string_view ticker, Side side, Quantity quantity,
                    TimePoint when = Clock::now());
 
   // Larger-side / smaller-side fill volume over the window; 1.0 = balanced (or
@@ -59,11 +59,11 @@ private:
   struct Entry {
     TimePoint when;
     Side side;
-    int quantity;
+    Quantity quantity;
   };
 
   // {yes_volume, no_volume} for fills within [now - window, now].
-  [[nodiscard]] std::pair<std::int64_t, std::int64_t>
+  [[nodiscard]] std::pair<Quantity, Quantity>
   windowed_volume(std::string_view ticker, TimePoint now) const;
 
   FlowImbalanceConfig config_;

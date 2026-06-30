@@ -46,7 +46,7 @@ bool RiskManager::check_order(std::string_view ticker, Side side,
   }
 
   auto pos_it = cached_position_.find(ticker_str);
-  const int current_pos =
+  const Quantity current_pos =
       (pos_it != cached_position_.end()) ? pos_it->second : 0;
   const int delta = (side == Side::Yes) ? quantity : -quantity;
   return std::abs(current_pos + delta) <= limits_.max_position_per_market;

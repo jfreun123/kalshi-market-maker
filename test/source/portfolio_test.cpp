@@ -27,7 +27,8 @@ struct FakeOrderManager : public kalshi::IOrderManager {
   void cancel_all(std::string_view /*ticker*/) override {}
   void record_fill(const kalshi::Fill & /*fill*/) override {}
 
-  [[nodiscard]] int net_position(std::string_view ticker) const override {
+  [[nodiscard]] kalshi::Quantity
+  net_position(std::string_view ticker) const override {
     auto iter = positions.find(std::string{ticker});
     return iter == positions.end() ? 0 : iter->second;
   }

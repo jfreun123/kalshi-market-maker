@@ -113,7 +113,7 @@ private:
 
   RiskLimits limits_;
   std::bitset<kNumConstraints> constraints_;
-  std::unordered_map<std::string, int> cached_position_;
+  std::unordered_map<std::string, Quantity> cached_position_;
   std::unordered_map<std::string, int> cached_open_order_count_;
   double cached_total_pnl_cents_{0.0};
   // High-water mark of total PnL (cents) seen by update_portfolio. Starts at

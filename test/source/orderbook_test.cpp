@@ -181,35 +181,87 @@ TEST(LocalOrderbookTest, ApplyDeltaAddsNewYesLevel) {
   EXPECT_EQ(yes.back().quantity, kNewQty);
 }
 
-TEST(LocalOrderbookTest, ApplyDeltaUpdatesExistingYesLevel) {
+TEST(LocalOrderbookTest, ApplyDeltaAddsIncrementToExistingYesLevel) {
   kalshi::LocalOrderbook orderbook;
   orderbook.apply_snapshot(make_orderbook());
 
+  // delta_fp is a SIGNED INCREMENT to the resting size, not the new absolute.
   orderbook.apply_delta(kalshi::Side::Yes, kYesBid, kQtyUpdated);
 
   const auto &yes = orderbook.state().yes;
   ASSERT_EQ(yes.size(), kTwoLevels);
   EXPECT_EQ(yes[0].price_cents, kYesBid);
-  EXPECT_EQ(yes[0].quantity, kQtyUpdated);
+  EXPECT_DOUBLE_EQ(yes[0].quantity, kQtyLarge + kQtyUpdated);
 }
 
-TEST(LocalOrderbookTest, ApplyDeltaRemovesYesLevelWhenQuantityZero) {
+TEST(LocalOrderbookTest, ApplyDeltaSubtractsNegativeIncrement) {
   kalshi::LocalOrderbook orderbook;
   orderbook.apply_snapshot(make_orderbook());
 
-  orderbook.apply_delta(kalshi::Side::Yes, kYesBid, 0);
+  constexpr double kShrink = -50.0;
+  orderbook.apply_delta(kalshi::Side::Yes, kYesBid, kShrink);
+
+  const auto &yes = orderbook.state().yes;
+  ASSERT_EQ(yes.size(), kTwoLevels);
+  EXPECT_DOUBLE_EQ(yes[0].quantity, kQtyLarge + kShrink);
+}
+
+TEST(LocalOrderbookTest, ApplyDeltaCarriesFractionalSize) {
+  kalshi::LocalOrderbook orderbook;
+  orderbook.apply_snapshot(make_orderbook());
+
+  // The exchange sends fractional contract counts; sub-unit deltas must not be
+  // rounded away (a -0.16 shrink used to round to 0 and erase the whole level).
+  constexpr double kFractionalShrink = -0.16;
+  orderbook.apply_delta(kalshi::Side::Yes, kYesBid, kFractionalShrink);
+
+  const auto &yes = orderbook.state().yes;
+  ASSERT_EQ(yes.size(), kTwoLevels);
+  EXPECT_DOUBLE_EQ(yes[0].quantity, kQtyLarge + kFractionalShrink);
+}
+
+TEST(LocalOrderbookTest, ApplyDeltaRemovesYesLevelWhenSizeReachesZero) {
+  kalshi::LocalOrderbook orderbook;
+  orderbook.apply_snapshot(make_orderbook());
+
+  // A negative increment equal to the resting size drives it to 0 -> removed.
+  orderbook.apply_delta(kalshi::Side::Yes, kYesBid, -kQtyLarge);
 
   const auto &yes = orderbook.state().yes;
   ASSERT_EQ(yes.size(), kOneLevel);
   EXPECT_EQ(yes[0].price_cents, kYesBid2);
 }
 
-TEST(LocalOrderbookTest, ApplyDeltaIgnoresRemoveForNonExistentLevel) {
+TEST(LocalOrderbookTest, ApplyDeltaRemovesYesLevelWhenSizeGoesNegative) {
   kalshi::LocalOrderbook orderbook;
   orderbook.apply_snapshot(make_orderbook());
 
-  orderbook.apply_delta(kalshi::Side::Yes, kNewPrice,
-                        0); // kNewPrice not in book
+  // Over-shrinking must not leave a negative resting size in the book.
+  orderbook.apply_delta(kalshi::Side::Yes, kYesBid, -(kQtyLarge + kQtySmall));
+
+  const auto &yes = orderbook.state().yes;
+  ASSERT_EQ(yes.size(), kOneLevel);
+  EXPECT_EQ(yes[0].price_cents, kYesBid2);
+}
+
+TEST(LocalOrderbookTest, ApplyDeltaZeroIncrementIsNoOp) {
+  kalshi::LocalOrderbook orderbook;
+  orderbook.apply_snapshot(make_orderbook());
+
+  orderbook.apply_delta(kalshi::Side::Yes, kYesBid, 0);
+
+  const auto &yes = orderbook.state().yes;
+  ASSERT_EQ(yes.size(), kTwoLevels);
+  EXPECT_DOUBLE_EQ(yes[0].quantity, kQtyLarge); // unchanged
+}
+
+TEST(LocalOrderbookTest,
+     ApplyDeltaIgnoresNegativeIncrementForNonExistentLevel) {
+  kalshi::LocalOrderbook orderbook;
+  orderbook.apply_snapshot(make_orderbook());
+
+  // A shrink for a level we don't have must not create a negative level.
+  orderbook.apply_delta(kalshi::Side::Yes, kNewPrice, -100.0);
 
   EXPECT_EQ(orderbook.state().yes.size(), kTwoLevels); // unchanged
 }
@@ -245,7 +297,8 @@ TEST(LocalOrderbookTest, BestBidUpdatesAfterDeltaRemovesTopLevel) {
   kalshi::LocalOrderbook orderbook;
   orderbook.apply_snapshot(make_orderbook());
 
-  orderbook.apply_delta(kalshi::Side::Yes, kYesBid, 0); // remove top bid
+  orderbook.apply_delta(kalshi::Side::Yes, kYesBid,
+                        -kQtyLarge); // drain top bid to zero
 
   auto bid = orderbook.best_bid();
   ASSERT_TRUE(bid.has_value());
@@ -261,7 +314,7 @@ TEST(LocalOrderbookTest, EmptyYesBookAfterRemovingAllLevels) {
   snap.yes = {{kYesBid, kQtySmall}};
   orderbook.apply_snapshot(snap);
 
-  orderbook.apply_delta(kalshi::Side::Yes, kYesBid, 0);
+  orderbook.apply_delta(kalshi::Side::Yes, kYesBid, -kQtySmall);
 
   EXPECT_FALSE(orderbook.best_bid().has_value());
 }

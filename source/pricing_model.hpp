@@ -1,5 +1,7 @@
 #pragma once
 
+#include "types.hpp"
+
 #include <optional>
 
 namespace kalshi {
@@ -7,7 +9,7 @@ namespace kalshi {
 struct FairValueInput {
   double mid_cents;           // orderbook mid-price in cents [1, 99]
   double time_to_close_hours; // hours until market resolves (must be >= 0)
-  int net_position;           // net YES contracts held (negative = net NO)
+  Quantity net_position;      // net YES contracts held (negative = net NO)
   std::optional<double>
       external_prob; // external probability estimate in [0, 1]
 };

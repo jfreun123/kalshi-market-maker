@@ -12,11 +12,24 @@ enum class Side { Yes, No };
 enum class OrderStatus { Open, PartiallyFilled, Filled, Cancelled };
 enum class OrderType { Limit, Market };
 
+// ---- Quantity ----
+
+// Contract counts are fractional on the wire: the aggregate orderbook reports
+// resting depth as the sum of many makers' sizes (e.g. 680.27, -0.16), and the
+// V2 fill/position fields are `*_fp` strings. Rounding to int corrupts the book
+// (a -0.16 shrink rounds to 0 and erases the level). All count/size fields use
+// this type.
+using Quantity = double;
+
+// A size at or below this is treated as "gone" — absorbs float rounding when a
+// stream of signed deltas drives a level's resting size to zero.
+inline constexpr Quantity kQuantityEpsilon = 1e-6;
+
 // ---- Orderbook types ----
 
 struct Level {
   int price_cents{0};
-  int quantity{0};
+  Quantity quantity{0};
 
   bool operator==(const Level &) const = default;
 };
@@ -34,13 +47,13 @@ struct Order {
   std::string market_ticker;
   Side side{Side::Yes};
   int price_cents{0};
-  int quantity{0};
-  int filled_quantity{0};
+  Quantity quantity{0};
+  Quantity filled_quantity{0};
   OrderStatus status{OrderStatus::Open};
   OrderType type{OrderType::Limit};
   std::chrono::system_clock::time_point created_at;
 
-  [[nodiscard]] int remaining_quantity() const {
+  [[nodiscard]] Quantity remaining_quantity() const {
     return quantity - filled_quantity;
   }
 
@@ -57,7 +70,7 @@ struct Fill {
   std::string market_ticker;
   Side side{Side::Yes};
   int price_cents{0};
-  int quantity{0};
+  Quantity quantity{0};
   bool is_taker{false};
   std::chrono::system_clock::time_point timestamp;
 };
@@ -82,7 +95,7 @@ struct Market {
 // GET /portfolio/positions. Used to reconcile against local accounting.
 struct MarketPosition {
   std::string ticker;
-  int position{0};                   // signed contracts: + YES, - NO
+  Quantity position{0};              // signed contracts: + YES, - NO
   double realized_pnl_cents{0.0};    // includes fees
   double market_exposure_cents{0.0}; // capital currently at risk
   int resting_orders_count{0};

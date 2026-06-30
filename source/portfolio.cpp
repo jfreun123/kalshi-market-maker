@@ -1,6 +1,7 @@
 #include "portfolio.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -19,7 +20,7 @@ Reconciliation
 reconcile(const IOrderManager &order_mgr,
           const std::vector<std::string> &tickers,
           const std::vector<MarketPosition> &exchange_positions) {
-  std::unordered_map<std::string, int> exchange_by_ticker;
+  std::unordered_map<std::string, Quantity> exchange_by_ticker;
   for (const auto &position : exchange_positions) {
     exchange_by_ticker[position.ticker] = position.position;
   }
@@ -28,18 +29,18 @@ reconcile(const IOrderManager &order_mgr,
   // position in (so positions we don't track still surface).
   std::unordered_set<std::string> to_check{tickers.begin(), tickers.end()};
   for (const auto &position : exchange_positions) {
-    if (position.position != 0) {
+    if (std::abs(position.position) > kQuantityEpsilon) {
       to_check.insert(position.ticker);
     }
   }
 
   Reconciliation result;
   for (const auto &ticker : to_check) {
-    const int local = order_mgr.net_position(ticker);
+    const Quantity local = order_mgr.net_position(ticker);
     auto exch_it = exchange_by_ticker.find(ticker);
-    const int exchange =
+    const Quantity exchange =
         exch_it == exchange_by_ticker.end() ? 0 : exch_it->second;
-    if (local != exchange) {
+    if (std::abs(local - exchange) > kQuantityEpsilon) {
       result.diffs.push_back({ticker, local, exchange});
     }
   }

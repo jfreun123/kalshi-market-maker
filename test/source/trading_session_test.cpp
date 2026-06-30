@@ -74,7 +74,7 @@ std::string order_json(const std::string &order_id, int qty) {
 
 // NOLINTBEGIN(bugprone-easily-swappable-parameters)
 kalshi::Orderbook make_orderbook(const std::string &ticker, int yes_bid,
-                                 int no_bid, int qty) {
+                                 int no_bid, kalshi::Quantity qty) {
   kalshi::Orderbook book;
   book.ticker = ticker;
   book.yes = {kalshi::Level{yes_bid, qty}};

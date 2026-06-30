@@ -46,8 +46,8 @@ struct PortfolioSnapshot {
 // One ticker where local accounting disagrees with the exchange.
 struct PositionDiff {
   std::string ticker;
-  int local_position{0};
-  int exchange_position{0};
+  Quantity local_position{0};
+  Quantity exchange_position{0};
 };
 
 // Result of reconciling local positions against the exchange's authoritative

@@ -78,26 +78,26 @@ void OrderManager::record_fill(const Fill &fill) {
                                         ? yes_lots_[fill.market_ticker]
                                         : no_lots_[fill.market_ticker];
 
-  int remaining = fill.quantity;
-  while (remaining > 0 && !opposing_inventory.empty()) {
+  Quantity remaining = fill.quantity;
+  while (remaining > kQuantityEpsilon && !opposing_inventory.empty()) {
     Lot &front = opposing_inventory.front();
-    const int matched = std::min(remaining, front.remaining);
+    const Quantity matched = std::min(remaining, front.remaining);
     realized_pnl_[fill.market_ticker] +=
         static_cast<double>(kContractMaxCents - fill.price_cents -
                             front.price_cents) *
         matched;
     remaining -= matched;
     front.remaining -= matched;
-    if (front.remaining == 0) {
+    if (front.remaining <= kQuantityEpsilon) {
       opposing_inventory.pop_front();
     }
   }
-  if (remaining > 0) {
+  if (remaining > kQuantityEpsilon) {
     same_inventory.push_back({fill.price_cents, remaining});
   }
 
   // Update net position: YES = +qty, NO = -qty.
-  const int signed_qty =
+  const Quantity signed_qty =
       (fill.side == Side::Yes) ? fill.quantity : -fill.quantity;
   net_position_[fill.market_ticker] += signed_qty;
 
@@ -114,7 +114,7 @@ void OrderManager::record_fill(const Fill &fill) {
   }
 }
 
-int OrderManager::net_position(std::string_view ticker) const {
+Quantity OrderManager::net_position(std::string_view ticker) const {
   auto position_it = net_position_.find(std::string{ticker});
   return position_it == net_position_.end() ? 0 : position_it->second;
 }
@@ -179,12 +179,12 @@ OrderManager::exposure_decomposition(std::string_view ticker) const {
   // Sum the open inventory on one side: returns {contracts, total cost cents}.
   auto sum_side =
       [&key](const std::unordered_map<std::string, std::deque<Lot>> &lots)
-      -> std::pair<int, double> {
+      -> std::pair<Quantity, double> {
     auto iter = lots.find(key);
     if (iter == lots.end()) {
       return {0, 0.0};
     }
-    int quantity = 0;
+    Quantity quantity = 0;
     double cost = 0.0;
     for (const Lot &lot : iter->second) {
       quantity += lot.remaining;
@@ -202,10 +202,9 @@ OrderManager::exposure_decomposition(std::string_view ticker) const {
 
   // Inventory sits on at most one side; value the dominant side against its
   // winning outcome (each contract pays 100) and its losing outcome (pays 0).
-  const int held_qty = (yes_qty >= no_qty) ? yes_qty : no_qty;
+  const Quantity held_qty = (yes_qty >= no_qty) ? yes_qty : no_qty;
   const double held_cost = (yes_qty >= no_qty) ? yes_cost : no_cost;
-  decomp.e_win_cents =
-      static_cast<double>(held_qty) * kContractMaxCents - held_cost;
+  decomp.e_win_cents = held_qty * kContractMaxCents - held_cost;
   decomp.e_loss_cents = -held_cost;
   return decomp;
 }
