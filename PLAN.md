@@ -305,20 +305,31 @@ were found and fixed, plus several environment/strategy learnings.
 - [x] order price ∈ [1,99], quantity > 0 (`OrderManager::place`)
 - [x] fair value is finite before quoting (`Quoter::update`)
 - [x] portfolio notional + PnL finite before the kill-switch (`RiskManager::update_portfolio`)
-- [ ] `complement_price` ∈ [1,99]
-- [ ] `best_bid < best_ask` when both sides present; no negative level sizes
-      (careful: real books lock/cross transiently — may not be a hard invariant)
-- [ ] net position and open-order counts within hard caps (careful: a fill can
-      legitimately push net position past a cap — likely not an `ensure`)
-- [ ] config values sane at load (spreads ≥ 0, price band `min < max`) — note
-      config is *operator input*, so a thrown error may fit better than `ensure`
-- [ ] realized/unrealized PnL and marks are finite at the source (order_manager)
+- [x] incoming fills: finite positive size, price ∈ [1,99] (`OrderManager::record_fill`).
+      This roots **finite PnL/marks at the source** — fills are the only NaN
+      entry point (prices are ints; PnL/lots/marks all derive from fill size),
+      so realized/unrealized PnL can no longer go non-finite downstream.
+- [~] `complement_price` ∈ [1,99] — **already covered, no separate guard.** The
+      only place we act on it is `Quoter::refresh_ask` → `place(Side::No, …)`,
+      which the `place()` guard above already validates. Guarding it in
+      `best_ask()` instead would assert on *wire input* and crash the whole bot
+      if a settling market sends a 0/100 price — not worth the false-positive.
+
+**Deliberately NOT seeded (would cause false-positive crashes or aren't hard
+invariants):**
+
+- `best_bid < best_ask` — real books lock/cross transiently.
+- net position / open-order counts within caps — a fill can legitimately push
+  net position past a cap (we can't un-fill); that's a gate, not an invariant.
+- config sanity at load — *operator input*; a clear thrown error fits better
+  than `ensure`'s "this is impossible" semantics.
 
 **Rollout:** land the primitive + its tests first, then introduce `ensure`
 calls incrementally — one subsystem per commit — so every new invariant ships
 with a test that exercises both the pass and the flatten-then-crash path. *Done
-so far (branch MOBILE2): the primitive + the three guards checked above, each
-with pass + flatten-then-crash tests.*
+(branch MOBILE2): the primitive + the four guards checked above, each with pass
++ flatten-then-crash tests. The remaining candidates are intentionally left
+un-guarded for the reasons above; the clean rollout is complete.*
 
 ---
 
