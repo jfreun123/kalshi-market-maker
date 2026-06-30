@@ -145,6 +145,60 @@ were found and fixed, plus several environment/strategy learnings.
 
 ---
 
+## Safety: `ensure()` Fail-Fast Invariant Checks
+
+- [ ] **Add a project-wide `ensure()` primitive.** Used liberally to assert
+  invariants that must hold for safe trading. On violation: **flatten (cancel
+  all resting orders) then crash** with a non-zero exit. An inconsistent process
+  must never keep quoting — fail loud and flat, don't limp on.
+
+**Design (the parts that are easy to get wrong):**
+
+- New `source/ensure.{hpp,cpp}` (Common). Signature roughly:
+  `void ensure(bool condition, std::string_view what,
+  std::source_location loc = std::source_location::current())`. On failure: log
+  `critical` with `file:line` + message, invoke the registered panic handler
+  (flatten), then terminate.
+- **Flatten-before-crash needs a registered hook.** `ensure` can be called from
+  anywhere and has no access to the `OrderManager`. At startup `main` registers
+  a panic handler — e.g. `set_panic_handler([&] { session.cancel_all_quotes(); })`
+  — that `ensure` calls on failure. `cancel_all_quotes` is already
+  best-effort / never-throws, so it is safe on this path.
+- **RAII will NOT save us here.** `std::abort()` / `std::terminate` do not run
+  stack-unwind destructors, so the existing exit-time `ScopeGuard` cancel-all
+  will *not* fire on an `ensure` failure. That is exactly why `ensure` must
+  flatten explicitly via the hook *before* aborting.
+- **Thread-safety / reentrancy.** `ensure` may fire on the WS thread or the main
+  loop; the panic handler must take the same `engine_mtx` (or be lock-free
+  best-effort) and be idempotent. Guard against an `ensure` failing *inside* the
+  handler: set a "panicking" flag on first entry; a second entry skips the
+  re-flatten and aborts immediately, so we can never deadlock or recurse.
+- **Testability (TDD first).** Make the terminating action injectable — default
+  to `std::abort`, overridable in tests to a recording/throwing stub — so tests
+  can assert "(a) the panic handler ran (flatten was called) and (b) abort was
+  requested" without killing the test process. Same injection pattern as the
+  configurable logger.
+- **Distinct from a risk halt.** A risk halt is recoverable (`resume()`); an
+  `ensure` violation is an unrecoverable invariant break → flatten + exit
+  non-zero. Use `ensure` only for "this should be impossible" conditions, never
+  for normal control flow or expected error handling (those stay
+  exceptions / `check_order` rejections).
+
+**Candidate invariants to seed the rollout:**
+
+- order price ∈ [1,99], quantity > 0, `complement_price` ∈ [1,99]
+- `best_bid < best_ask` when both sides present; no negative level sizes
+- fair value is finite (not NaN/inf) and ∈ [1,99] before quoting
+- net position and open-order counts within the configured hard caps
+- config values sane at load (spreads ≥ 0, price band `min < max`)
+- realized/unrealized PnL and marks are finite
+
+**Rollout:** land the primitive + its tests first, then introduce `ensure`
+calls incrementally — one subsystem per commit — so every new invariant ships
+with a test that exercises both the pass and the flatten-then-crash path.
+
+---
+
 ## UAT Blockers
 
 **BLOCKER-1 (resolved):** `IxWebSocket` implemented via FetchContent `machinezone/IXWebSocket`. End-to-end connection to live UAT not yet verified.
