@@ -92,7 +92,44 @@ TEST(LocalOrderbookTest, ApplySnapshotOverwritesPreviousState) {
   ASSERT_EQ(orderbook.state().yes.size(), kOneLevel);
 }
 
-// ---- BBO after snapshot ----
+// ---- BBO after a snapshot in the exchange's ascending order ----
+
+TEST(LocalOrderbookTest, ApplySnapshotSortsExchangeAscendingLevelsDescending) {
+  // The exchange sends levels in ASCENDING price order (lowest first, typically
+  // a 1c dust level). best_bid/best_ask/find_level all assume DESCENDING (best
+  // at front), so apply_snapshot must sort — otherwise best_bid is the 1c dust
+  // level and the computed mid is garbage (this caused post-only-cross quotes).
+  kalshi::Orderbook book;
+  book.ticker = "KXBTCD";
+  book.yes = {{1, 5000}, {46, 100}, {53, 200}}; // ascending as on the wire
+  book.no = {{1, 5000}, {40, 100}, {44, 300}};  // ascending as on the wire
+
+  kalshi::LocalOrderbook orderbook;
+  orderbook.apply_snapshot(book);
+
+  ASSERT_TRUE(orderbook.best_bid().has_value());
+  EXPECT_EQ(orderbook.best_bid()->price_cents, 53); // highest YES bid, not 1
+  ASSERT_TRUE(orderbook.best_ask().has_value());
+  EXPECT_EQ(orderbook.best_ask()->price_cents, 56); // 100 - highest NO bid (44)
+  EXPECT_DOUBLE_EQ(orderbook.mid_price_cents(), 54.5);
+}
+
+TEST(LocalOrderbookTest, DeltaMaintainsOrderAfterAscendingSnapshot) {
+  // After the sorted snapshot, a delta that adds a new best bid must land at
+  // the front (the descending invariant must hold through delta application
+  // too).
+  kalshi::Orderbook book;
+  book.ticker = "KXBTCD";
+  book.yes = {{1, 5000}, {46, 100}, {53, 200}};
+  book.no = {{1, 5000}, {40, 100}, {44, 300}};
+  kalshi::LocalOrderbook orderbook;
+  orderbook.apply_snapshot(book);
+
+  orderbook.apply_delta(kalshi::Side::Yes, 55, 75); // new top-of-book YES bid
+
+  ASSERT_TRUE(orderbook.best_bid().has_value());
+  EXPECT_EQ(orderbook.best_bid()->price_cents, 55);
+}
 
 TEST(LocalOrderbookTest, BestBidIsHighestYesPrice) {
   kalshi::LocalOrderbook orderbook;

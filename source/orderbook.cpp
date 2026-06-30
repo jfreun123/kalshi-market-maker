@@ -36,7 +36,17 @@ auto insertion_point(std::vector<Level> &levels,
 
 } // namespace
 
-void LocalOrderbook::apply_snapshot(const Orderbook &snap) { state_ = snap; }
+void LocalOrderbook::apply_snapshot(const Orderbook &snap) {
+  state_ = snap;
+  // The exchange sends levels in ascending price order, but best_bid/best_ask
+  // and the delta search/insert all rely on descending order (best at front).
+  // Sort on ingest so that invariant holds regardless of wire order.
+  const auto by_price_descending = [](const Level &left, const Level &right) {
+    return left.price_cents > right.price_cents;
+  };
+  std::sort(state_.yes.begin(), state_.yes.end(), by_price_descending);
+  std::sort(state_.no.begin(), state_.no.end(), by_price_descending);
+}
 
 void LocalOrderbook::apply_delta(Side side, int price_cents, int new_quantity) {
   auto &levels = (side == Side::Yes) ? state_.yes : state_.no;
