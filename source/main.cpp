@@ -1,6 +1,7 @@
 #include "auth.hpp"
 #include "capture.hpp"
 #include "config.hpp"
+#include "ensure.hpp"
 #include "fair_value.hpp"
 #include "flow_imbalance.hpp"
 #include "http_transport.hpp"
@@ -45,6 +46,10 @@
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::atomic<bool> g_shutdown{false};
 
+// SIGINT/SIGTERM are the *graceful* path: flip the flag and let the main loop
+// fall out so the RAII shutdown guard stops the feed, joins, and flattens. The
+// flatten-on-crash hooks for fatal signals / std::terminate live in the ensure
+// module (install_crash_flatten_handlers).
 extern "C" void handle_signal(int /*sig*/) { g_shutdown.store(true); }
 
 // ---- Logger setup ----
@@ -474,6 +479,14 @@ int main(int argc, char *argv[]) {
     kalshi::TradingSession session{app_config.target_tickers, order_mgr,
                                    risk_mgr, quoter, &flow_guard};
 
+    // Flatten-on-crash: ensure()/std::terminate/fatal signals all flatten via
+    // this hook. cancel_all_quotes is best-effort and never throws. It is
+    // called WITHOUT engine_mtx on purpose — an ensure() can fire while the
+    // lock is already held, so re-locking here would self-deadlock; on a crash
+    // a racy unlocked cancel beats a hung process with quotes resting.
+    kalshi::set_panic_handler([&session]() { session.cancel_all_quotes(); });
+    kalshi::install_crash_flatten_handlers();
+
     const std::filesystem::path pnl_path{"pnl_state.json"};
     auto prior_pnl = load_pnl(pnl_path);
     for (const auto &[ticker, cents] : prior_pnl) {
@@ -484,6 +497,19 @@ int main(int argc, char *argv[]) {
     session.set_pnl_listener([&pnl_path, &log](const PnlMap &pnl) {
       persist_pnl(pnl_path, pnl, log);
     });
+
+    // Start flat: cancel any orders left resting on the exchange by a prior run
+    // before we place a single quote, so a stale order can't fill against us or
+    // self-cross. Live only (paper has no real resting orders). Best-effort — a
+    // transient REST failure here must not block startup.
+    if (paper_ptr == nullptr) {
+      try {
+        session.cancel_preexisting_orders(rest.get_open_orders());
+      } catch (const std::exception &ex) {
+        log->warn("startup: could not fetch/cancel pre-existing orders: {}",
+                  ex.what());
+      }
+    }
 
     for (const auto &ticker : app_config.target_tickers) {
       // Contain per-ticker startup failures (closed/invalid market, transient
@@ -512,7 +538,7 @@ int main(int argc, char *argv[]) {
 
     ws_client.on_orderbook_delta(
         [&session, &engine_mtx](const std::string &ticker, kalshi::Side side,
-                                int price, int qty) {
+                                int price, kalshi::Quantity qty) {
           const std::lock_guard<std::mutex> lock{engine_mtx};
           session.on_delta(ticker, side, price, qty);
         });
@@ -544,6 +570,11 @@ int main(int argc, char *argv[]) {
         ws_thread.join();
       }
       session.cancel_all_quotes();
+      // The crash-flatten hook holds a reference to `session`, which is about
+      // to be destroyed; clear it so a fault during later teardown can't
+      // flatten through a dangling reference. run_panic_handler() is a no-op
+      // once empty.
+      kalshi::set_panic_handler(nullptr);
       log->info("shutdown complete");
     }};
 

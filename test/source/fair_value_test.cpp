@@ -21,7 +21,7 @@ kalshi::FairValueEngine make_engine() {
 
 kalshi::FairValueInput make_input(double mid_cents,
                                   double time_to_close_hours = kLargeTimeHours,
-                                  int net_position = 0) {
+                                  kalshi::Quantity net_position = 0) {
   return kalshi::FairValueInput{
       mid_cents, time_to_close_hours, net_position, {}};
 }

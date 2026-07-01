@@ -1,9 +1,11 @@
 #include "risk_manager.hpp"
 
+#include "ensure.hpp"
 #include "logger.hpp"
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdlib>
 #include <limits>
 #include <string>
@@ -46,7 +48,7 @@ bool RiskManager::check_order(std::string_view ticker, Side side,
   }
 
   auto pos_it = cached_position_.find(ticker_str);
-  const int current_pos =
+  const Quantity current_pos =
       (pos_it != cached_position_.end()) ? pos_it->second : 0;
   const int delta = (side == Side::Yes) ? quantity : -quantity;
   return std::abs(current_pos + delta) <= limits_.max_position_per_market;
@@ -74,12 +76,20 @@ void RiskManager::update(const IOrderManager &order_mgr,
 }
 
 void RiskManager::update_portfolio(const PortfolioSnapshot &snapshot) {
+  // The kill-switch below is a set of `value > limit` comparisons. A NaN makes
+  // every one false, silently disabling the halt while we keep trading — the
+  // worst possible failure. A non-finite aggregate means upstream accounting is
+  // broken; flatten and crash rather than run blind.
+  const double total_pnl_cents = snapshot.total_pnl_cents();
+  ensure(std::isfinite(snapshot.total_notional_cents),
+         "portfolio notional is not finite");
+  ensure(std::isfinite(total_pnl_cents), "portfolio PnL is not finite");
+
   if (snapshot.total_notional_cents / kCentsToDollars >
       limits_.max_total_exposure_dollars) {
     set(Constraint::kOverExposure);
   }
 
-  const double total_pnl_cents = snapshot.total_pnl_cents();
   if (total_pnl_cents / kCentsToDollars < limits_.max_total_loss_dollars) {
     set(Constraint::kPortfolioLoss);
   }

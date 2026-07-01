@@ -167,12 +167,14 @@ bool PaperTransport::simulate_fill(const std::string &order_id,
     return false;
   }
 
-  const int remaining = order_iter->quantity - order_iter->filled_quantity;
-  const int actual_fill = std::min(fill_quantity, remaining);
+  const Quantity remaining = order_iter->quantity - order_iter->filled_quantity;
+  const Quantity actual_fill =
+      std::min(static_cast<Quantity>(fill_quantity), remaining);
   order_iter->filled_quantity += actual_fill;
-  order_iter->status = (order_iter->filled_quantity == order_iter->quantity)
-                           ? OrderStatus::Filled
-                           : OrderStatus::PartiallyFilled;
+  order_iter->status =
+      (order_iter->filled_quantity >= order_iter->quantity - kQuantityEpsilon)
+          ? OrderStatus::Filled
+          : OrderStatus::PartiallyFilled;
 
   Fill fill;
   fill.order_id = order_id;

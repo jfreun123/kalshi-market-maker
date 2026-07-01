@@ -38,7 +38,7 @@ void TradingSession::on_snapshot(const Orderbook &snapshot) {
 }
 
 void TradingSession::on_delta(const std::string &ticker, Side side,
-                              int price_cents, int qty) {
+                              int price_cents, Quantity qty) {
   auto &book = ob_map_[ticker];
   book.apply_delta(side, price_cents, qty);
   get_logger()->debug("delta ticker={} side={} price={} qty={} mid={:.1f}",
@@ -108,8 +108,53 @@ void TradingSession::cancel_all_quotes() {
 }
 
 void TradingSession::enforce_quote_safety() {
-  if (risk_mgr_.is_halted()) {
+  // Edge-triggered: flatten once when the halt begins. Re-running every tick
+  // livelocks if a resting order can't be cancelled (already filled -> the
+  // cancel keeps failing and it stays in open_orders forever). Quoting is
+  // separately gated on the halt, so no new quotes appear that would need
+  // re-flattening.
+  if (!risk_mgr_.is_halted()) {
+    halt_flattened_ = false;
+    return;
+  }
+  if (!halt_flattened_) {
     cancel_all_quotes();
+    halt_flattened_ = true;
+  }
+}
+
+void TradingSession::cancel_preexisting_orders(
+    const std::vector<Order> &resting_orders) {
+  int cancelled = 0;
+  int left_untracked = 0;
+  for (const auto &order : resting_orders) {
+    const bool tracked = std::find(tickers_.begin(), tickers_.end(),
+                                   order.market_ticker) != tickers_.end();
+    if (!tracked) {
+      // Not one of our markets — could belong to another strategy or instance.
+      // Surface it loudly rather than cancelling someone else's order.
+      get_logger()->warn(
+          "startup: resting order on untracked ticker={} id={} left in place",
+          order.market_ticker, order.id);
+      ++left_untracked;
+      continue;
+    }
+    try {
+      get_logger()->warn(
+          "startup: cancelling pre-existing order ticker={} id={}",
+          order.market_ticker, order.id);
+      order_mgr_.cancel(order.id);
+      ++cancelled;
+    } catch (const std::exception &ex) {
+      get_logger()->error("startup: failed to cancel orphan id={}: {}",
+                          order.id, ex.what());
+    }
+  }
+  if (cancelled > 0 || left_untracked > 0) {
+    get_logger()->info(
+        "startup: cancelled {} orphan order(s) on tracked tickers; left {} on "
+        "untracked tickers",
+        cancelled, left_untracked);
   }
 }
 
@@ -165,7 +210,7 @@ void TradingSession::run_portfolio_risk() {
 void TradingSession::log_status() const {
   auto log = get_logger();
   for (const auto &ticker : tickers_) {
-    const int pos = order_mgr_.net_position(ticker);
+    const Quantity pos = order_mgr_.net_position(ticker);
     const double session_pnl = order_mgr_.realized_pnl(ticker);
     const double prior = prior_pnl_for(prior_pnl_, ticker);
     log->info("status ticker={} net_pos={} session_pnl_dollars={:.2f} "

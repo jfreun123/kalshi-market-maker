@@ -41,7 +41,7 @@ private:
 
 kalshi::FairValueInput make_input(double mid_cents,
                                   double time_to_close_hours = kLargeTimeHours,
-                                  int net_position = 0,
+                                  kalshi::Quantity net_position = 0,
                                   std::optional<double> external_prob = {}) {
   return kalshi::FairValueInput{mid_cents, time_to_close_hours, net_position,
                                 external_prob};

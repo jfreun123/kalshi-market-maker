@@ -41,7 +41,8 @@ public:
   // Replace a market's book from a fresh snapshot (no re-quote).
   void on_snapshot(const Orderbook &snapshot);
   // Apply an incremental book update and re-quote that market.
-  void on_delta(const std::string &ticker, Side side, int price_cents, int qty);
+  void on_delta(const std::string &ticker, Side side, int price_cents,
+                Quantity qty);
   // Record a fill, refresh per-market risk, and notify the PnL listener.
   void on_fill(const Fill &fill);
   // Cancel all resting orders (called when the market-data feed drops).
@@ -50,6 +51,13 @@ public:
   // Best-effort flatten: cancel every resting order across all tickers. Never
   // throws — safe to call from shutdown / error paths.
   void cancel_all_quotes();
+
+  // Cancel resting orders the exchange reports on our tracked tickers — orphans
+  // from a prior run that we hold no local state for. Call once at startup,
+  // before quoting, so we begin flat and never quote alongside a stale order
+  // that could fill against us or self-cross. Orders on untracked tickers are
+  // left alone (logged). Best-effort; never throws.
+  void cancel_preexisting_orders(const std::vector<Order> &resting_orders);
 
   // Safety net: if risk is halted, cancel all resting quotes so a halt can't
   // leave orders on the book to fill adversely. Idempotent and cheap once flat;
@@ -91,6 +99,8 @@ private:
   OrderbookMap ob_map_;
   PnlMap prior_pnl_;
   PnlListener pnl_listener_;
+  bool halt_flattened_{
+      false}; // edge-trigger: flatten once per halt, not per tick
 };
 
 } // namespace kalshi

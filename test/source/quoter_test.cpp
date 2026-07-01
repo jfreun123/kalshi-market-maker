@@ -1,7 +1,10 @@
+#include "ensure.hpp"
+#include "fair_value.hpp"
 #include "fake_transport.hpp"
 #include "flow_imbalance.hpp"
 #include "order_manager.hpp"
 #include "orderbook.hpp"
+#include "pricing_model.hpp"
 #include "quoter.hpp"
 #include "rest_client.hpp"
 #include "risk_manager.hpp"
@@ -12,7 +15,9 @@
 #include <openssl/rsa.h>
 
 #include <chrono>
+#include <limits>
 #include <memory>
+#include <stdexcept>
 #include <string>
 
 // ---- Test constants ----
@@ -43,8 +48,9 @@ constexpr std::string_view kAskPriceMid52 =
 constexpr std::string_view kBidPriceMid52Long20 = R"("price":"0.4900")";
 constexpr std::string_view kBidPriceMid52Short20 = R"("price":"0.5100")";
 constexpr std::string_view kBidPriceExtremeClamp = R"("price":"0.0100")";
-constexpr std::string_view kAskPriceExtremeClamp =
-    R"("price":"0.0400")"; // YES=100-96=4
+// Extreme long skew prices the raw ask at 4c — through the market bid of 51.
+// The non-crossing clamp lifts it to the passive 52c (1c above the bid).
+constexpr std::string_view kAskPriceExtremeClamp = R"("price":"0.5200")";
 // Flow imbalance: default spread 4 → half 2 → bid 50; +2 imbalance → half 3 →
 // bid 49.
 constexpr std::string_view kBidPriceImbalanced = R"("price":"0.4900")";
@@ -127,6 +133,63 @@ void record_position_fill(kalshi::OrderManager &order_mgr,
   order_mgr.record_fill(fill);
 }
 
+// A pricing model that returns NaN, to exercise the quoter's finiteness guard.
+class NanModel : public kalshi::IPricingModel {
+public:
+  [[nodiscard]] double
+  estimate(const kalshi::FairValueInput & /*input*/) const override {
+    return std::numeric_limits<double>::quiet_NaN();
+  }
+};
+
+// A pricing model that returns a fixed fair value, to drive the quoter to an
+// aggressive price and exercise the non-crossing clamp deterministically.
+class ConstantModel : public kalshi::IPricingModel {
+public:
+  explicit ConstantModel(double cents) : cents_{cents} {}
+  [[nodiscard]] double
+  estimate(const kalshi::FairValueInput & /*input*/) const override {
+    return cents_;
+  }
+
+private:
+  double cents_;
+};
+
+// Fair value of 70 with mid≈52 would price the bid at 68 — through a best ask
+// of 53; the clamp must pull it back. 50 keeps both sides mid-book.
+constexpr double kAggressiveFvCents = 70.0;
+constexpr double kMidFvCents = 50.0;
+// A book whose best bid sits at the ceiling, leaving no passive ask room.
+constexpr int kYesBidAtCeiling = 99;
+constexpr int kNoBid45 = 45; // best ask = 55
+
+struct EnsureAborted : std::exception {};
+
+// Routes ensure() failures to a thrown exception so the fail path is testable,
+// recording whether the flatten hook ran; restores defaults on scope exit.
+class EnsureAbortGuard {
+public:
+  EnsureAbortGuard() {
+    kalshi::reset_panic_state();
+    kalshi::set_panic_handler([this] { flattened_ = true; });
+    kalshi::set_abort_fn([] { throw EnsureAborted{}; });
+  }
+  EnsureAbortGuard(const EnsureAbortGuard &) = delete;
+  EnsureAbortGuard &operator=(const EnsureAbortGuard &) = delete;
+  EnsureAbortGuard(EnsureAbortGuard &&) = delete;
+  EnsureAbortGuard &operator=(EnsureAbortGuard &&) = delete;
+  ~EnsureAbortGuard() {
+    kalshi::set_panic_handler(nullptr);
+    kalshi::set_abort_fn(nullptr);
+    kalshi::reset_panic_state();
+  }
+  [[nodiscard]] bool flattened() const { return flattened_; }
+
+private:
+  bool flattened_ = false;
+};
+
 } // namespace
 
 // ---- Test fixture ----
@@ -135,6 +198,81 @@ class QuoterTest : public ::testing::Test {
 public:
   static void SetUpTestSuite() { kPemPrivateKey = generate_rsa_pem(); }
 };
+
+TEST_F(QuoterTest, NonFiniteFairValueFlattensAndAborts) {
+  auto transport_ptr = std::make_unique<FakeTransport>();
+  auto *transport = transport_ptr.get();
+  kalshi::RestClient rest{kalshi::Auth{kApiKey, kPemPrivateKey},
+                          std::move(transport_ptr), kBaseUrl};
+  kalshi::OrderManager order_mgr{rest};
+  kalshi::RiskManager risk_mgr{kalshi::RiskLimits{}};
+  kalshi::Quoter quoter{kalshi::QuoterConfig{},
+                        kalshi::FairValueEngine{std::make_unique<NanModel>()},
+                        order_mgr, risk_mgr};
+
+  EnsureAbortGuard guard;
+  // A NaN fair value would otherwise be cast to int (UB) and produce a garbage
+  // quote — the quoter must flatten and crash instead of quoting.
+  EXPECT_THROW(quoter.update(kTicker, make_ob(kYesBid52, kNoBid52)),
+               EnsureAborted);
+  EXPECT_TRUE(guard.flattened());
+  EXPECT_TRUE(transport->recorded_requests().empty());
+}
+
+// ---- Non-crossing clamp (stay strictly passive vs. the observed BBO) ----
+
+TEST_F(QuoterTest, BidClampedToStayPassiveBelowMarketAsk) {
+  // best_ask = 100 - 47 = 53. A fair value of 70 prices the raw bid at 68 —
+  // through the ask. The clamp must pull it back to 52 (best_ask - 1).
+  auto transport_ptr = std::make_unique<FakeTransport>();
+  FakeTransport &transport = *transport_ptr;
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId1, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId2, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  kalshi::RestClient rest{kalshi::Auth{kApiKey, kPemPrivateKey},
+                          std::move(transport_ptr), kBaseUrl};
+  kalshi::OrderManager order_mgr{rest};
+  kalshi::RiskManager risk_mgr{kalshi::RiskLimits{}};
+  kalshi::Quoter quoter{kalshi::QuoterConfig{},
+                        kalshi::FairValueEngine{std::make_unique<ConstantModel>(
+                            kAggressiveFvCents)},
+                        order_mgr, risk_mgr};
+
+  quoter.update(kTicker, make_ob(kYesBid52, kNoBid52));
+
+  const std::string &bid_body = transport.recorded_requests().at(0).body;
+  EXPECT_NE(bid_body.find("\"side\":\"bid\""), std::string::npos);
+  // 52c = best_ask (53) - 1, not the raw 68 ("0.6800").
+  EXPECT_NE(bid_body.find(R"("price":"0.5200")"), std::string::npos);
+  EXPECT_EQ(bid_body.find(R"("price":"0.6800")"), std::string::npos);
+}
+
+TEST_F(QuoterTest, AskSkippedWhenMarketBidLeavesNoPassiveRoom) {
+  // best_bid = 99 leaves no room for a passive ask (min passive would be 100).
+  // The ask side is skipped; the bid still rests.
+  auto transport_ptr = std::make_unique<FakeTransport>();
+  FakeTransport &transport = *transport_ptr;
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId1, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  kalshi::RestClient rest{kalshi::Auth{kApiKey, kPemPrivateKey},
+                          std::move(transport_ptr), kBaseUrl};
+  kalshi::OrderManager order_mgr{rest};
+  kalshi::RiskManager risk_mgr{kalshi::RiskLimits{}};
+  kalshi::Quoter quoter{
+      kalshi::QuoterConfig{},
+      kalshi::FairValueEngine{std::make_unique<ConstantModel>(kMidFvCents)},
+      order_mgr, risk_mgr};
+
+  quoter.update(kTicker, make_ob(kYesBidAtCeiling, kNoBid45));
+
+  ASSERT_EQ(transport.recorded_requests().size(), 1U);
+  EXPECT_NE(transport.recorded_requests().at(0).body.find("\"side\":\"bid\""),
+            std::string::npos);
+}
 
 // ---- Tests ----
 
@@ -333,6 +471,61 @@ TEST_F(QuoterTest, ResetQuotesForgetsLiveStateSoNextUpdatePlacesFresh) {
   EXPECT_EQ(transport.recorded_requests().at(3).method, "POST");
 }
 
+TEST_F(QuoterTest, RepriceReplacesFilledOrderInsteadOfCancellingDeadId) {
+  // A resting bid that fully fills is erased from the order manager's open
+  // orders, but the quoter still tracks its id. On the next reprice the quoter
+  // must recognise the id is dead (gone from open_orders) and place a fresh
+  // bid — NOT keep issuing cancels against the filled id, which the exchange
+  // rejects forever (observed live: 127 failed cancels on one filled order).
+  auto transport_ptr = std::make_unique<FakeTransport>();
+  FakeTransport &transport = *transport_ptr;
+  // update 1 (mid=52): POST bid order-001, POST ask order-002.
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId1, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId2, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  // update 2 (mid=55): fresh bid POST (order-003), then ask reprice —
+  // DELETE ask order-002, POST ask order-004. No DELETE for the filled bid.
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId3, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  transport.enqueue({kHttpOk, "{}"}); // DELETE ask order-002
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId4, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  kalshi::RestClient rest{kalshi::Auth{kApiKey, kPemPrivateKey},
+                          std::move(transport_ptr), kBaseUrl};
+  kalshi::OrderManager order_mgr{rest};
+  kalshi::RiskManager risk_mgr{kalshi::RiskLimits{}};
+  kalshi::Quoter quoter{kalshi::QuoterConfig{}, order_mgr, risk_mgr};
+
+  quoter.update(kTicker, make_ob(kYesBid52, kNoBid52));
+  ASSERT_EQ(transport.recorded_requests().size(), 2U);
+
+  // The bid (order-001) fills completely — order_mgr erases it from open
+  // orders.
+  record_position_fill(order_mgr, kOrderId1, kalshi::Side::Yes,
+                       kalshi::QuoterConfig::kDefaultQuoteSize);
+
+  quoter.update(kTicker, make_ob(kYesBid55, kNoBid55));
+
+  // The filled bid must never be the target of a cancel.
+  for (const auto &request : transport.recorded_requests()) {
+    const bool cancels_filled_bid =
+        request.method == "DELETE" &&
+        request.url.find(kOrderId1) != std::string::npos;
+    EXPECT_FALSE(cancels_filled_bid)
+        << "must not cancel the already-filled order " << kOrderId1;
+  }
+  // Instead the quoter re-places the bid: request index 2 is a fresh bid POST.
+  ASSERT_EQ(transport.recorded_requests().size(), 5U);
+  const auto &fresh_bid = transport.recorded_requests().at(2);
+  EXPECT_EQ(fresh_bid.method, "POST");
+  EXPECT_NE(fresh_bid.body.find("\"side\":\"bid\""), std::string::npos);
+}
+
 TEST_F(QuoterTest, LongPositionShiftsBidDown) {
   // pos=+20: inv_skew=1.0 → bid = round(52-2-1) = 49, ask = round(52+2-1) = 53.
   auto transport_ptr = std::make_unique<FakeTransport>();
@@ -433,8 +626,9 @@ TEST_F(QuoterTest, SelfCrossGuardSkipsBidWhenItWouldCrossOwnAsk) {
 }
 
 TEST_F(QuoterTest, AskAlwaysHigherThanBidWithExtremeInventory) {
-  // pos=+1000: inv_skew=50 → bid=0→1 (clamped), ask=4→NO=96.
-  // Verifies ask(4) > bid(1) after clamping at extreme inventory.
+  // pos=+1000: inv_skew=50 → raw bid=0→1 (range-clamped), raw ask=4. The raw
+  // ask is through the market bid (51), so the non-crossing clamp lifts it to
+  // the passive 52. Verifies ask(52) > bid(1) and neither side crosses.
   auto transport_ptr = std::make_unique<FakeTransport>();
   FakeTransport &transport = *transport_ptr;
   transport.enqueue(

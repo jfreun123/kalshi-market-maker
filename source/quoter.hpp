@@ -5,6 +5,7 @@
 #include "orderbook.hpp"
 #include "risk_manager.hpp"
 
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -79,6 +80,14 @@ private:
   // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
   static std::pair<int, int> compute_quotes(double fv_cents, int half_spread,
                                             double inventory_skew_cents);
+
+  // Non-crossing clamps: keep a quote strictly passive vs. the observed BBO so
+  // latency on a fast book can't turn it into a post-only cross / taker fill.
+  // Pull the bid to ≥1c below the market ask; push the ask to ≥1c above the
+  // market bid. nullopt = no passive price exists (touch at the extreme) →
+  // skip.
+  static std::optional<int> passive_bid(int desired_bid, int market_ask_cents);
+  static std::optional<int> passive_ask(int desired_ask, int market_bid_cents);
 
   void refresh_bid(const std::string &ticker, int desired_bid);
   void refresh_ask(const std::string &ticker, int desired_ask);

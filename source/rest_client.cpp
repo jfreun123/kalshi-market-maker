@@ -80,9 +80,10 @@ auto parse_dollars_to_cents(const std::string &dollars) -> int {
   return static_cast<int>(std::round(std::stod(dollars) * kCentsPerDollar));
 }
 
-// Parses a fixed-point count string to integer: "10.00" -> 10
-auto parse_fp_count(const std::string &fp_str) -> int {
-  return static_cast<int>(std::round(std::stod(fp_str)));
+// Parses a fixed-point count string to a fractional contract count: the wire
+// carries sub-unit and signed sizes ("680.27", "-0.16") that must not round.
+auto parse_fp_count(const std::string &fp_str) -> Quantity {
+  return std::stod(fp_str);
 }
 
 // --- Enum parsers ---
@@ -175,9 +176,9 @@ Order parse_order(const nlohmann::json &order_json) {
                 order_json.at("yes_price_dollars").get<std::string>())
           : parse_dollars_to_cents(
                 order_json.at("no_price_dollars").get<std::string>());
-  const int quantity =
+  const Quantity quantity =
       parse_fp_count(order_json.at("initial_count_fp").get<std::string>());
-  const int filled_qty =
+  const Quantity filled_qty =
       parse_fp_count(order_json.at("fill_count_fp").get<std::string>());
 
   // The API no longer uses "partially_filled" as a status; a resting order
@@ -309,12 +310,12 @@ Orderbook RestClient::get_orderbook(std::string_view ticker) {
   result.ticker = ticker_str;
   for (const auto &level_array : orderbook_json.at("yes_dollars")) {
     const int price = parse_dollars_to_cents(level_array[0].get<std::string>());
-    const int qty = parse_fp_count(level_array[1].get<std::string>());
+    const Quantity qty = parse_fp_count(level_array[1].get<std::string>());
     result.yes.push_back({price, qty});
   }
   for (const auto &level_array : orderbook_json.at("no_dollars")) {
     const int price = parse_dollars_to_cents(level_array[0].get<std::string>());
-    const int qty = parse_fp_count(level_array[1].get<std::string>());
+    const Quantity qty = parse_fp_count(level_array[1].get<std::string>());
     result.no.push_back({price, qty});
   }
   return result;
@@ -357,7 +358,7 @@ Order RestClient::place_order(std::string_view ticker, Side side,
 
   // V2 returns a minimal response; reconstruct the Order from input params.
   auto json_data = nlohmann::json::parse(resp.body);
-  const int filled_qty =
+  const Quantity filled_qty =
       parse_fp_count(json_data.at("fill_count").get<std::string>());
 
   OrderStatus status = OrderStatus::Open;
@@ -377,7 +378,7 @@ Order RestClient::place_order(std::string_view ticker, Side side,
       .market_ticker = std::string(ticker),
       .side = side,
       .price_cents = price_cents,
-      .quantity = quantity,
+      .quantity = static_cast<Quantity>(quantity), // we place whole contracts
       .filled_quantity = filled_qty,
       .status = status,
       .type = type,

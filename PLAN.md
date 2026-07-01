@@ -9,8 +9,12 @@
 
 ### P0 — Correctness & safety (do these first)
 
-- [ ] **1. Orderbook deltas are applied wrong — the book corrupts on every
-  update.** `orderbook_delta.delta_fp` is an *increment* to the resting size at
+- [x] **1. Orderbook deltas are applied wrong — the book corrupts on every
+  update.** *(Fixed: `Quantity=double`, `apply_delta` now `+= delta` with
+  epsilon removal, `parse_fp_count` no longer rounds; fractional size carried
+  through the PnL/risk core. Also fixed a `main.cpp` delta lambda that truncated
+  the fractional delta back to `int`.)* `orderbook_delta.delta_fp` is an
+  *increment* to the resting size at
   a price level, but `LocalOrderbook::apply_delta` treats it as the *absolute*
   new quantity (`existing->quantity = new_quantity`, not `+=`). Confirmed from
   captured frames: deltas are signed (`-0.16`, `-1.47`, `680.27`). Two failure
@@ -24,13 +28,28 @@
   exchange. **Top priority — every quote is computed against this book, so it
   silently re-corrupts within seconds even after the snapshot-sort fix.**
 
-- [ ] **2. `ensure()` fail-fast invariant primitive.** Flatten all orders, then
-  crash, on a broken invariant. Safety-critical and explicitly requested. Full
-  design in *Safety: `ensure()` Fail-Fast Invariant Checks* below.
+- [x] **2. `ensure()` fail-fast invariant primitive.** *(Done: `source/ensure.{hpp,cpp}`
+  with `ensure(cond, what, source_location)` → log critical, run the registered
+  panic handler (flatten) once via an atomic reentrancy guard, then abort
+  (injectable for tests). `install_crash_flatten_handlers()` wires fatal signals
+  (SIGSEGV/SIGABRT/SIGFPE/SIGILL/SIGBUS) + `std::set_terminate` so orders are
+  cancelled even on a crash — proven by death tests. main registers the handler
+  to `cancel_all_quotes` (lock-free, best-effort) and clears it on clean
+  shutdown. Next: seed actual `ensure` calls into subsystems, one per commit.)*
+  Flatten all orders, then crash, on a broken invariant. Full design in
+  *Safety: `ensure()` Fail-Fast Invariant Checks* below.
 
 ### P1 — Market-making quality
 
-- [ ] **3. Cancel orphaned orders on startup (and guarantee cancel-on-exit).**
+- [x] **3. Cancel orphaned orders on startup (and guarantee cancel-on-exit).**
+  *(Done: `TradingSession::cancel_preexisting_orders` cancels resting orders the
+  exchange reports on our tracked tickers (orphans from a prior run), called at
+  startup before any quoting via `rest.get_open_orders()` (live only). Orders on
+  untracked tickers are logged, not cancelled. Combined with the graceful-exit
+  ScopeGuard flatten + crash/terminate flatten (P0 #2), this is the full
+  cancel-on-exit story: even an uncatchable SIGKILL is recovered on the next
+  launch. Possible follow-up: flatten on exit via `get_open_orders()` too, so a
+  mid-run local-state drift is caught without waiting for restart.)*
   The bot only knows about orders it placed in the *current* process and never
   cancels pre-existing resting orders at startup. Across restarts, orders pile
   up on the exchange that the running bot is unaware of — observed live on
@@ -42,14 +61,25 @@
   local state), and make the exit/halt flatten path reliable across SIGINT/kill.
   High priority before any live trading.
 
-- [ ] **4. D1 — non-crossing quote clamp.** Clamp quotes to stay strictly
-  passive vs. the observed BBO (≥1c behind) so latency on fast books can't turn
-  a quote into a `post only cross`. The *systematic* crossing was the orderbook
-  sort bug (now fixed); this is the residual. Detail in *Demo Run Findings*.
+- [x] **4. D1 — non-crossing quote clamp.** *(Done: `Quoter::passive_bid`/
+  `passive_ask` pull each quote ≥1c behind the observed BBO before placing —
+  bid below the market ask, ask above the market bid — and skip a side when the
+  touch is at the extreme (no passive room). Wired into `Quoter::update`; the
+  existing self-cross guard against our own resting quotes stays. Surfaced that
+  extreme inventory skew used to price a crossing ask — the clamp now keeps the
+  skew passive instead.)* Clamp quotes to stay strictly passive vs. the observed
+  BBO (≥1c behind) so latency on fast books can't turn a quote into a `post only
+  cross`. The *systematic* crossing was the orderbook sort bug (now fixed); this
+  is the residual.
 
-- [ ] **5. D2 — align scanner price band with the risk price gate.** The scanner
-  admits `[min_price, max_price]` but the quoter only trades `[10,90]`, so the
-  scanner's top picks are un-quotable longshots. Derive one band from the other.
+- [x] **5. D2 — align scanner price band with the risk price gate.** *(Done +
+  verified live: `quotable_price_band(risk, quoter)` = the risk gate inset by the
+  quoter's min half-spread, so admitted markets have room for BOTH a bid and an
+  ask in the gate; `load_config` clamps the scanner band to it (narrows only).
+  Before: top picks were 4–9c longshots (3 got zero quotes, 1 one-sided). After:
+  band [2,98]→[12,88], top-5 mids now 12–45c, all two-sided-quotable.)* The
+  scanner admitted `[min_price, max_price]` but the quoter only trades `[10,90]`,
+  so its top picks were un-quotable longshots.
 
 ### P2 — Operational robustness & strategy
 
@@ -78,6 +108,66 @@
 - [ ] **12. R5 — `KalshiSession` + a `Session` concept** (multi-exchange).
 - [ ] **13. R6 — comment convention** (prose only at the top of each `.hpp`).
 - [ ] **14. R7 — `docs/kalshi-messages.md` + rate-limiting review.**
+
+### P4 — Latency & async order submission (EXPLORE LATER — do not build now)
+
+Order round-trip was ~255ms; the persistent keep-alive HTTP client cut it to
+**~22ms steady-state** (one-time ~144ms cold handshake on the first request).
+That captured most of the available win, so everything below is lower priority.
+
+- [ ] **15. Cheaper remaining latency levers (before any async work).**
+  - **Co-locate** near the exchange (Kalshi = AWS us-east-1). Dev runs in WSL on
+    a home box; residential RTT is 40–100ms one-way vs. low-single-digit ms from
+    the same region. Pure deploy change, likely the biggest remaining win.
+  - **Warm the connection** — the first order after an idle gap re-handshakes
+    (~144ms). A periodic lightweight request keeps the socket hot.
+
+- [ ] **16. Async order submission (deferred — revisit only with the event-loop
+  rewrite).** Today `order_mgr.place()` blocks the WS thread under `engine_mtx`
+  for the round-trip. At 22ms that's tolerable, so this is about throughput / not
+  stalling book processing during one slow order, NOT per-order latency. It is a
+  large change with real correctness surface — write it down, don't build it yet.
+  - **Prerequisite, useful on its own: `client_order_id`.** We send no client
+    order id today, so an order is identifiable only by the exchange id in the
+    response. Async needs a client tag to correlate a response/fill to our intent
+    before the exchange id returns. Worth adding when we next touch reconcile,
+    even while still synchronous.
+  - **What full async requires:** an I/O worker thread + command queue; pending
+    states in the quoter (`none → pending-place → resting → pending-cancel`);
+    coalescing stale quote intents (collapse to the newest desired price) +
+    bounded-queue backpressure; completion results applied back under
+    `engine_mtx` (now three actors contend, not two); **out-of-order fill
+    handling** (a fill can arrive before the place response — today impossible;
+    collides with the `record_fill` `ensure()` guard, which would need to
+    tolerate "unknown order, pending"); cancel-before-id ordering; a rate-limiter
+    (none today); and the safety flatten (`ensure()`/ScopeGuard) must drain or
+    bypass the queue so cancel-on-exit stays guaranteed.
+  - **"Async-lite" middle ground:** compute the order decision under the lock,
+    release it, do the HTTP, re-acquire to record the result. Shrinks lock-hold
+    without a worker/queue — but still opens the out-of-order-fill race, so it
+    needs `client_order_id` + fill buffering anyway.
+
+- [ ] **17. Coroutines — only as part of an event-loop engine rewrite, not a
+  bolt-on.** Coroutines (`co_await place(...)`) would linearize the pending-state
+  machine — the ugliest part of #16 — making the reprice path read synchronously
+  while not blocking the thread. BUT: (a) they are only *suspension syntax*, not
+  I/O — cpp-httplib is purely blocking, so you'd either run blocking calls on a
+  thread pool behind a hand-written `task<T>`/executor (same threading model,
+  nicer syntax, modest win) or adopt an async stack (Asio+Beast / libcurl-multi
+  = big new dependency + transport/TLS rewrite); (b) the domain-hard problems
+  (out-of-order fills, correlation, coalescing, rate limit, flatten-drain) are
+  unchanged; (c) they add new costs — manual lifetime/cancellation of suspended
+  frames (use-after-free risk on shutdown / `ensure()` abort), poor gdb
+  visibility into suspended frames (bad when chasing the very races this is
+  about), no std executor yet (write your own or pull stdexec/Asio), and harder
+  hermetic testing vs. the current `FakeTransport` mock-the-IO approach.
+  **Verdict:** coroutines fit *if* we rebuild the engine around a single reactor
+  thread driving WS + timers + order I/O cooperatively (target-architecture
+  territory — see [[target_architecture]]); as a graft onto today's threaded
+  design a plain worker thread + queue is lower-risk for the same benefit. A
+  contained way to feel out the ergonomics first: a tiny `task<T>` + single-
+  thread executor running blocking httplib on a thread pool, on a throwaway
+  branch — no Asio.
 
 **Recently fixed this session (committed):** orderbook ascending-sort → correct
 BBO/mid (was the reason we weren't making markets); quoter resync on flatten
@@ -221,17 +311,13 @@ were found and fixed, plus several environment/strategy learnings.
   unit test used single-level (already-sorted) books.
 
 **Open follow-ups (tracked):**
-- [ ] **D1 — Belt-and-braces non-crossing clamp.** The orderbook fix removed the
-  systematic crossing. Residual risk remains on very fast books: a quote priced
-  near the touch can cross by the time the ~300ms REST round-trip lands. Clamp
-  quotes to stay strictly passive vs. the observed BBO (≥1c behind) so latency
-  jitter can't produce a `post only cross`. Lower priority now that mid is
-  correct, but still worth doing.
-- [ ] **D2 — Scanner price band vs. risk price gate are misaligned.** Scanner
-  admits `[min_price, max_price]` (was `[2,98]`) but the risk gate only quotes
-  `[10,90]`, so the scanner's top picks (2–5c longshots) are un-quotable and
-  also the longshots Bürgi/Deng/Whelan say to avoid. Align the scanner's
-  `min/max_price_cents` to the risk gate (or derive one from the other).
+- [x] **D1 — Belt-and-braces non-crossing clamp.** *(Done — see P1 #4.)* Clamp
+  quotes strictly passive vs. the observed BBO (≥1c behind) so latency jitter
+  can't produce a `post only cross`.
+- [x] **D2 — Scanner price band vs. risk price gate are misaligned.** *(Done +
+  verified live — see P1 #5.)* The scanner now derives its price band from the
+  risk gate inset by the quoter's min half-spread, so the top-N are two-sided-
+  quotable rather than 2–9c longshots.
 - [ ] **D3 — Staleness flapping on quiet markets.** Thin demo markets (e.g. the
   CPI tickers) send no WS traffic for >30s, tripping `kStaleBook` repeatedly →
   flatten/re-quote churn. Consider counting heartbeats/pings toward freshness,
@@ -239,6 +325,52 @@ were found and fixed, plus several environment/strategy learnings.
   weakens staleness protection on active markets.
 - Ops note: background launches need `setsid` (a bare `&` under the tooling gets
   killed when the parent shell exits).
+
+### Demo Run Findings (2026-06-30 → 07-01)
+
+Three more bugs found and fixed across several demo runs; one root-cause
+follow-up remains open (the important one).
+
+**Fixed (committed):**
+- **Fill side mis-signed → phantom position.** The WS `fill` parser signed
+  inventory from `side` (the aggressor/book side), which inverts on a maker
+  fill: a resting NO order lifted by a yes-buyer arrives as `side:"yes"`,
+  `purchased_side:"no"`. We booked a phantom long (`local +10` vs `exchange 0`
+  → `kModelDiverge` + reconcile DRIFT halt). Now signs from `purchased_side`;
+  confirmed against a live `--capture` fill frame. The exchange also sends
+  `post_position_fp` (authoritative net after each fill) — adopting that as the
+  source of truth is the robust long-term fix (see D5). (`68aa86d`)
+- **Quoter cancel-loop on a filled order.** `refresh_bid/ask` retried
+  cancelling a live-quote id that had already filled (cancel → `false`, id never
+  cleared) forever. Now reconciles `live_quotes_` against `open_orders()` and
+  re-places instead. (`68aa86d`)
+- **Halt-flatten livelock.** `enforce_quote_safety` ran `cancel_all_quotes`
+  every main-loop tick while halted; a filled order that can't be cancelled
+  stayed in `open_orders`, so the flatten never completed and re-issued the
+  doomed cancel ~5×/sec forever (7202 times observed live). Now edge-triggered:
+  flatten once on halt entry, re-arm when the halt clears. (`48a6358`)
+
+**Open follow-ups (tracked):**
+- [ ] **D4 — Adopt exchange positions at startup (root cause of the drift
+  halts).** The bot starts every run believing it is flat (`local = 0`) even
+  when the exchange still holds inventory from a prior run (positions survive
+  shutdown — we cancel *orders*, not *positions*). The mismatch is real and
+  permanent, so reconcile immediately DRIFT-halts the affected tickers, and
+  before the livelock fix it wedged the whole process. Fix: at startup call
+  `GET /portfolio/positions` and seed local `net_position` from it (pairs with
+  the orphan-order sweep, P1 #3), so we begin reconciled instead of phantom-
+  flat. Consider also skipping quoting a ticker that still carries a residual.
+- [ ] **D5 — Trust `post_position_fp` for inventory.** Sync per-market position
+  to the exchange's authoritative post-fill field instead of accumulating from
+  `purchased_side` + `count_fp`; self-corrects any future fill-parsing drift.
+- [ ] **Flatten *inventory* (not just orders) on halt/shutdown (optional,
+  gated).** Today halt/shutdown cancels resting orders but leaves the open
+  position, so residuals accumulate across runs and become D4's drift. A gated
+  "close position on halt" path would leave the account flat — but it crosses
+  the spread (taker cost), so it must be opt-in / risk-bounded.
+- Ops note: demo account currently carries residual positions from these runs
+  (e.g. `MEXGMORA` short, `MIA` ~4.36) — clear them in the UI before the next
+  clean run, or they will DRIFT-halt those tickers.
 
 ---
 
@@ -283,16 +415,34 @@ were found and fixed, plus several environment/strategy learnings.
 
 **Candidate invariants to seed the rollout:**
 
-- order price ∈ [1,99], quantity > 0, `complement_price` ∈ [1,99]
-- `best_bid < best_ask` when both sides present; no negative level sizes
-- fair value is finite (not NaN/inf) and ∈ [1,99] before quoting
-- net position and open-order counts within the configured hard caps
-- config values sane at load (spreads ≥ 0, price band `min < max`)
-- realized/unrealized PnL and marks are finite
+- [x] order price ∈ [1,99], quantity > 0 (`OrderManager::place`)
+- [x] fair value is finite before quoting (`Quoter::update`)
+- [x] portfolio notional + PnL finite before the kill-switch (`RiskManager::update_portfolio`)
+- [x] incoming fills: finite positive size, price ∈ [1,99] (`OrderManager::record_fill`).
+      This roots **finite PnL/marks at the source** — fills are the only NaN
+      entry point (prices are ints; PnL/lots/marks all derive from fill size),
+      so realized/unrealized PnL can no longer go non-finite downstream.
+- [~] `complement_price` ∈ [1,99] — **already covered, no separate guard.** The
+      only place we act on it is `Quoter::refresh_ask` → `place(Side::No, …)`,
+      which the `place()` guard above already validates. Guarding it in
+      `best_ask()` instead would assert on *wire input* and crash the whole bot
+      if a settling market sends a 0/100 price — not worth the false-positive.
+
+**Deliberately NOT seeded (would cause false-positive crashes or aren't hard
+invariants):**
+
+- `best_bid < best_ask` — real books lock/cross transiently.
+- net position / open-order counts within caps — a fill can legitimately push
+  net position past a cap (we can't un-fill); that's a gate, not an invariant.
+- config sanity at load — *operator input*; a clear thrown error fits better
+  than `ensure`'s "this is impossible" semantics.
 
 **Rollout:** land the primitive + its tests first, then introduce `ensure`
 calls incrementally — one subsystem per commit — so every new invariant ships
-with a test that exercises both the pass and the flatten-then-crash path.
+with a test that exercises both the pass and the flatten-then-crash path. *Done
+(branch MOBILE2): the primitive + the four guards checked above, each with pass
++ flatten-then-crash tests. The remaining candidates are intentionally left
+un-guarded for the reasons above; the clean rollout is complete.*
 
 ---
 
@@ -300,17 +450,13 @@ with a test that exercises both the pass and the flatten-then-crash path.
 
 **BLOCKER-1 (resolved):** `IxWebSocket` implemented via FetchContent `machinezone/IXWebSocket`. End-to-end connection to live UAT not yet verified.
 
-**BLOCKER-2 (open — narrowed 2026-06-29):** A live `--capture` run against demo
-showed network + clock are fine and **public** REST (`GET /orderbook`) returns
-200, but every **authenticated** call (`GET /portfolio/positions`, the WS
-handshake) returns `401 INVALID_PARAMETER`. Root cause: the `api_key` (access key
-ID) in `config-demo.json` is still an unfilled placeholder (`<…>`, not a UUID) —
-the private key `.pem` is real, the access key ID is missing. **Action: paste the
-real demo access key ID into config, then re-run `--capture`.** Secondary suspect
-if 401 persists after that: RSA-PSS salt length in `auth.cpp` uses
-`RSA_PSS_SALTLEN_MAX`; Kalshi's SDK uses digest length (32) — verify live once a
-real key exists. Field-shape drift (price names, `count` vs `quantity`, status
-strings, timestamps) can only be confirmed once authenticated traffic flows.
+**BLOCKER-2 (RESOLVED 2026-06-30):** Authenticated demo calls now succeed.
+`config.json` (NOT `config-demo.json` — that one still has the placeholder key)
+holds the real demo access key ID + `.pem`, points at `demo-api.kalshi.co`, and
+`--reconcile`/`--scan`/trade all authenticate (`reconcile: in sync`, WS handshake
+connects). The earlier 401 was just the unfilled key in `config-demo.json`; the
+RSA-PSS salt length was a non-issue. A full demo run (scan → seed → quote → WS →
+staleness-halt → flatten) ran clean end-to-end; see *Demo Run Findings*.
 
 **Pre-UAT checklist:**
 - [x] `IxWebSocket` implemented and library fetched

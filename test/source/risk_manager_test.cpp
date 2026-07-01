@@ -1,3 +1,4 @@
+#include "ensure.hpp"
 #include "fake_transport.hpp"
 #include "order_manager.hpp"
 #include "rest_client.hpp"
@@ -9,7 +10,9 @@
 #include <openssl/rsa.h>
 
 #include <chrono>
+#include <limits>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -148,6 +151,29 @@ kalshi::RestClient make_rest_client(std::unique_ptr<FakeTransport> transport) {
   return kalshi::RestClient{kalshi::Auth{kApiKey, kPemPrivateKey},
                             std::move(transport), kBaseUrl};
 }
+
+struct EnsureAborted : std::exception {};
+
+// Routes ensure() failures to a thrown exception so the fail path is testable;
+// restores defaults and clears the one-shot panic guard on scope exit.
+class EnsureAbortGuard {
+public:
+  EnsureAbortGuard() {
+    kalshi::reset_panic_state();
+    kalshi::set_panic_handler(nullptr);
+    kalshi::set_abort_fn([] { throw EnsureAborted{}; });
+  }
+  EnsureAbortGuard(const EnsureAbortGuard &) = delete;
+  EnsureAbortGuard &operator=(const EnsureAbortGuard &) = delete;
+  EnsureAbortGuard(EnsureAbortGuard &&) = delete;
+  EnsureAbortGuard &operator=(EnsureAbortGuard &&) = delete;
+  ~EnsureAbortGuard() {
+    kalshi::set_abort_fn(nullptr);
+    kalshi::reset_panic_state();
+  }
+};
+
+constexpr double kNan = std::numeric_limits<double>::quiet_NaN();
 
 } // namespace
 
@@ -381,6 +407,25 @@ TEST_F(RiskManagerTest, UpdatePortfolioHaltsOnUnrealizedDrawdown) {
 
   EXPECT_TRUE(risk_mgr.is_halted());
   EXPECT_TRUE(risk_mgr.is_set(kalshi::Constraint::kPortfolioLoss));
+}
+
+// ---- Non-finite aggregates must not silently disable the kill-switch ----
+
+TEST_F(RiskManagerTest, UpdatePortfolioAbortsOnNonFiniteNotional) {
+  // A NaN notional would make `notional > cap` false and skip the over-exposure
+  // halt — the kill-switch must never be silently bypassed. Flatten and crash.
+  kalshi::RiskManager risk_mgr{tight_exposure_limits()};
+  EnsureAbortGuard guard;
+  EXPECT_THROW(risk_mgr.update_portfolio(make_snapshot(0.0, 0.0, kNan)),
+               EnsureAborted);
+}
+
+TEST_F(RiskManagerTest, UpdatePortfolioAbortsOnNonFinitePnl) {
+  // A NaN PnL would make every loss/drawdown comparison false. Crash instead.
+  kalshi::RiskManager risk_mgr{tight_total_loss_limits()};
+  EnsureAbortGuard guard;
+  EXPECT_THROW(risk_mgr.update_portfolio(make_snapshot(kNan, 0.0, 0.0)),
+               EnsureAborted);
 }
 
 TEST_F(RiskManagerTest, UpdatePortfolioDoesNotHaltWhenTotalPnlWithinLimit) {

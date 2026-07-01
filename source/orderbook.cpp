@@ -48,22 +48,25 @@ void LocalOrderbook::apply_snapshot(const Orderbook &snap) {
   std::sort(state_.no.begin(), state_.no.end(), by_price_descending);
 }
 
-void LocalOrderbook::apply_delta(Side side, int price_cents, int new_quantity) {
+void LocalOrderbook::apply_delta(Side side, int price_cents, Quantity delta) {
   auto &levels = (side == Side::Yes) ? state_.yes : state_.no;
   auto existing = find_level(levels, price_cents);
 
-  if (new_quantity == 0) {
-    if (existing != levels.end()) {
-      levels.erase(existing);
+  if (existing != levels.end()) {
+    // delta is a SIGNED INCREMENT to the resting size, not the new absolute.
+    existing->quantity += delta;
+    if (existing->quantity <= kQuantityEpsilon) {
+      levels.erase(existing); // size driven to zero (or negative) -> gone.
     }
     return;
   }
 
-  if (existing != levels.end()) {
-    existing->quantity = new_quantity;
-  } else {
+  // No existing level: only a positive increment introduces one. A negative or
+  // zero increment for a level we don't hold is a no-op (never a negative
+  // size).
+  if (delta > kQuantityEpsilon) {
     auto insert_pos = insertion_point(levels, price_cents);
-    levels.insert(insert_pos, {price_cents, new_quantity});
+    levels.insert(insert_pos, {price_cents, delta});
   }
 }
 
