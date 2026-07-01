@@ -45,6 +45,7 @@ const std::string kFillOrderId = "fill-001";
 const std::string kApiKey = "test-key-id";
 const std::string kBaseUrl = "https://trading-api.kalshi.com/trade-api/v2";
 constexpr int kHttpOk = 200;
+constexpr int kHttpBadRequest = 400; // a cancel that fails (order already gone)
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::string kPemPrivateKey;
@@ -299,7 +300,6 @@ TEST_F(TradingSessionTest,
   // flatten re-issues that doomed cancel forever (observed live: 7202 flattens,
   // ~5/sec). The flatten must be edge-triggered: run once on halt entry, not
   // per tick.
-  constexpr int kHttpBadRequest = 400;
   transport_.enqueue({kHttpOk, order_json(kOrderId1, kDefaultQuoteSize)});
   transport_.enqueue({kHttpOk, order_json(kOrderId2, kDefaultQuoteSize)});
   session_.on_snapshot(make_orderbook(kTicker, kYesBid, kNoBid, kObQty));
