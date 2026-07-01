@@ -471,6 +471,61 @@ TEST_F(QuoterTest, ResetQuotesForgetsLiveStateSoNextUpdatePlacesFresh) {
   EXPECT_EQ(transport.recorded_requests().at(3).method, "POST");
 }
 
+TEST_F(QuoterTest, RepriceReplacesFilledOrderInsteadOfCancellingDeadId) {
+  // A resting bid that fully fills is erased from the order manager's open
+  // orders, but the quoter still tracks its id. On the next reprice the quoter
+  // must recognise the id is dead (gone from open_orders) and place a fresh
+  // bid — NOT keep issuing cancels against the filled id, which the exchange
+  // rejects forever (observed live: 127 failed cancels on one filled order).
+  auto transport_ptr = std::make_unique<FakeTransport>();
+  FakeTransport &transport = *transport_ptr;
+  // update 1 (mid=52): POST bid order-001, POST ask order-002.
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId1, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId2, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  // update 2 (mid=55): fresh bid POST (order-003), then ask reprice —
+  // DELETE ask order-002, POST ask order-004. No DELETE for the filled bid.
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId3, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  transport.enqueue({kHttpOk, "{}"}); // DELETE ask order-002
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId4, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  kalshi::RestClient rest{kalshi::Auth{kApiKey, kPemPrivateKey},
+                          std::move(transport_ptr), kBaseUrl};
+  kalshi::OrderManager order_mgr{rest};
+  kalshi::RiskManager risk_mgr{kalshi::RiskLimits{}};
+  kalshi::Quoter quoter{kalshi::QuoterConfig{}, order_mgr, risk_mgr};
+
+  quoter.update(kTicker, make_ob(kYesBid52, kNoBid52));
+  ASSERT_EQ(transport.recorded_requests().size(), 2U);
+
+  // The bid (order-001) fills completely — order_mgr erases it from open
+  // orders.
+  record_position_fill(order_mgr, kOrderId1, kalshi::Side::Yes,
+                       kalshi::QuoterConfig::kDefaultQuoteSize);
+
+  quoter.update(kTicker, make_ob(kYesBid55, kNoBid55));
+
+  // The filled bid must never be the target of a cancel.
+  for (const auto &request : transport.recorded_requests()) {
+    const bool cancels_filled_bid =
+        request.method == "DELETE" &&
+        request.url.find(kOrderId1) != std::string::npos;
+    EXPECT_FALSE(cancels_filled_bid)
+        << "must not cancel the already-filled order " << kOrderId1;
+  }
+  // Instead the quoter re-places the bid: request index 2 is a fresh bid POST.
+  ASSERT_EQ(transport.recorded_requests().size(), 5U);
+  const auto &fresh_bid = transport.recorded_requests().at(2);
+  EXPECT_EQ(fresh_bid.method, "POST");
+  EXPECT_NE(fresh_bid.body.find("\"side\":\"bid\""), std::string::npos);
+}
+
 TEST_F(QuoterTest, LongPositionShiftsBidDown) {
   // pos=+20: inv_skew=1.0 → bid = round(52-2-1) = 49, ask = round(52+2-1) = 53.
   auto transport_ptr = std::make_unique<FakeTransport>();

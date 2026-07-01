@@ -116,12 +116,14 @@ std::string delta_message(const std::string &ticker, const std::string &side,
 
 std::string fill_message(const std::string &order_id, const std::string &ticker,
                          const std::string &side, int price, int count,
-                         bool is_taker = false) {
+                         bool is_taker = false,
+                         const std::string &purchased_side = "") {
   nlohmann::json msg;
   msg["type"] = "fill";
   msg["msg"]["order_id"] = order_id;
   msg["msg"]["market_ticker"] = ticker;
   msg["msg"]["side"] = side;
+  msg["msg"]["purchased_side"] = purchased_side.empty() ? side : purchased_side;
   msg["msg"]["yes_price_dollars"] = cents_to_dollars(price);
   msg["msg"]["count_fp"] = format_count(count);
   msg["msg"]["ts_ms"] = kFillTsMs;
@@ -415,6 +417,28 @@ TEST_F(WebSocketClientTest, FillFieldsParsedCorrectly) {
   EXPECT_EQ(received.price_cents, kFillPrice);
   EXPECT_EQ(received.quantity, kFillCount);
   EXPECT_FALSE(received.is_taker); // default fill_message is maker (passive)
+}
+
+TEST_F(WebSocketClientTest, MakerFillSideTakenFromPurchasedSideNotAggressor) {
+  // A resting order that gets lifted reports `side` as the AGGRESSOR's side but
+  // `purchased_side` as what THIS account bought. A resting NO order hit by a
+  // yes-buyer arrives as side="yes", purchased_side="no"; the fill must be
+  // booked NO (short yes). Trusting `side` booked a phantom long that desynced
+  // our position from the exchange (observed live: local +10 vs exchange 0).
+  auto fake_ws = std::make_unique<kalshi::FakeWebSocket>();
+  kalshi::FakeWebSocket *ws_raw = fake_ws.get();
+  ws_raw->enqueue_message(fill_message("order-abc", kTestTicker, "yes",
+                                       kFillPrice, kFillCount,
+                                       /*is_taker=*/false,
+                                       /*purchased_side=*/"no"));
+
+  auto client = make_client(std::move(fake_ws));
+
+  kalshi::Side recv_side{kalshi::Side::Yes};
+  client.on_fill([&](const kalshi::Fill &fill) { recv_side = fill.side; });
+  client.run();
+
+  EXPECT_EQ(recv_side, kalshi::Side::No);
 }
 
 TEST_F(WebSocketClientTest, ThrowingCallbackIsContainedNotPropagated) {

@@ -61,6 +61,12 @@ std::optional<int> Quoter::passive_ask(int desired_ask, int market_bid_cents) {
 
 void Quoter::refresh_bid(const std::string &ticker, int desired_bid) {
   auto &live = live_quotes_[ticker];
+  // A filled/vanished order is erased from open_orders: cancelling its dead id
+  // fails forever. Drop it and re-place instead.
+  if (!live.bid_order_id.empty() &&
+      !order_mgr_.open_orders().contains(live.bid_order_id)) {
+    live.bid_order_id.clear();
+  }
   if (live.bid_order_id.empty()) {
     // Self-cross guard: don't place bid if it would match our own resting ask.
     if (!live.ask_order_id.empty() && desired_bid >= live.current_ask_cents) {
@@ -98,6 +104,10 @@ void Quoter::refresh_bid(const std::string &ticker, int desired_bid) {
 void Quoter::refresh_ask(const std::string &ticker, int desired_ask) {
   const int no_price = complement_price(desired_ask);
   auto &live = live_quotes_[ticker];
+  if (!live.ask_order_id.empty() &&
+      !order_mgr_.open_orders().contains(live.ask_order_id)) {
+    live.ask_order_id.clear();
+  }
   if (live.ask_order_id.empty()) {
     // Self-cross guard: don't place ask if it would match our own resting bid.
     if (!live.bid_order_id.empty() && desired_ask <= live.current_bid_cents) {

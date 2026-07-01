@@ -296,7 +296,12 @@ void dispatch_fill(const WebSocketClient::FillCallback &callback,
     Fill fill;
     fill.order_id = msg_body.at("order_id").get<std::string>();
     fill.market_ticker = msg_body.at("market_ticker").get<std::string>();
-    fill.side = parse_side(msg_body.at("side").get<std::string>());
+    // `purchased_side` is the side THIS account bought; `side` is the
+    // aggressor's — inverted on a maker fill, which mis-signs the position.
+    fill.side =
+        parse_side(msg_body.contains("purchased_side")
+                       ? msg_body.at("purchased_side").get<std::string>()
+                       : msg_body.at("side").get<std::string>());
     fill.price_cents =
         dollars_to_cents(msg_body.at("yes_price_dollars").get<std::string>());
     fill.quantity = parse_fp_count(msg_body.at("count_fp").get<std::string>());
