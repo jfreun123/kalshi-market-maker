@@ -72,9 +72,14 @@
   cross`. The *systematic* crossing was the orderbook sort bug (now fixed); this
   is the residual.
 
-- [ ] **5. D2 — align scanner price band with the risk price gate.** The scanner
-  admits `[min_price, max_price]` but the quoter only trades `[10,90]`, so the
-  scanner's top picks are un-quotable longshots. Derive one band from the other.
+- [x] **5. D2 — align scanner price band with the risk price gate.** *(Done +
+  verified live: `quotable_price_band(risk, quoter)` = the risk gate inset by the
+  quoter's min half-spread, so admitted markets have room for BOTH a bid and an
+  ask in the gate; `load_config` clamps the scanner band to it (narrows only).
+  Before: top picks were 4–9c longshots (3 got zero quotes, 1 one-sided). After:
+  band [2,98]→[12,88], top-5 mids now 12–45c, all two-sided-quotable.)* The
+  scanner admitted `[min_price, max_price]` but the quoter only trades `[10,90]`,
+  so its top picks were un-quotable longshots.
 
 ### P2 — Operational robustness & strategy
 
@@ -306,17 +311,13 @@ were found and fixed, plus several environment/strategy learnings.
   unit test used single-level (already-sorted) books.
 
 **Open follow-ups (tracked):**
-- [ ] **D1 — Belt-and-braces non-crossing clamp.** The orderbook fix removed the
-  systematic crossing. Residual risk remains on very fast books: a quote priced
-  near the touch can cross by the time the ~300ms REST round-trip lands. Clamp
-  quotes to stay strictly passive vs. the observed BBO (≥1c behind) so latency
-  jitter can't produce a `post only cross`. Lower priority now that mid is
-  correct, but still worth doing.
-- [ ] **D2 — Scanner price band vs. risk price gate are misaligned.** Scanner
-  admits `[min_price, max_price]` (was `[2,98]`) but the risk gate only quotes
-  `[10,90]`, so the scanner's top picks (2–5c longshots) are un-quotable and
-  also the longshots Bürgi/Deng/Whelan say to avoid. Align the scanner's
-  `min/max_price_cents` to the risk gate (or derive one from the other).
+- [x] **D1 — Belt-and-braces non-crossing clamp.** *(Done — see P1 #4.)* Clamp
+  quotes strictly passive vs. the observed BBO (≥1c behind) so latency jitter
+  can't produce a `post only cross`.
+- [x] **D2 — Scanner price band vs. risk price gate are misaligned.** *(Done +
+  verified live — see P1 #5.)* The scanner now derives its price band from the
+  risk gate inset by the quoter's min half-spread, so the top-N are two-sided-
+  quotable rather than 2–9c longshots.
 - [ ] **D3 — Staleness flapping on quiet markets.** Thin demo markets (e.g. the
   CPI tickers) send no WS traffic for >30s, tripping `kStaleBook` repeatedly →
   flatten/re-quote churn. Consider counting heartbeats/pings toward freshness,
@@ -403,17 +404,13 @@ un-guarded for the reasons above; the clean rollout is complete.*
 
 **BLOCKER-1 (resolved):** `IxWebSocket` implemented via FetchContent `machinezone/IXWebSocket`. End-to-end connection to live UAT not yet verified.
 
-**BLOCKER-2 (open — narrowed 2026-06-29):** A live `--capture` run against demo
-showed network + clock are fine and **public** REST (`GET /orderbook`) returns
-200, but every **authenticated** call (`GET /portfolio/positions`, the WS
-handshake) returns `401 INVALID_PARAMETER`. Root cause: the `api_key` (access key
-ID) in `config-demo.json` is still an unfilled placeholder (`<…>`, not a UUID) —
-the private key `.pem` is real, the access key ID is missing. **Action: paste the
-real demo access key ID into config, then re-run `--capture`.** Secondary suspect
-if 401 persists after that: RSA-PSS salt length in `auth.cpp` uses
-`RSA_PSS_SALTLEN_MAX`; Kalshi's SDK uses digest length (32) — verify live once a
-real key exists. Field-shape drift (price names, `count` vs `quantity`, status
-strings, timestamps) can only be confirmed once authenticated traffic flows.
+**BLOCKER-2 (RESOLVED 2026-06-30):** Authenticated demo calls now succeed.
+`config.json` (NOT `config-demo.json` — that one still has the placeholder key)
+holds the real demo access key ID + `.pem`, points at `demo-api.kalshi.co`, and
+`--reconcile`/`--scan`/trade all authenticate (`reconcile: in sync`, WS handshake
+connects). The earlier 401 was just the unfilled key in `config-demo.json`; the
+RSA-PSS salt length was a non-issue. A full demo run (scan → seed → quote → WS →
+staleness-halt → flatten) ran clean end-to-end; see *Demo Run Findings*.
 
 **Pre-UAT checklist:**
 - [x] `IxWebSocket` implemented and library fetched

@@ -115,8 +115,10 @@ TEST(ConfigTest, LoadsAllFields) {
 }
 
 TEST(ConfigTest, LoadsScannerSection) {
-  constexpr int kMinPrice = 5;
-  constexpr int kMaxPrice = 95;
+  // Within the default quotable band [12,88] so the band-clamp is a no-op here
+  // and this test stays focused on parsing the scanner fields.
+  constexpr int kMinPrice = 15;
+  constexpr int kMaxPrice = 85;
   constexpr int kMinSpread = 1;
   constexpr int kMaxSpread = 20;
   constexpr double kMinVolume = 25.0;
@@ -141,6 +143,49 @@ TEST(ConfigTest, LoadsScannerSection) {
   EXPECT_DOUBLE_EQ(config.scanner.min_volume_24h, kMinVolume);
   EXPECT_DOUBLE_EQ(config.scanner.min_days_to_close, kMinDays);
   EXPECT_DOUBLE_EQ(config.scanner.max_days_to_close, kMaxDays);
+}
+
+// ---- Scanner price band aligned to the quotable range ----
+
+TEST(ConfigTest, QuotablePriceBandInsetsRiskGateByMinHalfSpread) {
+  kalshi::RiskLimits risk;
+  risk.min_quote_price_cents = 10;
+  risk.max_quote_price_cents = 90;
+  kalshi::QuoterConfig quoter; // defaults: target 4, min_spread 3 → half = 2
+
+  const auto [band_min, band_max] = kalshi::quotable_price_band(risk, quoter);
+
+  // Inset by the min half-spread (2) so both bid and ask fit inside [10,90].
+  EXPECT_EQ(band_min, 12);
+  EXPECT_EQ(band_max, 88);
+}
+
+TEST(ConfigTest, ScannerBandClampedToQuotableRange) {
+  // The exact bug seen live: a wide scanner band ([2,98]) admits longshots the
+  // [10,90] risk gate can't two-side.
+  nlohmann::json config_json = minimal_config_json();
+  config_json["scanner"] = {{"min_price_cents", 2}, {"max_price_cents", 98}};
+
+  const auto path = write_temp_config(config_json);
+  const auto config = kalshi::load_config(path);
+  std::filesystem::remove(path);
+
+  // Clamped to the default quotable band [12,88], not the configured [2,98].
+  EXPECT_EQ(config.scanner.min_price_cents, 12);
+  EXPECT_EQ(config.scanner.max_price_cents, 88);
+}
+
+TEST(ConfigTest, ScannerBandNotWidenedWhenTighterThanQuotable) {
+  // A deliberately narrow scanner band is preserved — clamp only narrows.
+  nlohmann::json config_json = minimal_config_json();
+  config_json["scanner"] = {{"min_price_cents", 30}, {"max_price_cents", 70}};
+
+  const auto path = write_temp_config(config_json);
+  const auto config = kalshi::load_config(path);
+  std::filesystem::remove(path);
+
+  EXPECT_EQ(config.scanner.min_price_cents, 30);
+  EXPECT_EQ(config.scanner.max_price_cents, 70);
 }
 
 TEST(ConfigTest, DefaultsAppliedWhenOptionalSectionsAbsent) {
