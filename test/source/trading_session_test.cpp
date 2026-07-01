@@ -242,7 +242,7 @@ TEST_F(TradingSessionTest, SeedOrderbookContainsOrderRejection) {
   // book). Seeding must not throw — one un-quotable market cannot abort
   // startup — and the book must still be recorded for the live feed.
   transport_.enqueue(
-      {400,
+      {kHttpBadRequest,
        R"({"error":{"code":"invalid_order","message":"post only cross"}})"});
 
   EXPECT_NO_THROW(session_.seed_orderbook(
