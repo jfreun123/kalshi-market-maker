@@ -326,6 +326,52 @@ were found and fixed, plus several environment/strategy learnings.
 - Ops note: background launches need `setsid` (a bare `&` under the tooling gets
   killed when the parent shell exits).
 
+### Demo Run Findings (2026-06-30 → 07-01)
+
+Three more bugs found and fixed across several demo runs; one root-cause
+follow-up remains open (the important one).
+
+**Fixed (committed):**
+- **Fill side mis-signed → phantom position.** The WS `fill` parser signed
+  inventory from `side` (the aggressor/book side), which inverts on a maker
+  fill: a resting NO order lifted by a yes-buyer arrives as `side:"yes"`,
+  `purchased_side:"no"`. We booked a phantom long (`local +10` vs `exchange 0`
+  → `kModelDiverge` + reconcile DRIFT halt). Now signs from `purchased_side`;
+  confirmed against a live `--capture` fill frame. The exchange also sends
+  `post_position_fp` (authoritative net after each fill) — adopting that as the
+  source of truth is the robust long-term fix (see D5). (`68aa86d`)
+- **Quoter cancel-loop on a filled order.** `refresh_bid/ask` retried
+  cancelling a live-quote id that had already filled (cancel → `false`, id never
+  cleared) forever. Now reconciles `live_quotes_` against `open_orders()` and
+  re-places instead. (`68aa86d`)
+- **Halt-flatten livelock.** `enforce_quote_safety` ran `cancel_all_quotes`
+  every main-loop tick while halted; a filled order that can't be cancelled
+  stayed in `open_orders`, so the flatten never completed and re-issued the
+  doomed cancel ~5×/sec forever (7202 times observed live). Now edge-triggered:
+  flatten once on halt entry, re-arm when the halt clears. (`48a6358`)
+
+**Open follow-ups (tracked):**
+- [ ] **D4 — Adopt exchange positions at startup (root cause of the drift
+  halts).** The bot starts every run believing it is flat (`local = 0`) even
+  when the exchange still holds inventory from a prior run (positions survive
+  shutdown — we cancel *orders*, not *positions*). The mismatch is real and
+  permanent, so reconcile immediately DRIFT-halts the affected tickers, and
+  before the livelock fix it wedged the whole process. Fix: at startup call
+  `GET /portfolio/positions` and seed local `net_position` from it (pairs with
+  the orphan-order sweep, P1 #3), so we begin reconciled instead of phantom-
+  flat. Consider also skipping quoting a ticker that still carries a residual.
+- [ ] **D5 — Trust `post_position_fp` for inventory.** Sync per-market position
+  to the exchange's authoritative post-fill field instead of accumulating from
+  `purchased_side` + `count_fp`; self-corrects any future fill-parsing drift.
+- [ ] **Flatten *inventory* (not just orders) on halt/shutdown (optional,
+  gated).** Today halt/shutdown cancels resting orders but leaves the open
+  position, so residuals accumulate across runs and become D4's drift. A gated
+  "close position on halt" path would leave the account flat — but it crosses
+  the spread (taker cost), so it must be opt-in / risk-bounded.
+- Ops note: demo account currently carries residual positions from these runs
+  (e.g. `MEXGMORA` short, `MIA` ~4.36) — clear them in the UI before the next
+  clean run, or they will DRIFT-halt those tickers.
+
 ---
 
 ## Safety: `ensure()` Fail-Fast Invariant Checks
