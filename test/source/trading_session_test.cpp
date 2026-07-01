@@ -290,6 +290,69 @@ TEST_F(TradingSessionTest, EnforceQuoteSafetyFlattensWhenHalted) {
   EXPECT_EQ(count_method(transport_, "DELETE"), 2);
 }
 
+TEST_F(TradingSessionTest,
+       EnforceQuoteSafetyFlattensOnceNotEveryTickWhileHalted) {
+  // Livelock regression: while halted, enforce_quote_safety runs every
+  // main-loop tick. If a resting order can't be cancelled (already filled on
+  // the exchange
+  // -> DELETE returns non-2xx -> stays in open_orders), a level-triggered
+  // flatten re-issues that doomed cancel forever (observed live: 7202 flattens,
+  // ~5/sec). The flatten must be edge-triggered: run once on halt entry, not
+  // per tick.
+  constexpr int kHttpBadRequest = 400;
+  transport_.enqueue({kHttpOk, order_json(kOrderId1, kDefaultQuoteSize)});
+  transport_.enqueue({kHttpOk, order_json(kOrderId2, kDefaultQuoteSize)});
+  session_.on_snapshot(make_orderbook(kTicker, kYesBid, kNoBid, kObQty));
+  session_.on_delta(kTicker, kalshi::Side::Yes, kSubBboDeltaPrice,
+                    kSubBboDeltaQty);
+  ASSERT_EQ(order_mgr_.open_orders().size(), 2U);
+
+  // Both cancels fail, so the orders stay tracked (mimics already-filled ids).
+  transport_.enqueue({kHttpBadRequest, R"({"error":{"code":"not_found"}})"});
+  transport_.enqueue({kHttpBadRequest, R"({"error":{"code":"not_found"}})"});
+
+  risk_mgr_.halt();
+  session_.enforce_quote_safety(); // first (edge) flatten
+  const int deletes_after_first = count_method(transport_, "DELETE");
+  ASSERT_EQ(deletes_after_first, 2);
+  ASSERT_EQ(order_mgr_.open_orders().size(), 2U); // dead ids still tracked
+
+  // Subsequent ticks while still halted must NOT re-issue cancels.
+  session_.enforce_quote_safety();
+  session_.enforce_quote_safety();
+  EXPECT_EQ(count_method(transport_, "DELETE"), deletes_after_first);
+}
+
+TEST_F(TradingSessionTest,
+       EnforceQuoteSafetyReflattensAfterHaltClearsAndReTriggers) {
+  // The edge-trigger must re-arm: if a halt clears and later re-triggers, the
+  // flatten must fire again (not be permanently suppressed).
+  transport_.enqueue({kHttpOk, order_json(kOrderId1, kDefaultQuoteSize)});
+  transport_.enqueue({kHttpOk, order_json(kOrderId2, kDefaultQuoteSize)});
+  session_.on_snapshot(make_orderbook(kTicker, kYesBid, kNoBid, kObQty));
+  session_.on_delta(kTicker, kalshi::Side::Yes, kSubBboDeltaPrice,
+                    kSubBboDeltaQty);
+
+  risk_mgr_.halt();
+  session_.enforce_quote_safety();
+  ASSERT_EQ(count_method(transport_, "DELETE"), 2);
+  ASSERT_TRUE(order_mgr_.open_orders().empty());
+
+  risk_mgr_.resume();
+  transport_.enqueue({kHttpOk, order_json(kOrderId3, kDefaultQuoteSize)});
+  transport_.enqueue({kHttpOk, order_json(kOrderId4, kDefaultQuoteSize)});
+  session_.on_delta(kTicker, kalshi::Side::Yes, kSubBboDeltaPrice,
+                    kSubBboDeltaQty);
+  ASSERT_EQ(order_mgr_.open_orders().size(), 2U);
+  session_
+      .enforce_quote_safety(); // an unhalted main-loop tick re-arms the edge
+
+  risk_mgr_.halt();
+  session_.enforce_quote_safety(); // re-armed edge -> flattens again
+  EXPECT_EQ(count_method(transport_, "DELETE"), 4);
+  EXPECT_TRUE(order_mgr_.open_orders().empty());
+}
+
 TEST_F(TradingSessionTest, EnforceQuoteSafetyIsNoOpWhenNotHalted) {
   transport_.enqueue({kHttpOk, order_json(kOrderId1, kDefaultQuoteSize)});
   transport_.enqueue({kHttpOk, order_json(kOrderId2, kDefaultQuoteSize)});

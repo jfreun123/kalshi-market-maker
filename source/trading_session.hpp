@@ -99,6 +99,8 @@ private:
   OrderbookMap ob_map_;
   PnlMap prior_pnl_;
   PnlListener pnl_listener_;
+  bool halt_flattened_{
+      false}; // edge-trigger: flatten once per halt, not per tick
 };
 
 } // namespace kalshi

@@ -108,8 +108,18 @@ void TradingSession::cancel_all_quotes() {
 }
 
 void TradingSession::enforce_quote_safety() {
-  if (risk_mgr_.is_halted()) {
+  // Edge-triggered: flatten once when the halt begins. Re-running every tick
+  // livelocks if a resting order can't be cancelled (already filled -> the
+  // cancel keeps failing and it stays in open_orders forever). Quoting is
+  // separately gated on the halt, so no new quotes appear that would need
+  // re-flattening.
+  if (!risk_mgr_.is_halted()) {
+    halt_flattened_ = false;
+    return;
+  }
+  if (!halt_flattened_) {
     cancel_all_quotes();
+    halt_flattened_ = true;
   }
 }
 
