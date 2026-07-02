@@ -170,10 +170,12 @@ kalshi::MarketPosition exchange_pos(const std::string &ticker,
   return pos;
 }
 
-const kalshi::Quantity kLocalYes = kalshi::Quantity::from_contracts(5);
-const kalshi::Quantity kLocalNo = kalshi::Quantity::from_contracts(-3);
-const kalshi::Quantity kExchangeMismatch = kalshi::Quantity::from_contracts(3);
-const kalshi::Quantity kUntrackedPosition = kalshi::Quantity::from_contracts(4);
+constexpr kalshi::Quantity kLocalYes = kalshi::Quantity::from_contracts(5);
+constexpr kalshi::Quantity kLocalNo = kalshi::Quantity::from_contracts(-3);
+constexpr kalshi::Quantity kExchangeMismatch =
+    kalshi::Quantity::from_contracts(3);
+constexpr kalshi::Quantity kUntrackedPosition =
+    kalshi::Quantity::from_contracts(4);
 } // namespace
 
 TEST(PortfolioTest, ReconcileInSyncWhenPositionsMatch) {

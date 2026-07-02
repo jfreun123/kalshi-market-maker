@@ -28,7 +28,8 @@ constexpr int kObQty = 100;
 
 // Delta below best bid — keeps a valid BBO so the quoter places quotes.
 constexpr int kSubBboDeltaPrice = 50;
-const kalshi::Quantity kSubBboDeltaQty = kalshi::Quantity::from_contracts(100);
+constexpr kalshi::Quantity kSubBboDeltaQty =
+    kalshi::Quantity::from_contracts(100);
 constexpr int kDefaultQuoteSize = kalshi::QuoterConfig::kDefaultQuoteSize;
 
 // A YES@90 qty-1 fill leaves 90c = $0.90 capital at risk.

@@ -48,8 +48,10 @@ constexpr std::string_view kAskPriceExtremeClamp =
 // Flow imbalance: default spread 4 → half 2 → bid 50; +2 imbalance → half 3 →
 // bid 49.
 constexpr std::string_view kBidPriceImbalanced = R"("price":"0.4900")";
-const kalshi::Quantity kImbalanceYesQty = kalshi::Quantity::from_contracts(30);
-const kalshi::Quantity kImbalanceNoQty = kalshi::Quantity::from_contracts(5);
+constexpr kalshi::Quantity kImbalanceYesQty =
+    kalshi::Quantity::from_contracts(30);
+constexpr kalshi::Quantity kImbalanceNoQty =
+    kalshi::Quantity::from_contracts(5);
 // Spread floor: target 2 (half 1 → bid 51) is overridden by min_spread 8
 // (half 4 → bid 48 at mid 52).
 constexpr int kLowTargetSpread = 2;
@@ -59,7 +61,7 @@ constexpr std::string_view kBidPriceFloored = R"("price":"0.4800")";
 // default spread 4 (half 2) widens to half 4 → bid 48 ("0.4800").
 constexpr double kMakerFeeRate = 0.07;
 
-const kalshi::Quantity kObLevelQty = kalshi::Quantity::from_contracts(100);
+constexpr kalshi::Quantity kObLevelQty = kalshi::Quantity::from_contracts(100);
 constexpr int kFillPrice = 52;
 constexpr long long kTs1Ns = 1'000'000LL;
 constexpr int kHttpOk = 200;

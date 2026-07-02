@@ -155,22 +155,23 @@ Side parse_side(const std::string &side_str) {
   return Side::No;
 }
 
-// Snapshot msg uses yes_dollars_fp / no_dollars_fp: arrays of [price_str,
-// count_str] pairs.
+Level parse_snapshot_level(const nlohmann::json &level) {
+  constexpr std::size_t kPriceField = 0;
+  constexpr std::size_t kCountField = 1;
+  return {dollars_to_cents(level.at(kPriceField).get<std::string>()),
+          parse_fp_count(level.at(kCountField).get<std::string>())};
+}
+
 Orderbook parse_snapshot(const nlohmann::json &msg) {
   Orderbook book;
   book.ticker = msg.at("market_ticker").get<std::string>();
 
   static const nlohmann::json kEmptyArray = nlohmann::json::array();
-  for (const auto &entry : msg.value("yes_dollars_fp", kEmptyArray)) {
-    const int price = dollars_to_cents(entry.at(0).get<std::string>());
-    const Quantity qty = parse_fp_count(entry.at(1).get<std::string>());
-    book.yes.push_back({price, qty});
+  for (const auto &level : msg.value("yes_dollars_fp", kEmptyArray)) {
+    book.yes.push_back(parse_snapshot_level(level));
   }
-  for (const auto &entry : msg.value("no_dollars_fp", kEmptyArray)) {
-    const int price = dollars_to_cents(entry.at(0).get<std::string>());
-    const Quantity qty = parse_fp_count(entry.at(1).get<std::string>());
-    book.no.push_back({price, qty});
+  for (const auto &level : msg.value("no_dollars_fp", kEmptyArray)) {
+    book.no.push_back(parse_snapshot_level(level));
   }
   return book;
 }

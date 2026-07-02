@@ -7,10 +7,12 @@
 namespace {
 
 constexpr int kMidPrice = 50;
-const kalshi::Quantity kLevelQuantity = kalshi::Quantity::from_contracts(100);
+constexpr kalshi::Quantity kLevelQuantity =
+    kalshi::Quantity::from_contracts(100);
 constexpr int kAltPriceA = 49;
 constexpr int kAltPriceB = 48;
-const kalshi::Quantity kDeltaQuantity = kalshi::Quantity::from_contracts(200);
+constexpr kalshi::Quantity kDeltaQuantity =
+    kalshi::Quantity::from_contracts(200);
 constexpr int kSmallLevelCount = 10;
 constexpr int kMediumLevelCount = 50;
 constexpr int kLargeLevelCount = 100;

@@ -8,6 +8,7 @@
 // floating-point drift. A Quantity is signed: positions net YES minus NO.
 
 #include <cmath>
+#include <compare>
 #include <cstdint>
 #include <cstdlib>
 #include <format>
@@ -19,13 +20,14 @@ class Quantity {
 public:
   static constexpr std::int64_t kCentiPerContract = 100;
 
-  Quantity() = default;
+  constexpr Quantity() = default;
 
-  [[nodiscard]] static Quantity from_centi(std::int64_t centi) {
+  [[nodiscard]] static constexpr Quantity from_centi(std::int64_t centi) {
     return Quantity{centi};
   }
 
-  [[nodiscard]] static Quantity from_contracts(std::int64_t contracts) {
+  [[nodiscard]] static constexpr Quantity
+  from_contracts(std::int64_t contracts) {
     return Quantity{contracts * kCentiPerContract};
   }
 
@@ -34,9 +36,9 @@ public:
         std::stod(fixed_point) * static_cast<double>(kCentiPerContract)))};
   }
 
-  [[nodiscard]] std::int64_t centi() const { return centi_; }
+  [[nodiscard]] constexpr std::int64_t centi() const { return centi_; }
 
-  [[nodiscard]] double contracts() const {
+  [[nodiscard]] constexpr double contracts() const {
     return static_cast<double>(centi_) / static_cast<double>(kCentiPerContract);
   }
 
@@ -47,54 +49,41 @@ public:
                        magnitude % kCentiPerContract);
   }
 
-  [[nodiscard]] bool is_zero() const { return centi_ == 0; }
-  [[nodiscard]] bool is_positive() const { return centi_ > 0; }
+  [[nodiscard]] constexpr bool is_zero() const { return centi_ == 0; }
+  [[nodiscard]] constexpr bool is_positive() const { return centi_ > 0; }
 
-  Quantity operator-() const { return Quantity{-centi_}; }
+  constexpr Quantity operator-() const { return Quantity{-centi_}; }
 
-  Quantity &operator+=(Quantity other) {
+  constexpr Quantity &operator+=(Quantity other) {
     centi_ += other.centi_;
     return *this;
   }
 
-  Quantity &operator-=(Quantity other) {
+  constexpr Quantity &operator-=(Quantity other) {
     centi_ -= other.centi_;
     return *this;
   }
 
-  friend Quantity operator+(Quantity lhs, Quantity rhs) { return lhs += rhs; }
-  friend Quantity operator-(Quantity lhs, Quantity rhs) { return lhs -= rhs; }
+  friend constexpr Quantity operator+(Quantity lhs, Quantity rhs) {
+    return lhs += rhs;
+  }
+  friend constexpr Quantity operator-(Quantity lhs, Quantity rhs) {
+    return lhs -= rhs;
+  }
 
-  friend bool operator==(Quantity lhs, Quantity rhs) {
-    return lhs.centi_ == rhs.centi_;
-  }
-  friend bool operator!=(Quantity lhs, Quantity rhs) {
-    return lhs.centi_ != rhs.centi_;
-  }
-  friend bool operator<(Quantity lhs, Quantity rhs) {
-    return lhs.centi_ < rhs.centi_;
-  }
-  friend bool operator>(Quantity lhs, Quantity rhs) {
-    return lhs.centi_ > rhs.centi_;
-  }
-  friend bool operator<=(Quantity lhs, Quantity rhs) {
-    return lhs.centi_ <= rhs.centi_;
-  }
-  friend bool operator>=(Quantity lhs, Quantity rhs) {
-    return lhs.centi_ >= rhs.centi_;
-  }
+  constexpr auto operator<=>(const Quantity &) const = default;
 
 private:
-  explicit Quantity(std::int64_t centi) : centi_{centi} {}
+  constexpr explicit Quantity(std::int64_t centi) : centi_{centi} {}
 
   std::int64_t centi_{0};
 };
 
-[[nodiscard]] inline Quantity abs(Quantity value) {
+[[nodiscard]] constexpr Quantity abs(Quantity value) {
   return value.is_positive() || value.is_zero() ? value : -value;
 }
 
-[[nodiscard]] inline Quantity min(Quantity lhs, Quantity rhs) {
+[[nodiscard]] constexpr Quantity min(Quantity lhs, Quantity rhs) {
   return (lhs < rhs) ? lhs : rhs;
 }
 

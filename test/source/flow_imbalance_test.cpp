@@ -15,11 +15,12 @@ constexpr int kWindowSeconds = 60;
 constexpr double kRatioThreshold = 2.0;
 constexpr int kMinFlowVolume = 20;
 
-const kalshi::Quantity kBalancedQty = kalshi::Quantity::from_contracts(15);
-const kalshi::Quantity kHeavyYesQty = kalshi::Quantity::from_contracts(30);
-const kalshi::Quantity kLightNoQty = kalshi::Quantity::from_contracts(5);
-const kalshi::Quantity kModerateNoQty = kalshi::Quantity::from_contracts(10);
-const kalshi::Quantity kThinQty = kalshi::Quantity::from_contracts(8);
+constexpr kalshi::Quantity kBalancedQty = kalshi::Quantity::from_contracts(15);
+constexpr kalshi::Quantity kHeavyYesQty = kalshi::Quantity::from_contracts(30);
+constexpr kalshi::Quantity kLightNoQty = kalshi::Quantity::from_contracts(5);
+constexpr kalshi::Quantity kModerateNoQty =
+    kalshi::Quantity::from_contracts(10);
+constexpr kalshi::Quantity kThinQty = kalshi::Quantity::from_contracts(8);
 constexpr double kExpectedRatio3 = 3.0;
 constexpr int kBeyondWindowSeconds = 120;
 
