@@ -31,7 +31,7 @@ constexpr int kHttpInternalError = 500;
 
 // V2 minimal create-order response.
 constexpr std::string_view kPlaceOrderResponse =
-    R"({"order_id":"order-abc","fill_count_fp":"0.00","remaining_count":"10.00","ts_ms":1718000000000})";
+    R"({"order_id":"order-abc","fill_count":"0.00","remaining_count":"10.00","ts_ms":1718000000000})";
 
 // V2 GET order with a partial fill (fill_count_fp > 0, still resting).
 constexpr std::string_view kPartialOrderJson =
@@ -396,6 +396,23 @@ TEST_F(RestClientTest, PlaceOrderParsesResponseIntoOrder) {
   EXPECT_EQ(order.status, kalshi::OrderStatus::Open);
   EXPECT_EQ(order.type, kalshi::OrderType::Limit);
   EXPECT_NE(order.created_at, std::chrono::system_clock::time_point{});
+}
+
+TEST_F(RestClientTest, PlaceOrderParsesImmediateFillCountFromResponse) {
+  constexpr int kImmediateFill = 3;
+  const std::string partial_fill_response =
+      R"({"order_id":"order-abc","fill_count":"3.00","remaining_count":"7.00","ts_ms":1718000000000})";
+  auto transport = std::make_unique<FakeTransport>();
+  FakeTransport *const transport_raw = transport.get();
+  transport_raw->enqueue({kHttpOk, partial_fill_response});
+  auto client = make_client(std::move(transport));
+
+  auto order = client.place_order(kTestTicker, kalshi::Side::Yes, kTestYesPrice,
+                                  kTestQuantity, kalshi::OrderType::Limit);
+
+  EXPECT_EQ(order.filled_quantity,
+            kalshi::Quantity::from_contracts(kImmediateFill));
+  EXPECT_EQ(order.status, kalshi::OrderStatus::PartiallyFilled);
 }
 
 // ---- cancel_order ----

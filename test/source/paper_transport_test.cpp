@@ -47,7 +47,7 @@ TEST(PaperTransportTest, PlaceOrderReturnsSyntheticOrder) {
   // Response must carry the V2 fields RestClient::place_order reads back.
   const auto parsed = nlohmann::json::parse(response.body);
   EXPECT_TRUE(parsed.contains("order_id"));
-  EXPECT_TRUE(parsed.contains("fill_count_fp"));
+  EXPECT_TRUE(parsed.contains("fill_count"));
   EXPECT_TRUE(parsed.contains("ts_ms"));
 
   ASSERT_EQ(paper.open_orders().size(), 1U);
