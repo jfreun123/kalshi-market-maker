@@ -5,11 +5,7 @@
 
 # CMake build directories (all presets)
 build/
-build-asan/
-build-tsan/
-build-bench/
-build-coverage/
-build-fuzz/
+build-*/
 cmake-build-*/
 prefix/
 
