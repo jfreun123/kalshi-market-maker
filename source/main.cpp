@@ -1,6 +1,7 @@
 #include "auth.hpp"
 #include "capture.hpp"
 #include "config.hpp"
+#include "ensure.hpp"
 #include "fair_value.hpp"
 #include "flow_imbalance.hpp"
 #include "http_transport.hpp"
@@ -475,6 +476,9 @@ int main(int argc, char *argv[]) {
     kalshi::TradingSession session{app_config.target_tickers, order_mgr,
                                    risk_mgr, quoter, &flow_guard};
 
+    kalshi::set_panic_handler([&session]() { session.cancel_all_quotes(); });
+    kalshi::install_crash_flatten_handlers();
+
     const std::filesystem::path pnl_path{"pnl_state.json"};
     auto prior_pnl = load_pnl(pnl_path);
     for (const auto &[ticker, cents] : prior_pnl) {
@@ -545,6 +549,7 @@ int main(int argc, char *argv[]) {
         ws_thread.join();
       }
       session.cancel_all_quotes();
+      kalshi::set_panic_handler(nullptr);
       log->info("shutdown complete");
     }};
 
