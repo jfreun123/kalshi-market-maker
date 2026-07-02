@@ -9,28 +9,13 @@
 
 ### P0 — Correctness & safety (do these first)
 
-- [x] **1. Orderbook deltas are applied wrong — the book corrupts on every
-  update.** `orderbook_delta.delta_fp` is an *increment* to the resting size at
-  a price level, but `LocalOrderbook::apply_delta` treated it as the *absolute*
-  new quantity (`existing->quantity = new_quantity`, not `+=`). Confirmed from
-  captured frames: deltas are signed (`-0.16`, `-1.47`, `680.27`). Two failure
-  modes: a shrink like `-1.47` rounded to `-1` and *set* the level negative; a
-  small shrink like `-0.16` rounded to `0` and the zero-branch **erased the
-  whole level**. Fixed: `apply_delta` now applies `quantity += delta` and
-  removes a level only when it reaches ≤ 0; a negative delta on a missing level
-  is ignored. Regression tests cover increment/decrement, accumulation across a
-  delta stream, and removal at zero and negative. **Fractional precision now
-  fixed too**: contract counts are a strong `Quantity` type backed by exact
-  int64 centi-contracts (see R3, item 8), so sub-unit deltas like `-0.16` are
-  carried exactly instead of rounding to 0 and vanishing.
-
-- [ ] **2. `ensure()` fail-fast invariant primitive.** Flatten all orders, then
+- [ ] **1. `ensure()` fail-fast invariant primitive.** Flatten all orders, then
   crash, on a broken invariant. Safety-critical and explicitly requested. Full
   design in *Safety: `ensure()` Fail-Fast Invariant Checks* below.
 
 ### P1 — Market-making quality
 
-- [ ] **3. Cancel orphaned orders on startup (and guarantee cancel-on-exit).**
+- [ ] **2. Cancel orphaned orders on startup (and guarantee cancel-on-exit).**
   The bot only knows about orders it placed in the *current* process and never
   cancels pre-existing resting orders at startup. Across restarts, orders pile
   up on the exchange that the running bot is unaware of — observed live on
@@ -42,24 +27,24 @@
   local state), and make the exit/halt flatten path reliable across SIGINT/kill.
   High priority before any live trading.
 
-- [ ] **4. D1 — non-crossing quote clamp.** Clamp quotes to stay strictly
+- [ ] **3. D1 — non-crossing quote clamp.** Clamp quotes to stay strictly
   passive vs. the observed BBO (≥1c behind) so latency on fast books can't turn
   a quote into a `post only cross`. The *systematic* crossing was the orderbook
   sort bug (now fixed); this is the residual. Detail in *Demo Run Findings*.
 
-- [ ] **5. D2 — align scanner price band with the risk price gate.** The scanner
+- [ ] **4. D2 — align scanner price band with the risk price gate.** The scanner
   admits `[min_price, max_price]` but the quoter only trades `[10,90]`, so the
   scanner's top picks are un-quotable longshots. Derive one band from the other.
 
 ### P2 — Operational robustness & strategy
 
-- [ ] **6. D3 — staleness flapping on quiet markets.** Thin markets send no WS
+- [ ] **5. D3 — staleness flapping on quiet markets.** Thin markets send no WS
   traffic for >30s and trip `kStaleBook` repeatedly → flatten/re-quote churn.
   Count heartbeats toward freshness, or lengthen the threshold for low-activity
   markets (don't loosen blindly — it weakens staleness protection on active
   markets).
 
-- [ ] **7. Queue-position awareness (strategy).** Orders join a price-time FIFO
+- [ ] **6. Queue-position awareness (strategy).** Orders join a price-time FIFO
   queue; at a deep level a small quote sits at the back (observed queue position
   ~115,081 behind a ~115k-contract level) and only fills on adverse selection —
   i.e. when the market runs *through* us. Consider level choice / quote sizing /
@@ -68,33 +53,43 @@
 
 ### P3 — Structural refactors (PR #1 review — detail in *Code Review Follow-ups*)
 
-- [ ] **FIX transport.** Replace REST order entry with FIX (Kalshi supports FIX
-  for order entry; tag `21006` = CancelOrderOnPause, drop-copy for missed exec
-  reports). Lower latency than REST, better for high-frequency requoting. Market
-  data still comes via WebSocket. See §12 of the API reference and
+- [ ] **7. R3 — `Cents` strong type for prices.** The `Quantity` half is done
+  (see Done); prices are still bare `int` cents everywhere. Wrap them in a strong
+  `Cents` type so price/count/dollar values can't be silently mixed.
+- [ ] **8. FIX transport.** Replace REST order entry with FIX (Kalshi supports
+  FIX for order entry; tag `21006` = CancelOrderOnPause, drop-copy for missed
+  exec reports). Lower latency than REST, better for high-frequency requoting.
+  Market data still comes via WebSocket. See §12 of the API reference and
   `https://docs.kalshi.com/fix/*`.
-
-
-
-- [ ] **8. R3 — `Cents` / strong quantity type.** Quantity half **done**:
-  contract counts (orderbook levels, fills, positions, order sizes, FIFO lots,
-  flow volumes) are now a strong `Quantity` type backed by exact int64
-  centi-contracts — no more `int` rounding of fractional fills/deltas. Outbound
-  order *sizing* stays whole-contract `int` by design. Still open: a `Cents`
-  strong type for prices (prices remain `int` cents throughout).
 - [ ] **9. R2 — break up `main.cpp`** (also flagged by clang-tidy:
   cognitive complexity 27 > 25).
 - [ ] **10. R1 — split `source/`** into `Calculations/ Quoter/
   PortfolioManagement/ Networking/ Common/`.
 - [ ] **11. R4 — Constraints-vs-Guards framework.**
 - [ ] **12. R5 — `KalshiSession` + a `Session` concept** (multi-exchange).
-- [ ] **13. R6 — comment convention** (prose only at the top of each `.hpp`).
-- [ ] **14. R7 — `docs/kalshi-messages.md` + rate-limiting review.**
+- [ ] **13. R7 — `docs/kalshi-messages.md` + rate-limiting review.**
 
-**Recently fixed this session (committed):** orderbook ascending-sort → correct
-BBO/mid (was the reason we weren't making markets); quoter resync on flatten
-(re-quotes after halt/disconnect); seed order-error containment (one bad market
-can't crash startup). See *Demo Run Findings*.
+### Done (recent sessions, committed)
+
+- [x] **Orderbook delta apply (P0).** `delta_fp` is a signed *increment*, not the
+  absolute size; `apply_delta` treated it as absolute, so a `-1.47` shrink set
+  the level negative and a `-0.16` shrink erased it. Now `quantity += delta` with
+  removal only at ≤ 0. Regression-tested.
+- [x] **Fractional count precision (R3 quantity half).** Contract counts
+  (orderbook levels, fills, positions, FIFO lots, flow volumes) are a strong
+  `Quantity` type backed by exact int64 centi-contracts — no more `int` rounding
+  that dropped sub-unit deltas/fills. Outbound order *sizing* stays whole-contract
+  `int` by design.
+- [x] **R6 — comment convention.** Documented in `CLAUDE.md`: no comments except a
+  single doc block at the top of each `.hpp`. Existing-code cleanup is incremental
+  (conform files as they're edited).
+- [x] **API conformance.** RSA-PSS salt length = digest size; fill dispatch reads
+  `outcome_side` (not removed `side`); `place_order` reads `fill_count_fp`. Added
+  `docs/KALSHI_API_REFERENCE.md`.
+- [x] **Orderbook ascending-sort → correct BBO/mid** (was the reason we weren't
+  making markets); **quoter resync on flatten** (re-quotes after halt/disconnect);
+  **seed order-error containment** (one bad market can't crash startup); **paper
+  mode against the V2 API**. See *Demo Run Findings*.
 
 ---
 
@@ -406,13 +401,15 @@ are cross-cutting refactors that should each land as their own TDD phase.
   while moving code (`ws_*` → `websocket_*`, `rest_*` stays — REST is a proper
   noun). Each extraction is independently testable.
 
-- [ ] **R3 — Introduce a `Cents` type.** Replace the `double *_cents` fields
-  (e.g. `ExposureDecomposition::e_win_cents`, spread capture, PnL) with a
-  dedicated strong type wrapping an integer representation, plus arithmetic
-  helpers and explicit dollar conversion. This (a) removes float rounding from
-  money math and (b) localizes the representation so a future move to
-  sub-cent precision (e.g. micro-cents) is a one-type change. Migrate call
-  sites incrementally behind the type's API.
+- [ ] **R3 — Introduce a `Cents` type.** The *count* half of this item is
+  already done: contract counts are a strong `Quantity` type (exact int64
+  centi-contracts) — see the Done list. Still open is the *money* half: replace
+  the `double *_cents` fields (e.g. `ExposureDecomposition::e_win_cents`, spread
+  capture, PnL) and the bare `int` price cents with a dedicated strong type
+  wrapping an integer representation, plus arithmetic helpers and explicit dollar
+  conversion. This (a) removes float rounding from money math and (b) localizes
+  the representation so a future move to sub-cent precision (e.g. micro-cents) is
+  a one-type change. Migrate call sites incrementally behind the type's API.
 
 - [ ] **R4 — Constraints vs. Guards abstraction.** `FlowImbalanceGuard` is
   really one of a family of *constraints* the quoter consults (inventory caps,
@@ -431,13 +428,12 @@ are cross-cutting refactors that should each land as their own TDD phase.
   lean on C++20 concepts and strong types across the codebase rather than bare
   interfaces + primitives.
 
-- [ ] **R6 — Comment convention: verbose code, header-top docs only.** The
-  preferred style is self-documenting code with explanatory prose confined to a
-  block at the top of each `.hpp`. Strip inline/implementation comments that
-  restate what readable code already says (offenders flagged:
-  `pricing_model.{hpp,cpp}`, `quoter.hpp`, `order_manager.hpp`); promote any
-  genuinely useful context to the header preamble. Apply opportunistically as
-  files are touched by R1–R5. (Consider codifying this in `CLAUDE.md`.)
+- [x] **R6 — Comment convention: verbose code, header-top docs only.** Codified
+  in `CLAUDE.md` (Comments section): no comments except a single doc block at the
+  top of each `.hpp`. The convention is now enforced on new/edited code; stripping
+  pre-existing inline comments from untouched files (offenders flagged:
+  `pricing_model.{hpp,cpp}`, `quoter.hpp`, `order_manager.hpp`) is incremental —
+  conform files as they're touched by R1–R5.
 
 - [ ] **R7 — Document Kalshi message types + revisit self-rate-limiting.**
   Add `docs/kalshi-messages.md` enumerating the WS/REST message shapes we
