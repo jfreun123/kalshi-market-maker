@@ -24,8 +24,8 @@ kalshi::Orderbook make_snapshot(int level_count) {
   kalshi::Orderbook snap;
   snap.ticker = "BENCH-TICKER";
   for (int index = 0; index < level_count; ++index) {
-    snap.yes.push_back({kMidPrice - index, kLevelQuantity});
-    snap.no.push_back({kMidPrice - index, kLevelQuantity});
+    snap.yes.push_back({.price_cents = kMidPrice - index, .quantity = kLevelQuantity});
+    snap.no.push_back({.price_cents = kMidPrice - index, .quantity = kLevelQuantity});
   }
   return snap;
 }
@@ -83,8 +83,10 @@ BENCHMARK(BM_BestBid)->Arg(kSmallLevelCount)->Arg(kLargeLevelCount);
 
 static void BM_FairValueEstimate(benchmark::State &state) {
   kalshi::FairValueEngine engine{std::make_unique<kalshi::HeuristicModel>()};
-  const kalshi::FairValueInput input{kMidCents, kMediumTimeHours, 0,
-                                     std::nullopt};
+  const kalshi::FairValueInput input{.mid_cents = kMidCents,
+                                     .time_to_close_hours = kMediumTimeHours,
+                                     .net_position = 0,
+                                     .external_prob = std::nullopt};
   for ([[maybe_unused]] auto iter : state) {
     double fair_value = engine.estimate(input);
     benchmark::DoNotOptimize(fair_value);
@@ -96,8 +98,10 @@ BENCHMARK(BM_FairValueEstimate);
 
 static void BM_FairValueEstimateWithInventory(benchmark::State &state) {
   kalshi::FairValueEngine engine{std::make_unique<kalshi::HeuristicModel>()};
-  const kalshi::FairValueInput input{kHighMidCents, kShortTimeHours,
-                                     kLargeInventory, std::nullopt};
+  const kalshi::FairValueInput input{.mid_cents = kHighMidCents,
+                                     .time_to_close_hours = kShortTimeHours,
+                                     .net_position = kLargeInventory,
+                                     .external_prob = std::nullopt};
   for ([[maybe_unused]] auto iter : state) {
     double fair_value = engine.estimate(input);
     benchmark::DoNotOptimize(fair_value);
