@@ -68,6 +68,14 @@
 
 ### P3 — Structural refactors (PR #1 review — detail in *Code Review Follow-ups*)
 
+- [ ] **FIX transport.** Replace REST order entry with FIX (Kalshi supports FIX
+  for order entry; tag `21006` = CancelOrderOnPause, drop-copy for missed exec
+  reports). Lower latency than REST, better for high-frequency requoting. Market
+  data still comes via WebSocket. See §12 of the API reference and
+  `https://docs.kalshi.com/fix/*`.
+
+
+
 - [ ] **8. R3 — `Cents` / strong quantity type.** Bumped up: the P0 #1 precision
   fix wants a non-`int`, fractional size type.
 - [ ] **9. R2 — break up `main.cpp`** (also flagged by clang-tidy:
