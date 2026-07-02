@@ -1,6 +1,14 @@
 # Kalshi Exchange API Reference (for C++ Market Maker)
 
-> Compiled from https://docs.kalshi.com (July 2026). Covers the Predictions (event-contract) Trade API: REST, WebSocket, and FIX pointers. Raw specs for codegen: `https://docs.kalshi.com/openapi.yaml` (REST) and `https://docs.kalshi.com/asyncapi.yaml` (WebSocket).
+> Compiled from https://docs.kalshi.com and **re-verified against the live docs on 2026-07-02**. Covers the Predictions (event-contract) Trade API: REST, WebSocket, and FIX pointers. Raw specs for codegen: `https://docs.kalshi.com/openapi.yaml` (REST) and `https://docs.kalshi.com/asyncapi.yaml` (WebSocket). Machine-readable page index: `https://docs.kalshi.com/llms.txt`.
+
+## Conformance notes for our implementation (2026-07-02 audit)
+
+Discrepancies found between our C++ code and the verified live API. Fix separately from this doc:
+
+1. **🔴 `place_order` reads the wrong response field.** `rest_client.cpp` (`place_order`, ~line 357) reads `fill_count_fp` from the Create Order V2 response, but that endpoint returns **`fill_count`** (fixed-point string, **no `_fp` suffix**; likewise `remaining_count`). `at("fill_count_fp")` throws `json::out_of_range` on a real response — every live order placement breaks. Our tests pass only because `paper_transport.cpp` emits the same wrong name. **Careful:** this is endpoint-specific — the **Get Orders** order resource (used by `parse_order`, ~line 179) genuinely *does* use `initial_count_fp`/`fill_count_fp`/`remaining_count_fp` (verified), so that call is **correct**; only the create-order response path is wrong. See §5/§6. **Highest priority — live order path.**
+2. **🟠 We send `use_yes_price: true` on `orderbook_delta` subscribe.** That parameter is **not in the current channel docs** (§8.4). If the server ignores it, fine; if it honors it, NO-side levels arrive on the yes scale and our `complement()` (`1 − price`) inverts the ask. Verify the NO-side price scale against a live demo capture; drop the flag unless a capture requires it.
+3. **🟢 Validated, no change needed.** Auth signing (salt = digest length, §2), `fee_cost` = total-dollars-per-fill (§8.5, matches the fee-PnL work), `outcome_side` fill dispatch (§4.3), REST orderbook `orderbook_fp`/bids-only (§4.4), delta-as-signed-increment (§8.4).
 
 ---
 
@@ -64,12 +72,14 @@ Tiers (tokens/sec per bucket):
 |---|---|---|
 | Basic | 200 | 100 |
 | Advanced | 300 | 300 |
+| Expert | 600 | 600 |
 | Premier | 1,000 | 1,000 |
 | Paragon | 2,000 | 2,000 |
 | Prime | 4,000 | 4,000 |
+| Prestige | 6,000 | 8,000 |
 
 - **Batch endpoints do not save tokens**: each item is billed individually (25 creates = 250 tokens; 25 cancels = 25 × 2 = 50 tokens). Max batch size scales with the tier's write budget.
-- **Bursting**: the Write bucket holds **two seconds** of budget (Basic: one second, no headroom). It refills continuously; idle time builds burst headroom.
+- **Bursting**: Basic-tier Write holds only **one second** of budget (no headroom). Advanced-and-up Read and Premier-and-up Write hold **two seconds** and permit twice the per-second budget in a single burst. It refills continuously; idle time builds burst headroom.
 - Rate-limited requests return `429` with body `{"error": "too many requests"}`. **No `Retry-After` or `X-RateLimit-*` headers** — use exponential backoff; the next request succeeds as soon as the bucket covers its cost.
 
 ## 4. Data Conventions (critical)
@@ -114,7 +124,7 @@ Mapping from legacy `(action, side)`:
 
 - Direction does **not** change price: an order at price `p` with `outcome_side=no` matches an order at the same `p` with `outcome_side=yes`.
 - Public trades use `taker_outcome_side` / `taker_book_side`.
-- Legacy fields (`action`, `side`, `is_yes`, `purchased_side`, `taker_side`) are deprecated, removed **no earlier than May 14, 2026**. New code should read only the new fields.
+- Legacy fields are deprecated, removed **no earlier than May 28, 2026** (per the live `order_direction` doc): `action`/`side` (Order, Fill), `is_yes` (Order WS), `purchased_side` (Fill WS), `taker_side` (Trade REST + WS). New code should read only the new fields. Note: some WS example payloads in the docs still *show* the legacy fields, so they may still be present — but do not depend on them.
 
 ### 4.4 Orderbook semantics: bids only
 
@@ -211,17 +221,20 @@ Request (required unless noted):
 | `reduce_only` (opt) | bool | Cap placeable count by current position |
 | `subaccount` (opt) | int | 0 = primary |
 | `order_group_id` (opt) | string | Attach to a risk group (§7) |
+| `exchange_index` (opt) | int | Exchange shard; default `0`, use `-1` for auto-routing |
 
 Response (`201`):
 
 | Field | Notes |
 |---|---|
-| `order_id`, `client_order_id` | |
+| `order_id`, `client_order_id` | strings |
 | `fill_count` | Contracts filled immediately on placement |
 | `remaining_count` | After placement; for IOC, final state after unfilled cancel |
 | `average_fill_price` | VWAP; present only if `fill_count > 0` |
 | `average_fee_paid` | Per-contract VWAP fee; present only if `fill_count > 0` |
 | `ts_ms` | Matching-engine timestamp, epoch ms |
+
+> ⚠️ **Naming trap — verified against the live example response.** On *this* endpoint the count/price fields are `fill_count`, `remaining_count`, `average_fill_price`, `average_fee_paid` — fixed-point **strings with NO `_fp`/`_dollars` suffix** (e.g. `{"fill_count":"0.00","remaining_count":"10.00"}`). This is inconsistent with the WS/orderbook fields that *do* carry `_fp` (`count_fp`, `delta_fp`). Read `fill_count`, not `fill_count_fp`, from the create-order response.
 
 Errors: `400`, `401`, `409` (conflict), `429`, `500` with `{code, message, details, service}`.
 
@@ -294,11 +307,12 @@ On subscribe you receive `orderbook_snapshot`, then `orderbook_delta` messages:
 ```
 
 - Snapshot levels: `[price_dollars, count_fp]`; keys absent if a side is empty.
-- Delta: apply `delta_fp` (signed) to the level at `price_dollars` on `side`; remove level at zero.
+- Delta: `delta_fp` is a **signed increment** to the resting size at that `price_dollars`/`side` level (the live doc calls it a "fixed-point contract delta"; example values are signed, e.g. `-54.00`). Apply `size += delta_fp`; remove the level when its running size reaches ≤ 0. It is **not** an absolute replacement.
+- Snapshot subscribe params (per the live channel doc): `market_ticker` (single) or `market_tickers` (array); `market_id`/`market_ids` are **not** supported for this channel. `update_subscription` supports `add_markets` / `delete_markets` / `get_snapshot`.
 - `client_order_id` and `subaccount` appear on deltas **you** caused — use for low-latency ack/fill inference of your own quotes.
 - `ts` (RFC3339) is deprecated; use `ts_ms`.
-- **Pricing convention**: by default, NO-side deltas/levels are in **no-leg pricing** (a no-side level at `0.30` = "no at 30¢", matching "yes at 70¢"), so the two sides use different scales. Pass **`use_yes_price: true`** in subscribe params to get both sides on the yes-leg scale (no-side `0.30` reported as `0.70`). The default will flip to `true` in a future release and the flag later removed — **new integrations should set `use_yes_price: true`**.
-- Sequence gaps: resync via `update_subscription` `get_snapshot` or resubscribe.
+- **Pricing convention (NO side).** The book is bids-only on both sides (§4.4). In the examples above, NO-side levels are in **no-leg pricing** — a NO bid at `0.56` pairs with a YES ask at `1 − 0.56 = 0.44` — so YES and NO use different scales and `best_yes_ask = 1 − best_no_bid`. ⚠️ **`use_yes_price` is NOT documented on the current `orderbook_delta` channel** (an earlier revision described such a flag to report both sides on the yes scale; it no longer appears in the live docs). Do **not** rely on sending it. Treat NO-side levels as no-leg unless a live capture proves otherwise — and if you *do* send `use_yes_price: true` and the server honors it, your `1 − price` complement math would double-flip and invert the ask. **Verify the NO-side scale against a live demo capture before trusting the computed ask.**
+- Sequence gaps: `seq` is a per-subscription counter that must be gapless; on a gap, resync via `update_subscription` `get_snapshot` or resubscribe.
 
 ### 8.5 `fill` channel message
 
@@ -310,7 +324,10 @@ On subscribe you receive `orderbook_snapshot`, then `orderbook_delta` messages:
   "client_order_id":"...","post_position_fp":"500.00","purchased_side":"yes","subaccount":3}}
 ```
 
-Key fields: `trade_id` (unique per fill), `order_id`, `is_taker`, `yes_price_dollars` (always YES-leg price), `count_fp`, `fee_cost`, `post_position_fp` (position after fill), `ts_ms`. (`action`/`side`/`purchased_side` are legacy; prefer `outcome_side`/`book_side` where present.)
+Key fields: `trade_id` (unique per fill), `order_id`, `is_taker`, `yes_price_dollars` (always YES-leg price, `*_dollars` string), `count_fp` (fixed-point contracts, 2 dp), `post_position_fp` (position after fill), `ts_ms`. Direction: the schema lists `outcome_side` and `book_side` (current — bid≡yes, ask≡no); `action`/`side`/`purchased_side` are legacy (still shown in the doc's example payload). Prefer `outcome_side`/`book_side`.
+
+- **`fee_cost`** (verified 2026-07-02): a fixed-point **dollars string** and the **TOTAL exchange fee for this fill** (not per-contract). Convert to cents with `×100`, subtract once per fill. Example: `"0.0175"` = 1.75¢ total for the fill.
+- The illustrative example above omits `fee_cost`/`outcome_side`/`book_side` for brevity; they are defined in the channel schema. Fees can be `0` (maker fills on most markets are free — §10/§13).
 
 ## 9. Market Lifecycle, Pauses, Settlement
 
@@ -333,13 +350,13 @@ Status filter mapping on `GET /markets?status=`: `unopened`→initialized, `open
 
 ## 10. Fees & Rounding
 
-Balances must be exact multiples of $0.01 before/after every fill. Per fill:
+The `fee_rounding` doc covers the **rounding** mechanics (the base trade-fee formula lives on the fee schedule — see §13, verify against the live schedule). Per fill:
 
-- **Trade fee**: fee model output, rounded **up** to nearest $0.0001.
-- **Rounding fee**: `balance_change = revenue − trade_fee` floored (toward −∞) to nearest $0.01; rounding fee = the sub-cent remainder ($0.0000–$0.0099).
-- **Rebate**: a per-order **fee accumulator** tracks cumulative rounding overpayment across all fills of an order (taker and maker alike); once it exceeds $0.01, a whole-cent rebate is issued. Total fee across many small fills converges to the single-fill equivalent.
+- **Target balance precision**: **$0.01 for non-direct members** (the common case), **$0.0001 for direct members**. Balances land on a multiple of that precision after every fill.
+- **Rounding fee**: `balance_change` (= revenue − trade fee) is floored toward −∞ to the member's target balance precision; `rounding_fee = balance_change − floor(balance_change)` (the sub-precision remainder).
+- **Rebate**: a per-order **fee accumulator** tracks cumulative rounding overpayment across all fills of an order (taker and maker alike); once the accumulated rounding exceeds $0.01, a whole-cent rebate is issued and the accumulator is reduced by $0.01. Total fee across many small fills converges to the single-fill equivalent.
 - Net fee = trade fee + rounding fee − rebate ≥ $0.
-- Settlement payouts are rounded **down** to the cent; remainder recorded as a settlement fee (< $0.01).
+- Settlement payouts are rounded **down**; the remainder is recorded as a settlement fee.
 
 Model implication: track fees per-order, not per-fill in isolation; intermediates need 6-decimal precision when subpenny prices × fractional counts combine.
 
@@ -371,7 +388,7 @@ Kalshi also offers FIX for order entry: sessions/logon with API-key auth, order 
 
 ## 14. Market Maker Implementation Checklist
 
-1. **Book building**: subscribe `orderbook_delta` with `use_yes_price: true`; apply snapshot, then deltas keyed by (ticker, side, price); enforce gapless `seq` per `sid`; on gap, `get_snapshot`. Best bid = highest price level; asks are implied (1 − opposite best bid).
+1. **Book building**: subscribe `orderbook_delta` (`market_tickers`); apply snapshot, then apply each `delta_fp` as a **signed increment** keyed by (ticker, side, price), removing a level at ≤ 0; enforce gapless `seq` per `sid`; on gap, `get_snapshot`. Best bid = highest price level; YES ask is implied as `1 − best NO bid`. Treat NO-side levels as **no-leg** pricing (see §8.4) — `use_yes_price` is no longer a documented flag; verify the NO scale against a live capture before trusting the ask.
 2. **Own-order tracking**: `user_orders` + `fill` channels; correlate via `client_order_id` (also present on your own book deltas). Reconcile with REST (`user_data_timestamp` caveat: REST reads lag; trust write responses + WS).
 3. **Quoting**: Create Order V2 with `post_only` for passive quotes, `time_in_force=good_till_canceled` (+ `expiration_time` for auto-expiry), `self_trade_prevention_type` chosen deliberately (`maker` keeps your taker flow alive; `taker_at_cross` protects resting quotes), `cancel_order_on_pause=true`, and `order_group_id` on everything.
 4. **Risk**: one or more order groups with 15s rolling matched-contract limits; `trigger` as the kill switch; `reset` to resume. Respect the 200k open-order cap.
