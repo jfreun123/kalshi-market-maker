@@ -8,6 +8,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
@@ -130,7 +131,7 @@ TEST_F(DemoConformanceTest, GetOpenOrdersParses) {
   EXPECT_NO_THROW((void)rest.get_open_orders());
 }
 
-TEST_F(DemoConformanceTest, PlaceAndCancelOrderParses) {
+TEST_F(DemoConformanceTest, CreateOrderResponseParsesRestsAndCancels) {
   const std::string ticker = first_target_ticker();
   if (ticker.empty()) {
     GTEST_SKIP() << "demo config has no target_tickers to trade";
@@ -139,13 +140,34 @@ TEST_F(DemoConformanceTest, PlaceAndCancelOrderParses) {
 
   constexpr int kDeepPassiveBidCents = 1;
   constexpr int kOneContract = 1;
+
   const auto order =
       rest.place_order(ticker, kalshi::Side::Yes, kDeepPassiveBidCents,
                        kOneContract, kalshi::OrderType::Limit);
 
-  EXPECT_FALSE(order.id.empty());
+  ASSERT_FALSE(order.id.empty());
+  EXPECT_EQ(order.filled_quantity, kalshi::Quantity{});
+  EXPECT_EQ(order.status, kalshi::OrderStatus::Open);
+  EXPECT_NE(order.created_at, std::chrono::system_clock::time_point{});
   EXPECT_EQ(order.price_cents, kDeepPassiveBidCents);
-  EXPECT_TRUE(rest.cancel_order(order.id));
+  EXPECT_EQ(order.quantity, kalshi::Quantity::from_contracts(kOneContract));
+
+  const auto resting = rest.get_open_orders();
+  const bool is_resting = std::any_of(
+      resting.begin(), resting.end(),
+      [&order](const kalshi::Order &open) { return open.id == order.id; });
+  EXPECT_TRUE(is_resting) << "placed order " << order.id
+                          << " not found in get_open_orders";
+
+  ASSERT_TRUE(rest.cancel_order(order.id));
+
+  const auto after_cancel = rest.get_open_orders();
+  const bool still_resting = std::any_of(
+      after_cancel.begin(), after_cancel.end(),
+      [&order](const kalshi::Order &open) { return open.id == order.id; });
+  EXPECT_FALSE(still_resting) << "order " << order.id
+                              << " still resting after "
+                                 "cancel";
 }
 
 TEST_F(DemoConformanceTest, WebSocketOrderbookSnapshotParses) {
@@ -169,8 +191,9 @@ TEST_F(DemoConformanceTest, WebSocketOrderbookSnapshotParses) {
 
   std::thread runner{[&ws] { ws.run(); }};
 
-  constexpr int kMaxWaitTenths = 100; // up to 10s
-  for (int tenth = 0; tenth < kMaxWaitTenths && !got_snapshot.load(); ++tenth) {
+  constexpr int kMaxWaitTenthsOfSecond = 100;
+  for (int tenth = 0; tenth < kMaxWaitTenthsOfSecond && !got_snapshot.load();
+       ++tenth) {
     std::this_thread::sleep_for(std::chrono::milliseconds{100});
   }
   ws.stop();
