@@ -7,6 +7,7 @@
 
 #include <filesystem>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace kalshi {
@@ -23,6 +24,9 @@ struct AppConfig {
   ScannerConfig scanner;
   FlowImbalanceConfig flow;
 };
+
+std::pair<int, int> quotable_price_band(const RiskLimits &risk,
+                                        const QuoterConfig &quoter);
 
 // Loads configuration from a JSON file.
 // Throws std::runtime_error if the file cannot be read or a required field

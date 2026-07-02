@@ -2,11 +2,23 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <fstream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 namespace kalshi {
+
+std::pair<int, int> quotable_price_band(const RiskLimits &risk,
+                                        const QuoterConfig &quoter) {
+  constexpr int kMinHalfSpread = 1;
+  const int half_spread =
+      std::max({kMinHalfSpread, quoter.target_spread_cents / 2,
+                quoter.min_spread_cents / 2});
+  return {risk.min_quote_price_cents + half_spread,
+          risk.max_quote_price_cents - half_spread};
+}
 
 namespace {
 
@@ -116,6 +128,13 @@ AppConfig load_config(const std::filesystem::path &path) {
     config.scanner.max_days_to_close = scanner_json.value(
         "max_days_to_close", ScannerConfig::kDefaultMaxDaysToClose);
   }
+
+  const auto [quotable_min, quotable_max] =
+      quotable_price_band(config.risk, config.quoter);
+  config.scanner.min_price_cents =
+      std::max(config.scanner.min_price_cents, quotable_min);
+  config.scanner.max_price_cents =
+      std::min(config.scanner.max_price_cents, quotable_max);
 
   return config;
 }

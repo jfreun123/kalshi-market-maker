@@ -115,8 +115,8 @@ TEST(ConfigTest, LoadsAllFields) {
 }
 
 TEST(ConfigTest, LoadsScannerSection) {
-  constexpr int kMinPrice = 5;
-  constexpr int kMaxPrice = 95;
+  constexpr int kMinPrice = 15;
+  constexpr int kMaxPrice = 85;
   constexpr int kMinSpread = 1;
   constexpr int kMaxSpread = 20;
   constexpr double kMinVolume = 25.0;
@@ -229,6 +229,42 @@ TEST(ConfigTest, EmptyTargetTickersLoadsSuccessfully) {
   const auto config = kalshi::load_config(path);
   std::filesystem::remove(path);
   EXPECT_TRUE(config.target_tickers.empty());
+}
+
+TEST(ConfigTest, QuotablePriceBandInsetsRiskGateByMinHalfSpread) {
+  kalshi::RiskLimits risk;
+  risk.min_quote_price_cents = 10;
+  risk.max_quote_price_cents = 90;
+  kalshi::QuoterConfig quoter;
+
+  const auto [band_min, band_max] = kalshi::quotable_price_band(risk, quoter);
+
+  EXPECT_EQ(band_min, 12);
+  EXPECT_EQ(band_max, 88);
+}
+
+TEST(ConfigTest, ScannerBandClampedToQuotableRange) {
+  nlohmann::json config_json = minimal_config_json();
+  config_json["scanner"] = {{"min_price_cents", 2}, {"max_price_cents", 98}};
+
+  const auto path = write_temp_config(config_json);
+  const auto config = kalshi::load_config(path);
+  std::filesystem::remove(path);
+
+  EXPECT_EQ(config.scanner.min_price_cents, 12);
+  EXPECT_EQ(config.scanner.max_price_cents, 88);
+}
+
+TEST(ConfigTest, ScannerBandNotWidenedWhenTighterThanQuotable) {
+  nlohmann::json config_json = minimal_config_json();
+  config_json["scanner"] = {{"min_price_cents", 30}, {"max_price_cents", 70}};
+
+  const auto path = write_temp_config(config_json);
+  const auto config = kalshi::load_config(path);
+  std::filesystem::remove(path);
+
+  EXPECT_EQ(config.scanner.min_price_cents, 30);
+  EXPECT_EQ(config.scanner.max_price_cents, 70);
 }
 
 TEST(ConfigTest, ThrowsOnNonexistentFile) {
