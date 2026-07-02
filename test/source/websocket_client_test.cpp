@@ -285,7 +285,8 @@ TEST_F(WebSocketClientTest, SnapshotYesLevelParsedCorrectly) {
 
   ASSERT_EQ(received.yes.size(), kOneLevel);
   EXPECT_EQ(received.yes[0].price_cents, kYesBidPrice);
-  EXPECT_EQ(received.yes[0].quantity, kYesBidQty);
+  EXPECT_EQ(received.yes[0].quantity,
+            kalshi::Quantity::from_contracts(kYesBidQty));
 }
 
 TEST_F(WebSocketClientTest, SnapshotNoLevelParsedCorrectly) {
@@ -302,7 +303,8 @@ TEST_F(WebSocketClientTest, SnapshotNoLevelParsedCorrectly) {
 
   ASSERT_EQ(received.no.size(), kOneLevel);
   EXPECT_EQ(received.no[0].price_cents, kNoBidPrice);
-  EXPECT_EQ(received.no[0].quantity, kNoBidQty);
+  EXPECT_EQ(received.no[0].quantity,
+            kalshi::Quantity::from_contracts(kNoBidQty));
 }
 
 TEST_F(WebSocketClientTest, SnapshotWithMultipleLevelsPreservesAll) {
@@ -343,11 +345,11 @@ TEST_F(WebSocketClientTest, DeltaCallbackFiredWithParsedFields) {
   std::string recv_ticker;
   kalshi::Side recv_side{kalshi::Side::No};
   int recv_price = 0;
-  int recv_qty = 0;
+  kalshi::Quantity recv_qty{};
   client.on_orderbook_delta(
       [&](const std::string &ticker, kalshi::Side side,
           int price, // NOLINT(bugprone-easily-swappable-parameters)
-          int qty) {
+          kalshi::Quantity qty) {
         recv_ticker = ticker;
         recv_side = side;
         recv_price = price;
@@ -359,7 +361,7 @@ TEST_F(WebSocketClientTest, DeltaCallbackFiredWithParsedFields) {
   EXPECT_EQ(recv_ticker, kTestTicker);
   EXPECT_EQ(recv_side, kalshi::Side::Yes);
   EXPECT_EQ(recv_price, kYesBidPrice);
-  EXPECT_EQ(recv_qty, kDeltaQty);
+  EXPECT_EQ(recv_qty, kalshi::Quantity::from_contracts(kDeltaQty));
 }
 
 TEST_F(WebSocketClientTest, DeltaSideNoIsParsedCorrectly) {
@@ -371,9 +373,9 @@ TEST_F(WebSocketClientTest, DeltaSideNoIsParsedCorrectly) {
   auto client = make_client(std::move(fake_ws));
 
   kalshi::Side recv_side{kalshi::Side::Yes};
-  client.on_orderbook_delta([&](const std::string & /*ticker*/,
-                                kalshi::Side side, int /*price*/,
-                                int /*qty*/) { recv_side = side; });
+  client.on_orderbook_delta(
+      [&](const std::string & /*ticker*/, kalshi::Side side, int /*price*/,
+          kalshi::Quantity /*qty*/) { recv_side = side; });
 
   client.run();
 
@@ -413,7 +415,7 @@ TEST_F(WebSocketClientTest, FillFieldsParsedCorrectly) {
   EXPECT_EQ(received.market_ticker, kTestTicker);
   EXPECT_EQ(received.side, kalshi::Side::Yes);
   EXPECT_EQ(received.price_cents, kFillPrice);
-  EXPECT_EQ(received.quantity, kFillCount);
+  EXPECT_EQ(received.quantity, kalshi::Quantity::from_contracts(kFillCount));
   EXPECT_FALSE(received.is_taker); // default fill_message is maker (passive)
 }
 
@@ -483,7 +485,9 @@ TEST_F(WebSocketClientTest, UnknownMessageTypeIsIgnored) {
       [&](const kalshi::Orderbook &) { any_called = true; });
   client.on_orderbook_delta(
       // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
-      [&](const std::string &, kalshi::Side, int, int) { any_called = true; });
+      [&](const std::string &, kalshi::Side, int, kalshi::Quantity) {
+        any_called = true;
+      });
   client.on_fill([&](const kalshi::Fill &) { any_called = true; });
 
   client.run();

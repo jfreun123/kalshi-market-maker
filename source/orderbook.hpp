@@ -16,7 +16,7 @@ class LocalOrderbook {
 public:
   void apply_snapshot(const Orderbook &snap);
 
-  void apply_delta(Side side, int price_cents, int delta);
+  void apply_delta(Side side, int price_cents, Quantity delta);
 
   [[nodiscard]] std::optional<Level> best_bid() const;
 

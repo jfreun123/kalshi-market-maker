@@ -54,7 +54,8 @@ TEST(PaperTransportTest, PlaceOrderReturnsSyntheticOrder) {
   EXPECT_EQ(paper.open_orders().front().market_ticker, "TICK-A");
   EXPECT_EQ(paper.open_orders().front().side, kalshi::Side::Yes);
   EXPECT_EQ(paper.open_orders().front().price_cents, kPrice);
-  EXPECT_EQ(paper.open_orders().front().quantity, kQty);
+  EXPECT_EQ(paper.open_orders().front().quantity,
+            kalshi::Quantity::from_contracts(kQty));
   EXPECT_EQ(paper.open_orders().front().status, kalshi::OrderStatus::Open);
 }
 
@@ -121,11 +122,13 @@ TEST(PaperTransportTest, SimulateFillUpdatesOrderStatus) {
   constexpr int kPartialFill = 4;
   EXPECT_TRUE(paper.simulate_fill(order_id, kPartialFill));
   ASSERT_EQ(paper.open_orders().size(), 1U);
-  EXPECT_EQ(paper.open_orders().front().filled_quantity, kPartialFill);
+  EXPECT_EQ(paper.open_orders().front().filled_quantity,
+            kalshi::Quantity::from_contracts(kPartialFill));
   EXPECT_EQ(paper.open_orders().front().status,
             kalshi::OrderStatus::PartiallyFilled);
   EXPECT_EQ(paper.fills().size(), 1U);
-  EXPECT_EQ(paper.fills().front().quantity, kPartialFill);
+  EXPECT_EQ(paper.fills().front().quantity,
+            kalshi::Quantity::from_contracts(kPartialFill));
 
   // Fill the rest
   constexpr int kRemainingFill = 6;
@@ -152,7 +155,8 @@ TEST(PaperTransportTest, SimulateFillClampsToRemainingQuantity) {
   // Request fill of 100, but only 5 remain.
   constexpr int kOversizedFill = 100;
   EXPECT_TRUE(paper.simulate_fill(order_id, kOversizedFill));
-  EXPECT_EQ(paper.fills().front().quantity, kQty);
+  EXPECT_EQ(paper.fills().front().quantity,
+            kalshi::Quantity::from_contracts(kQty));
   EXPECT_TRUE(paper.open_orders().empty());
 }
 

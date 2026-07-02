@@ -38,11 +38,11 @@ void TradingSession::on_snapshot(const Orderbook &snapshot) {
 }
 
 void TradingSession::on_delta(const std::string &ticker, Side side,
-                              int price_cents, int qty) {
+                              int price_cents, Quantity qty) {
   auto &book = ob_map_[ticker];
   book.apply_delta(side, price_cents, qty);
   get_logger()->debug("delta ticker={} side={} price={} qty={} mid={:.1f}",
-                      ticker, side_name(side), price_cents, qty,
+                      ticker, side_name(side), price_cents, qty.to_fp_string(),
                       book.mid_price_cents());
   try {
     quoter_.update(ticker, book);
@@ -66,7 +66,7 @@ void TradingSession::on_fill(const Fill &fill) {
   get_logger()->info("fill ticker={} side={} price={} qty={} is_taker={} "
                      "session_pnl=${:.2f} total_pnl=${:.2f}",
                      fill.market_ticker, side_name(fill.side), fill.price_cents,
-                     fill.quantity, fill.is_taker,
+                     fill.quantity.to_fp_string(), fill.is_taker,
                      session_pnl / kCentsPerDollar,
                      total_pnl / kCentsPerDollar);
 
@@ -165,12 +165,12 @@ void TradingSession::run_portfolio_risk() {
 void TradingSession::log_status() const {
   auto log = get_logger();
   for (const auto &ticker : tickers_) {
-    const int pos = order_mgr_.net_position(ticker);
+    const Quantity pos = order_mgr_.net_position(ticker);
     const double session_pnl = order_mgr_.realized_pnl(ticker);
     const double prior = prior_pnl_for(prior_pnl_, ticker);
     log->info("status ticker={} net_pos={} session_pnl_dollars={:.2f} "
               "total_pnl_dollars={:.2f} halted={} constraints={}",
-              ticker, pos, session_pnl / kCentsPerDollar,
+              ticker, pos.to_fp_string(), session_pnl / kCentsPerDollar,
               (prior + session_pnl) / kCentsPerDollar, risk_mgr_.is_halted(),
               risk_mgr_.active_constraints());
 
@@ -179,7 +179,7 @@ void TradingSession::log_status() const {
     log->info(
         "exposure ticker={} net_inventory={} spread_capture_dollars={:.2f} "
         "e_win_dollars={:.2f} e_loss_dollars={:.2f}",
-        ticker, exposure.net_inventory,
+        ticker, exposure.net_inventory.to_fp_string(),
         exposure.spread_capture_cents / kCentsPerDollar,
         exposure.e_win_cents / kCentsPerDollar,
         exposure.e_loss_cents / kCentsPerDollar);

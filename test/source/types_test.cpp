@@ -26,7 +26,7 @@ TEST(OrderTypeTest, ValuesAreDistinct) {
 
 TEST(LevelTest, FieldAccess) {
   constexpr int kPrice = 52;
-  constexpr int kQty = 100;
+  const Quantity kQty = Quantity::from_contracts(100);
   Level level{kPrice, kQty};
   EXPECT_EQ(level.price_cents, kPrice);
   EXPECT_EQ(level.quantity, kQty);
@@ -35,7 +35,7 @@ TEST(LevelTest, FieldAccess) {
 TEST(LevelTest, Equality) {
   constexpr int kPriceA = 52;
   constexpr int kPriceB = 53;
-  constexpr int kQty = 100;
+  const Quantity kQty = Quantity::from_contracts(100);
   Level lhs{kPriceA, kQty};
   Level rhs{kPriceA, kQty};
   Level other{kPriceB, kQty};
@@ -54,9 +54,9 @@ TEST(OrderbookTest, DefaultConstruction) {
 
 TEST(OrderbookTest, PushLevels) {
   constexpr int kYesPrice = 55;
-  constexpr int kYesQty = 200;
+  const Quantity kYesQty = Quantity::from_contracts(200);
   constexpr int kNoPrice = 42;
-  constexpr int kNoQty = 50;
+  const Quantity kNoQty = Quantity::from_contracts(50);
   Orderbook book;
   book.ticker = "KXBTCD-25DEC31-T50000";
   book.yes.push_back({kYesPrice, kYesQty});
@@ -72,14 +72,14 @@ TEST(OrderbookTest, PushLevels) {
 
 TEST(OrderTest, FieldAccess) {
   constexpr int kPrice = 52;
-  constexpr int kQty = 10;
+  const Quantity kQty = Quantity::from_contracts(10);
   Order order;
   order.id = "order-abc";
   order.market_ticker = "KXBTCD-25DEC31-T50000";
   order.side = Side::Yes;
   order.price_cents = kPrice;
   order.quantity = kQty;
-  order.filled_quantity = 0;
+  order.filled_quantity = Quantity{};
   order.status = OrderStatus::Open;
   order.type = OrderType::Limit;
 
@@ -87,14 +87,14 @@ TEST(OrderTest, FieldAccess) {
   EXPECT_EQ(order.side, Side::Yes);
   EXPECT_EQ(order.price_cents, kPrice);
   EXPECT_EQ(order.quantity, kQty);
-  EXPECT_EQ(order.filled_quantity, 0);
+  EXPECT_EQ(order.filled_quantity, Quantity{});
   EXPECT_EQ(order.status, OrderStatus::Open);
   EXPECT_EQ(order.type, OrderType::Limit);
 }
 
 TEST(OrderTest, RemainingQuantity) {
-  constexpr int kTotal = 10;
-  constexpr int kFilled = 3;
+  const Quantity kTotal = Quantity::from_contracts(10);
+  const Quantity kFilled = Quantity::from_contracts(3);
   Order order;
   order.quantity = kTotal;
   order.filled_quantity = kFilled;
@@ -102,11 +102,11 @@ TEST(OrderTest, RemainingQuantity) {
 }
 
 TEST(OrderTest, RemainingQuantityFullyFilled) {
-  constexpr int kQty = 10;
+  const Quantity kQty = Quantity::from_contracts(10);
   Order order;
   order.quantity = kQty;
   order.filled_quantity = kQty;
-  EXPECT_EQ(order.remaining_quantity(), 0);
+  EXPECT_EQ(order.remaining_quantity(), Quantity{});
 }
 
 TEST(OrderTest, IsActiveWhenOpen) {
@@ -137,7 +137,7 @@ TEST(OrderTest, IsInactiveWhenCancelled) {
 
 TEST(FillTest, FieldAccess) {
   constexpr int kPrice = 48;
-  constexpr int kQty = 5;
+  const Quantity kQty = Quantity::from_contracts(5);
   Fill fill;
   fill.order_id = "order-abc";
   fill.market_ticker = "KXBTCD-25DEC31-T50000";

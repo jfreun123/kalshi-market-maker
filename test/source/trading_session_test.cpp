@@ -28,7 +28,7 @@ constexpr int kObQty = 100;
 
 // Delta below best bid — keeps a valid BBO so the quoter places quotes.
 constexpr int kSubBboDeltaPrice = 50;
-constexpr int kSubBboDeltaQty = 100;
+const kalshi::Quantity kSubBboDeltaQty = kalshi::Quantity::from_contracts(100);
 constexpr int kDefaultQuoteSize = kalshi::QuoterConfig::kDefaultQuoteSize;
 
 // A YES@90 qty-1 fill leaves 90c = $0.90 capital at risk.
@@ -68,8 +68,8 @@ std::string generate_rsa_pem() {
 // Minimal V2 order response so OrderManager tracks the placed order.
 std::string order_json(const std::string &order_id, int qty) {
   return R"({"order_id":")" + order_id +
-         R"(","fill_count_fp":"0.00","remaining_count":")" + std::to_string(qty) +
-         R"(.00","ts_ms":1718000000000})";
+         R"(","fill_count_fp":"0.00","remaining_count":")" +
+         std::to_string(qty) + R"(.00","ts_ms":1718000000000})";
 }
 
 // NOLINTBEGIN(bugprone-easily-swappable-parameters)
@@ -77,8 +77,8 @@ kalshi::Orderbook make_orderbook(const std::string &ticker, int yes_bid,
                                  int no_bid, int qty) {
   kalshi::Orderbook book;
   book.ticker = ticker;
-  book.yes = {kalshi::Level{yes_bid, qty}};
-  book.no = {kalshi::Level{no_bid, qty}};
+  book.yes = {kalshi::Level{yes_bid, kalshi::Quantity::from_contracts(qty)}};
+  book.no = {kalshi::Level{no_bid, kalshi::Quantity::from_contracts(qty)}};
   return book;
 }
 
@@ -89,7 +89,7 @@ kalshi::Fill make_fill(const std::string &order_id, const std::string &ticker,
   fill.market_ticker = ticker;
   fill.side = side;
   fill.price_cents = price_cents;
-  fill.quantity = quantity;
+  fill.quantity = kalshi::Quantity::from_contracts(quantity);
   fill.timestamp = std::chrono::system_clock::time_point{};
   return fill;
 }
@@ -176,7 +176,8 @@ TEST_F(TradingSessionTest, FillUpdatesPositionAndNotifiesPnlListener) {
   session_.on_fill(make_fill(kFillOrderId, kTicker, kalshi::Side::Yes,
                              kHighYesPrice, kOneLot));
 
-  EXPECT_EQ(order_mgr_.net_position(kTicker), kOneLot);
+  EXPECT_EQ(order_mgr_.net_position(kTicker),
+            kalshi::Quantity::from_contracts(kOneLot));
   EXPECT_TRUE(notified);
   EXPECT_TRUE(session_.prior_pnl().contains(kTicker));
 }

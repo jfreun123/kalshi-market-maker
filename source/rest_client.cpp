@@ -48,7 +48,7 @@ void check_response(const HttpResponse &resp) {
 // Parses "2025-01-01T00:00:00Z" into a system_clock time_point.
 auto parse_iso8601(const std::string &time_str)
     -> std::chrono::system_clock::time_point {
-  struct std::tm time_struct {};
+  struct std::tm time_struct{};
   // NOLINTNEXTLINE(modernize-use-nullptr) — strptime returns char*
   if (strptime(time_str.c_str(), "%Y-%m-%dT%H:%M:%SZ", &time_struct) ==
       nullptr) {
@@ -70,9 +70,8 @@ auto format_dollars(int cents) -> std::string {
   return std::format("{:.4f}", cents / kCentsPerDollar);
 }
 
-// Converts an integer contract count to a fixed-point string: 10 -> "10.00"
 auto format_count(int count) -> std::string {
-  return std::format("{:.2f}", static_cast<double>(count));
+  return Quantity::from_contracts(count).to_fp_string();
 }
 
 // Parses a fixed-point dollar string to integer cents: "0.5200" -> 52
@@ -80,9 +79,8 @@ auto parse_dollars_to_cents(const std::string &dollars) -> int {
   return static_cast<int>(std::round(std::stod(dollars) * kCentsPerDollar));
 }
 
-// Parses a fixed-point count string to integer: "10.00" -> 10
-auto parse_fp_count(const std::string &fp_str) -> int {
-  return static_cast<int>(std::round(std::stod(fp_str)));
+auto parse_fp_count(const std::string &fp_str) -> Quantity {
+  return Quantity::from_fp_string(fp_str);
 }
 
 // --- Enum parsers ---
@@ -175,15 +173,13 @@ Order parse_order(const nlohmann::json &order_json) {
                 order_json.at("yes_price_dollars").get<std::string>())
           : parse_dollars_to_cents(
                 order_json.at("no_price_dollars").get<std::string>());
-  const int quantity =
+  const Quantity quantity =
       parse_fp_count(order_json.at("initial_count_fp").get<std::string>());
-  const int filled_qty =
+  const Quantity filled_qty =
       parse_fp_count(order_json.at("fill_count_fp").get<std::string>());
 
-  // The API no longer uses "partially_filled" as a status; a resting order
-  // with fill_count_fp > 0 is a partial fill.
   auto status = parse_order_status(order_json.at("status").get<std::string>());
-  if (status == OrderStatus::Open && filled_qty > 0) {
+  if (status == OrderStatus::Open && filled_qty.is_positive()) {
     status = OrderStatus::PartiallyFilled;
   }
 
@@ -309,12 +305,12 @@ Orderbook RestClient::get_orderbook(std::string_view ticker) {
   result.ticker = ticker_str;
   for (const auto &level_array : orderbook_json.at("yes_dollars")) {
     const int price = parse_dollars_to_cents(level_array[0].get<std::string>());
-    const int qty = parse_fp_count(level_array[1].get<std::string>());
+    const Quantity qty = parse_fp_count(level_array[1].get<std::string>());
     result.yes.push_back({price, qty});
   }
   for (const auto &level_array : orderbook_json.at("no_dollars")) {
     const int price = parse_dollars_to_cents(level_array[0].get<std::string>());
-    const int qty = parse_fp_count(level_array[1].get<std::string>());
+    const Quantity qty = parse_fp_count(level_array[1].get<std::string>());
     result.no.push_back({price, qty});
   }
   return result;
@@ -356,13 +352,14 @@ Order RestClient::place_order(std::string_view ticker, Side side,
 
   // V2 returns a minimal response; reconstruct the Order from input params.
   auto json_data = nlohmann::json::parse(resp.body);
-  const int filled_qty =
+  const Quantity ordered = Quantity::from_contracts(quantity);
+  const Quantity filled_qty =
       parse_fp_count(json_data.at("fill_count_fp").get<std::string>());
 
   OrderStatus status = OrderStatus::Open;
-  if (filled_qty >= quantity) {
+  if (filled_qty >= ordered) {
     status = OrderStatus::Filled;
-  } else if (filled_qty > 0) {
+  } else if (filled_qty.is_positive()) {
     status = OrderStatus::PartiallyFilled;
   }
 
@@ -376,7 +373,7 @@ Order RestClient::place_order(std::string_view ticker, Side side,
       .market_ticker = std::string(ticker),
       .side = side,
       .price_cents = price_cents,
-      .quantity = quantity,
+      .quantity = ordered,
       .filled_quantity = filled_qty,
       .status = status,
       .type = type,

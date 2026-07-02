@@ -69,7 +69,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
       /*reconnect_delay=*/std::chrono::milliseconds{0}};
 
   client.on_orderbook_snapshot([](const kalshi::Orderbook &) {});
-  client.on_orderbook_delta([](const std::string &, kalshi::Side, int, int) {});
+  client.on_orderbook_delta(
+      [](const std::string &, kalshi::Side, int, kalshi::Quantity) {});
   client.on_fill([](const kalshi::Fill &) {});
 
   client.run();

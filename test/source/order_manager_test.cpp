@@ -72,8 +72,8 @@ std::string generate_rsa_pem() {
 // order.
 std::string order_response_json(const std::string &order_id, int qty) {
   return R"({"order_id":")" + order_id +
-         R"(","fill_count_fp":"0.00","remaining_count":")" + std::to_string(qty) +
-         R"(.00","ts_ms":1718000000000})";
+         R"(","fill_count_fp":"0.00","remaining_count":")" +
+         std::to_string(qty) + R"(.00","ts_ms":1718000000000})";
 }
 
 // NOLINTBEGIN(bugprone-easily-swappable-parameters)
@@ -85,7 +85,7 @@ kalshi::Fill make_fill(const std::string &order_id, const std::string &ticker,
   fill.market_ticker = ticker;
   fill.side = side;
   fill.price_cents = price_cents;
-  fill.quantity = quantity;
+  fill.quantity = kalshi::Quantity::from_contracts(quantity);
   fill.timestamp = std::chrono::system_clock::time_point{
       std::chrono::duration_cast<std::chrono::system_clock::duration>(
           std::chrono::nanoseconds{timestamp_ns})};
@@ -127,7 +127,7 @@ TEST_F(OrderManagerTest, NetPositionDefaultsToZero) {
   auto rest_client = make_rest_client(std::make_unique<FakeTransport>());
   kalshi::OrderManager mgr{rest_client};
 
-  EXPECT_EQ(mgr.net_position(kTicker), 0);
+  EXPECT_EQ(mgr.net_position(kTicker), kalshi::Quantity{});
 }
 
 TEST_F(OrderManagerTest, RealizedPnlDefaultsToZero) {
@@ -163,7 +163,7 @@ TEST_F(OrderManagerTest, PlaceReturnsOrderWithCorrectTicker) {
   EXPECT_EQ(order.market_ticker, kTicker);
   EXPECT_EQ(order.id, kOrderId);
   EXPECT_EQ(order.price_cents, kYesBidPrice);
-  EXPECT_EQ(order.quantity, kOrderQty);
+  EXPECT_EQ(order.quantity, kalshi::Quantity::from_contracts(kOrderQty));
 }
 
 // ---- cancel() ----
@@ -266,7 +266,8 @@ TEST_F(OrderManagerTest, RecordYesFillIncreasesNetPosition) {
   mgr.record_fill(
       make_fill(kOrderId, kTicker, kalshi::Side::Yes, kYesFillPrice, kFillQty));
 
-  EXPECT_EQ(mgr.net_position(kTicker), kFillQty);
+  EXPECT_EQ(mgr.net_position(kTicker),
+            kalshi::Quantity::from_contracts(kFillQty));
 }
 
 TEST_F(OrderManagerTest, RecordNoFillDecreasesNetPosition) {
@@ -276,7 +277,8 @@ TEST_F(OrderManagerTest, RecordNoFillDecreasesNetPosition) {
   mgr.record_fill(
       make_fill(kOrderId, kTicker, kalshi::Side::No, kNoFillPrice, kFillQty));
 
-  EXPECT_EQ(mgr.net_position(kTicker), -kFillQty);
+  EXPECT_EQ(mgr.net_position(kTicker),
+            -kalshi::Quantity::from_contracts(kFillQty));
 }
 
 TEST_F(OrderManagerTest, YesAndNoFillsNetToZeroPosition) {
@@ -288,7 +290,7 @@ TEST_F(OrderManagerTest, YesAndNoFillsNetToZeroPosition) {
   mgr.record_fill(make_fill(kOrderId2, kTicker, kalshi::Side::No, kNoFillPrice,
                             kFillQty, kTs2Ns));
 
-  EXPECT_EQ(mgr.net_position(kTicker), 0);
+  EXPECT_EQ(mgr.net_position(kTicker), kalshi::Quantity{});
 }
 
 TEST_F(OrderManagerTest, DuplicateFillIsIdempotent) {
@@ -301,7 +303,8 @@ TEST_F(OrderManagerTest, DuplicateFillIsIdempotent) {
   mgr.record_fill(fill); // same fill again
 
   // Should count only once.
-  EXPECT_EQ(mgr.net_position(kTicker), kFillQty);
+  EXPECT_EQ(mgr.net_position(kTicker),
+            kalshi::Quantity::from_contracts(kFillQty));
 }
 
 TEST_F(OrderManagerTest, FilledCountUpdatedOnPartialFill) {
@@ -318,7 +321,8 @@ TEST_F(OrderManagerTest, FilledCountUpdatedOnPartialFill) {
   const kalshi::Order
       &open_order = // NOLINT(bugprone-unchecked-optional-access)
       mgr.open_orders().at(kOrderId);
-  EXPECT_EQ(open_order.filled_quantity, kFillQty);
+  EXPECT_EQ(open_order.filled_quantity,
+            kalshi::Quantity::from_contracts(kFillQty));
   EXPECT_EQ(open_order.status, kalshi::OrderStatus::PartiallyFilled);
 }
 
@@ -492,7 +496,7 @@ TEST_F(OrderManagerTest, ExposureZeroWithNoPosition) {
 
   const auto exposure = mgr.exposure_decomposition(kTicker);
 
-  EXPECT_EQ(exposure.net_inventory, 0);
+  EXPECT_EQ(exposure.net_inventory, kalshi::Quantity{});
   EXPECT_DOUBLE_EQ(exposure.spread_capture_cents, 0.0);
   EXPECT_DOUBLE_EQ(exposure.e_win_cents, 0.0);
   EXPECT_DOUBLE_EQ(exposure.e_loss_cents, 0.0);
@@ -507,7 +511,7 @@ TEST_F(OrderManagerTest, ExposureOnNetLongYes) {
   const auto exposure = mgr.exposure_decomposition(kTicker);
   const double cost = static_cast<double>(kYesFillPrice) * kFillQty; // 260
 
-  EXPECT_EQ(exposure.net_inventory, kFillQty);
+  EXPECT_EQ(exposure.net_inventory, kalshi::Quantity::from_contracts(kFillQty));
   EXPECT_DOUBLE_EQ(exposure.spread_capture_cents, 0.0);
   // If YES wins: 5 * 100 - 260 = 240; if it loses: -260 (the cost).
   EXPECT_DOUBLE_EQ(exposure.e_win_cents,
@@ -524,7 +528,8 @@ TEST_F(OrderManagerTest, ExposureOnNetLongNo) {
   const auto exposure = mgr.exposure_decomposition(kTicker);
   const double cost = static_cast<double>(kNoFillPrice) * kFillQty; // 220
 
-  EXPECT_EQ(exposure.net_inventory, -kFillQty);
+  EXPECT_EQ(exposure.net_inventory,
+            -kalshi::Quantity::from_contracts(kFillQty));
   EXPECT_DOUBLE_EQ(exposure.e_win_cents,
                    static_cast<double>(kFillQty) * kContractPayout - cost);
   EXPECT_DOUBLE_EQ(exposure.e_loss_cents, -cost);
@@ -547,7 +552,8 @@ TEST_F(OrderManagerTest, ExposureSplitsMatchedSpreadFromDirectional) {
   const int remaining = kFillQty - kNoMatchQty; // 2
   const double cost = static_cast<double>(kYesFillPrice) * remaining; // 104
 
-  EXPECT_EQ(exposure.net_inventory, remaining);
+  EXPECT_EQ(exposure.net_inventory,
+            kalshi::Quantity::from_contracts(remaining));
   EXPECT_DOUBLE_EQ(exposure.spread_capture_cents, spread);
   EXPECT_DOUBLE_EQ(exposure.e_win_cents,
                    static_cast<double>(remaining) * kContractPayout - cost);

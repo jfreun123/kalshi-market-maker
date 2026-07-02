@@ -19,10 +19,10 @@
   whole level**. Fixed: `apply_delta` now applies `quantity += delta` and
   removes a level only when it reaches ≤ 0; a negative delta on a missing level
   is ignored. Regression tests cover increment/decrement, accumulation across a
-  delta stream, and removal at zero and negative. **Remaining (folded into R3,
-  item 8): the exchange uses *fractional* contract counts and `parse_fp_count`
-  still rounds to `int`, so sub-unit deltas (e.g. `-0.16`) round to 0 and are
-  dropped — a slow drift, no longer catastrophic corruption.**
+  delta stream, and removal at zero and negative. **Fractional precision now
+  fixed too**: contract counts are a strong `Quantity` type backed by exact
+  int64 centi-contracts (see R3, item 8), so sub-unit deltas like `-0.16` are
+  carried exactly instead of rounding to 0 and vanishing.
 
 - [ ] **2. `ensure()` fail-fast invariant primitive.** Flatten all orders, then
   crash, on a broken invariant. Safety-critical and explicitly requested. Full
@@ -76,8 +76,12 @@
 
 
 
-- [ ] **8. R3 — `Cents` / strong quantity type.** Bumped up: the P0 #1 precision
-  fix wants a non-`int`, fractional size type.
+- [ ] **8. R3 — `Cents` / strong quantity type.** Quantity half **done**:
+  contract counts (orderbook levels, fills, positions, order sizes, FIFO lots,
+  flow volumes) are now a strong `Quantity` type backed by exact int64
+  centi-contracts — no more `int` rounding of fractional fills/deltas. Outbound
+  order *sizing* stays whole-contract `int` by design. Still open: a `Cents`
+  strong type for prices (prices remain `int` cents throughout).
 - [ ] **9. R2 — break up `main.cpp`** (also flagged by clang-tidy:
   cognitive complexity 27 > 25).
 - [ ] **10. R1 — split `source/`** into `Calculations/ Quoter/

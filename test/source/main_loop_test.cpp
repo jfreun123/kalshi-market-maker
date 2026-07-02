@@ -121,8 +121,8 @@ std::string fill_msg(const std::string &order_id, const std::string &ticker,
 // order.
 std::string order_json(const std::string &order_id, int qty) {
   return R"({"order_id":")" + order_id +
-         R"(","fill_count_fp":"0.00","remaining_count":")" + std::to_string(qty) +
-         R"(.00","ts_ms":1718000000000})";
+         R"(","fill_count_fp":"0.00","remaining_count":")" +
+         std::to_string(qty) + R"(.00","ts_ms":1718000000000})";
 }
 
 // NOLINTEND(bugprone-easily-swappable-parameters)
@@ -167,7 +167,7 @@ TEST_F(MainLoopTest, SnapshotPlusDeltaPlacesQuotes) {
   });
   ws_client.on_orderbook_delta([&ob_map, &quoter](const std::string &ticker,
                                                   kalshi::Side side, int price,
-                                                  int qty) {
+                                                  kalshi::Quantity qty) {
     ob_map[ticker].apply_delta(side, price, qty);
     quoter.update(ticker, ob_map[ticker]);
   });
@@ -209,7 +209,7 @@ TEST_F(MainLoopTest, DeltaWithoutSnapshotPlacesNoOrders) {
 
   ws_client.on_orderbook_delta([&ob_map, &quoter](const std::string &ticker,
                                                   kalshi::Side side, int price,
-                                                  int qty) {
+                                                  kalshi::Quantity qty) {
     ob_map[ticker].apply_delta(side, price, qty);
     quoter.update(ticker, ob_map[ticker]);
   });
@@ -250,7 +250,8 @@ TEST_F(MainLoopTest, FillEventUpdatesNetPosition) {
       fill_msg(kFillOrderId, kTicker, "yes", kFillPrice, kFillQty));
   ws_client.run();
 
-  EXPECT_EQ(order_mgr.net_position(kTicker), kFillQty);
+  EXPECT_EQ(order_mgr.net_position(kTicker),
+            kalshi::Quantity::from_contracts(kFillQty));
 }
 
 // When RiskManager is halted, check_order() returns false and no orders are
@@ -279,7 +280,7 @@ TEST_F(MainLoopTest, NoOrdersPlacedWhenRiskHalted) {
   });
   ws_client.on_orderbook_delta([&ob_map, &quoter](const std::string &ticker,
                                                   kalshi::Side side, int price,
-                                                  int qty) {
+                                                  kalshi::Quantity qty) {
     ob_map[ticker].apply_delta(side, price, qty);
     quoter.update(ticker, ob_map[ticker]);
   });

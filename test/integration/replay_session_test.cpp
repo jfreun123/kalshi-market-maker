@@ -106,9 +106,11 @@ public:
     // Production wiring: WS callbacks delegate to the TradingSession.
     ws_client.on_orderbook_snapshot(
         [this](const kalshi::Orderbook &snap) { session_.on_snapshot(snap); });
-    ws_client.on_orderbook_delta(
-        [this](const std::string &ticker, kalshi::Side side, int price,
-               int qty) { session_.on_delta(ticker, side, price, qty); });
+    ws_client.on_orderbook_delta([this](const std::string &ticker,
+                                        kalshi::Side side, int price,
+                                        kalshi::Quantity qty) {
+      session_.on_delta(ticker, side, price, qty);
+    });
     ws_client.on_fill(
         [this](const kalshi::Fill &fill) { session_.on_fill(fill); });
 
@@ -145,7 +147,8 @@ TEST_F(ReplaySessionTest, ParsesSnapshotAndDeltasIntoValidBook) {
 
 // Fill field shapes parse and apply to local accounting.
 TEST_F(ReplaySessionTest, ParsesFillsIntoLocalAccounting) {
-  EXPECT_EQ(order_mgr_.net_position(kFixtureTicker), kExpectedNetPosition);
+  EXPECT_EQ(order_mgr_.net_position(kFixtureTicker),
+            kalshi::Quantity::from_contracts(kExpectedNetPosition));
 }
 
 // The market data drove the quoter to place resting orders via the REST path —

@@ -241,7 +241,8 @@ static bool reconcile_against_exchange(kalshi::RestClient &rest,
 
   for (const auto &diff : result.diffs) {
     log->critical("reconcile DRIFT ticker={} local={} exchange={}", diff.ticker,
-                  diff.local_position, diff.exchange_position);
+                  diff.local_position.to_fp_string(),
+                  diff.exchange_position.to_fp_string());
   }
   if (risk_mgr != nullptr) {
     risk_mgr->set(kalshi::Constraint::kModelDiverge);
@@ -512,7 +513,7 @@ int main(int argc, char *argv[]) {
 
     ws_client.on_orderbook_delta(
         [&session, &engine_mtx](const std::string &ticker, kalshi::Side side,
-                                int price, int qty) {
+                                int price, kalshi::Quantity qty) {
           const std::lock_guard<std::mutex> lock{engine_mtx};
           session.on_delta(ticker, side, price, qty);
         });

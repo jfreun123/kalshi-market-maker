@@ -237,7 +237,8 @@ TEST_F(RestClientTest, GetPositionsParsesMarketPositionFields) {
 
   ASSERT_EQ(positions.size(), kOneResult);
   EXPECT_EQ(positions[0].ticker, "KXFED-26SEP-T3.00");
-  EXPECT_EQ(positions[0].position, -7); // NO position -> negative
+  EXPECT_EQ(positions[0].position,
+            kalshi::Quantity::from_contracts(-7)); // NO position -> negative
   EXPECT_DOUBLE_EQ(positions[0].realized_pnl_cents, 125.0);
   EXPECT_DOUBLE_EQ(positions[0].market_exposure_cents, 308.0);
   EXPECT_EQ(positions[0].resting_orders_count, 2);
@@ -302,12 +303,12 @@ TEST_F(RestClientTest, GetOrderbookParsesYesAndNoLevels) {
 
   ASSERT_EQ(orderbook.yes.size(), kTwoResults);
   EXPECT_EQ(orderbook.yes[0].price_cents, 55);
-  EXPECT_EQ(orderbook.yes[0].quantity, 200);
+  EXPECT_EQ(orderbook.yes[0].quantity, kalshi::Quantity::from_contracts(200));
   EXPECT_EQ(orderbook.yes[1].price_cents, 52);
 
   ASSERT_EQ(orderbook.no.size(), kTwoResults);
   EXPECT_EQ(orderbook.no[0].price_cents, 45);
-  EXPECT_EQ(orderbook.no[0].quantity, 150);
+  EXPECT_EQ(orderbook.no[0].quantity, kalshi::Quantity::from_contracts(150));
 }
 
 TEST_F(RestClientTest, GetOrderbookSetsTicker) {
@@ -390,8 +391,8 @@ TEST_F(RestClientTest, PlaceOrderParsesResponseIntoOrder) {
   EXPECT_EQ(order.market_ticker, std::string(kTestTicker));
   EXPECT_EQ(order.side, kalshi::Side::Yes);
   EXPECT_EQ(order.price_cents, kTestYesPrice);
-  EXPECT_EQ(order.quantity, kTestQuantity);
-  EXPECT_EQ(order.filled_quantity, 0);
+  EXPECT_EQ(order.quantity, kalshi::Quantity::from_contracts(kTestQuantity));
+  EXPECT_EQ(order.filled_quantity, kalshi::Quantity{});
   EXPECT_EQ(order.status, kalshi::OrderStatus::Open);
   EXPECT_EQ(order.type, kalshi::OrderType::Limit);
   EXPECT_NE(order.created_at, std::chrono::system_clock::time_point{});
@@ -461,7 +462,8 @@ TEST_F(RestClientTest, GetOpenOrdersParsesOrdersList) {
   EXPECT_EQ(orders[0].id, "order-abc");
   EXPECT_EQ(orders[0].market_ticker, "KXBTCD");
   EXPECT_EQ(orders[0].price_cents, kTestYesPrice);
-  EXPECT_EQ(orders[0].filled_quantity, kTestFilledQty);
+  EXPECT_EQ(orders[0].filled_quantity,
+            kalshi::Quantity::from_contracts(kTestFilledQty));
 }
 
 TEST_F(RestClientTest, GetOpenOrdersThrowsOnHttpError) {

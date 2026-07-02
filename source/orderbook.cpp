@@ -9,11 +9,11 @@ namespace {
 
 auto find_level(std::vector<Level> &levels, int price_cents)
     -> std::vector<Level>::iterator {
-  auto level_pos =
-      std::lower_bound(levels.begin(), levels.end(), Level{price_cents, 0},
-                       [](const Level &level, const Level &target) {
-                         return level.price_cents > target.price_cents;
-                       });
+  auto level_pos = std::lower_bound(
+      levels.begin(), levels.end(), Level{price_cents, Quantity{}},
+      [](const Level &level, const Level &target) {
+        return level.price_cents > target.price_cents;
+      });
   if (level_pos != levels.end() && level_pos->price_cents == price_cents) {
     return level_pos;
   }
@@ -22,7 +22,8 @@ auto find_level(std::vector<Level> &levels, int price_cents)
 
 auto insertion_point(std::vector<Level> &levels, int price_cents)
     -> std::vector<Level>::iterator {
-  return std::lower_bound(levels.begin(), levels.end(), Level{price_cents, 0},
+  return std::lower_bound(levels.begin(), levels.end(),
+                          Level{price_cents, Quantity{}},
                           [](const Level &level, const Level &target) {
                             return level.price_cents > target.price_cents;
                           });
@@ -39,19 +40,19 @@ void LocalOrderbook::apply_snapshot(const Orderbook &snap) {
   std::sort(state_.no.begin(), state_.no.end(), by_price_descending);
 }
 
-void LocalOrderbook::apply_delta(Side side, int price_cents, int delta) {
+void LocalOrderbook::apply_delta(Side side, int price_cents, Quantity delta) {
   auto &levels = (side == Side::Yes) ? state_.yes : state_.no;
   auto existing = find_level(levels, price_cents);
 
   if (existing != levels.end()) {
     existing->quantity += delta;
-    if (existing->quantity <= 0) {
+    if (existing->quantity <= Quantity{}) {
       levels.erase(existing);
     }
     return;
   }
 
-  if (delta > 0) {
+  if (delta.is_positive()) {
     auto insert_pos = insertion_point(levels, price_cents);
     levels.insert(insert_pos, {price_cents, delta});
   }

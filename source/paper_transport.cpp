@@ -34,8 +34,8 @@ std::string order_to_json(const Order &order) {
   json_order["order_id"] = order.id;
   json_order["ticker"] = order.market_ticker;
   json_order["side"] = (order.side == Side::Yes) ? "yes" : "no";
-  json_order["count"] = order.quantity;
-  json_order["filled_count"] = order.filled_quantity;
+  json_order["count"] = order.quantity.to_fp_string();
+  json_order["filled_count"] = order.filled_quantity.to_fp_string();
   json_order["type"] = (order.type == OrderType::Limit) ? "limit" : "market";
   json_order["created_time"] = "2025-01-01T00:00:00Z";
 
@@ -120,8 +120,8 @@ PaperTransport::post(std::string_view /*url*/,
   order.market_ticker = ticker;
   order.side = side;
   order.price_cents = price_cents;
-  order.quantity = quantity;
-  order.filled_quantity = 0;
+  order.quantity = Quantity::from_contracts(quantity);
+  order.filled_quantity = Quantity{};
   order.status = OrderStatus::Open;
   order.type = order_type;
   order.created_at = std::chrono::system_clock::now();
@@ -167,8 +167,9 @@ bool PaperTransport::simulate_fill(const std::string &order_id,
     return false;
   }
 
-  const int remaining = order_iter->quantity - order_iter->filled_quantity;
-  const int actual_fill = std::min(fill_quantity, remaining);
+  const Quantity remaining = order_iter->quantity - order_iter->filled_quantity;
+  const Quantity actual_fill =
+      kalshi::min(Quantity::from_contracts(fill_quantity), remaining);
   order_iter->filled_quantity += actual_fill;
   order_iter->status = (order_iter->filled_quantity == order_iter->quantity)
                            ? OrderStatus::Filled
