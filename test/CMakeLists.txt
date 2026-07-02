@@ -16,6 +16,7 @@ endfunction()
 
 kalshi_add_test(types_test source/types_test.cpp)
 kalshi_add_test(quantity_test source/quantity_test.cpp)
+kalshi_add_test(ensure_test source/ensure_test.cpp)
 kalshi_add_test(auth_test source/auth_test.cpp)
 kalshi_add_test(rest_client_test source/rest_client_test.cpp)
 kalshi_add_test(orderbook_test source/orderbook_test.cpp)

@@ -1,5 +1,6 @@
 #include "quoter.hpp"
 
+#include "ensure.hpp"
 #include "flow_imbalance.hpp"
 #include "logger.hpp"
 
@@ -147,6 +148,7 @@ void Quoter::update(std::string_view ticker, const LocalOrderbook &book) {
   const double mid = book.mid_price_cents();
   const double fair_val =
       fv_engine_.estimate(FairValueInput{mid, kDefaultTimeToCloseHours, 0, {}});
+  ensure(std::isfinite(fair_val), "fair value is not finite");
 
   int target_spread = config_.target_spread_cents;
   if (flow_guard_ != nullptr && flow_guard_->is_imbalanced(ticker_str)) {

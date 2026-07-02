@@ -1,9 +1,11 @@
 #include "risk_manager.hpp"
 
+#include "ensure.hpp"
 #include "logger.hpp"
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdlib>
 #include <limits>
 #include <string>
@@ -76,12 +78,15 @@ void RiskManager::update(const IOrderManager &order_mgr,
 }
 
 void RiskManager::update_portfolio(const PortfolioSnapshot &snapshot) {
+  ensure(std::isfinite(snapshot.total_notional_cents),
+         "portfolio notional is not finite");
   if (snapshot.total_notional_cents / kCentsToDollars >
       limits_.max_total_exposure_dollars) {
     set(Constraint::kOverExposure);
   }
 
   const double total_pnl_cents = snapshot.total_pnl_cents();
+  ensure(std::isfinite(total_pnl_cents), "portfolio PnL is not finite");
   if (total_pnl_cents / kCentsToDollars < limits_.max_total_loss_dollars) {
     set(Constraint::kPortfolioLoss);
   }
