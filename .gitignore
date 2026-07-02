@@ -25,6 +25,8 @@ config.json
 *.trade.json
 pnl_state.json
 *.pem
+# API keys, private keys, and local demo configs — never commit
+/api-keys/
 
 # Runtime logs
 logs/
