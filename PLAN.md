@@ -36,15 +36,36 @@
   admits `[min_price, max_price]` but the quoter only trades `[10,90]`, so the
   scanner's top picks are un-quotable longshots. Derive one band from the other.
 
+- [ ] **5. Demo-environment conformance smoke tests.** Short, unit-test-style
+  tests that hit the **real Kalshi demo environment** — one per request/response
+  — asserting we can *send* each request and *parse* each response into our
+  types without throwing, with key fields populated. **Why this matters:** pure
+  unit tests use fakes that can mirror our own bugs — the `fill_count` vs
+  `fill_count_fp` bug passed every unit test because `PaperTransport` emitted the
+  same wrong field name. A live demo test exercises the real wire shapes and
+  catches conformance drift (renamed fields, the `use_yes_price`/NO-side-scale
+  question, `fill_count`) the moment it happens. **Design:** gated behind a CMake
+  option / env var (needs demo creds + network; off by default, not in normal
+  CI); each test is small and fast — one call → assert-parse. Read-only where
+  possible; for order endpoints place a tiny `post_only` order far from the
+  market so it rests, assert the response parses, then cancel it (demo is fake
+  money). **Coverage:** REST `GET /markets`, `/markets/{t}`,
+  `/markets/{t}/orderbook`, `/portfolio/balance|positions|orders`, create-order
+  (`POST`) + cancel (`DELETE`); WS `orderbook_delta` (subscribe → snapshot
+  parses, then a delta) and the `fill` channel. Ties to the conformance audit —
+  see the conformance notes in `docs/KALSHI_API_REFERENCE.md`. Highest-leverage
+  safety net before live trading: it would have caught the `fill_count` bug on
+  the first run.
+
 ### P2 — Operational robustness & strategy
 
-- [ ] **5. D3 — staleness flapping on quiet markets.** Thin markets send no WS
+- [ ] **6. D3 — staleness flapping on quiet markets.** Thin markets send no WS
   traffic for >30s and trip `kStaleBook` repeatedly → flatten/re-quote churn.
   Count heartbeats toward freshness, or lengthen the threshold for low-activity
   markets (don't loosen blindly — it weakens staleness protection on active
   markets).
 
-- [ ] **6. Queue-position awareness (strategy).** Orders join a price-time FIFO
+- [ ] **7. Queue-position awareness (strategy).** Orders join a price-time FIFO
   queue; at a deep level a small quote sits at the back (observed queue position
   ~115,081 behind a ~115k-contract level) and only fills on adverse selection —
   i.e. when the market runs *through* us. Consider level choice / quote sizing /
@@ -53,21 +74,21 @@
 
 ### P3 — Structural refactors (PR #1 review — detail in *Code Review Follow-ups*)
 
-- [ ] **7. R3 — `Cents` strong type for prices.** The `Quantity` half is done
+- [ ] **8. R3 — `Cents` strong type for prices.** The `Quantity` half is done
   (see Done); prices are still bare `int` cents everywhere. Wrap them in a strong
   `Cents` type so price/count/dollar values can't be silently mixed.
-- [ ] **8. FIX transport.** Replace REST order entry with FIX (Kalshi supports
+- [ ] **9. FIX transport.** Replace REST order entry with FIX (Kalshi supports
   FIX for order entry; tag `21006` = CancelOrderOnPause, drop-copy for missed
   exec reports). Lower latency than REST, better for high-frequency requoting.
   Market data still comes via WebSocket. See §12 of the API reference and
   `https://docs.kalshi.com/fix/*`.
-- [ ] **9. R2 — break up `main.cpp`** (also flagged by clang-tidy:
+- [ ] **10. R2 — break up `main.cpp`** (also flagged by clang-tidy:
   cognitive complexity 27 > 25).
-- [ ] **10. R1 — split `source/`** into `Calculations/ Quoter/
+- [ ] **11. R1 — split `source/`** into `Calculations/ Quoter/
   PortfolioManagement/ Networking/ Common/`.
-- [ ] **11. R4 — Constraints-vs-Guards framework.**
-- [ ] **12. R5 — `KalshiSession` + a `Session` concept** (multi-exchange).
-- [ ] **13. Process-per-exchange isolation.** Today the whole system is a
+- [ ] **12. R4 — Constraints-vs-Guards framework.**
+- [ ] **13. R5 — `KalshiSession` + a `Session` concept** (multi-exchange).
+- [ ] **14. Process-per-exchange isolation.** Today the whole system is a
   **single process, two threads** (WS feed + 100ms poll loop) with **one global
   `engine_mtx`** serializing all state; all markets share one WebSocket
   connection and are distinguished only by a ticker key into per-ticker maps.
@@ -79,7 +100,7 @@
   seam; this is the runtime/deployment boundary). Open design questions:
   shared vs. per-process risk/PnL ledger, cross-exchange netting, and how a
   supervisor starts/monitors/flattens each process.
-- [ ] **14. R7 — `docs/kalshi-messages.md` + rate-limiting review.**
+- [ ] **15. R7 — `docs/kalshi-messages.md` + rate-limiting review.**
 
 ### Done (recent sessions, committed)
 
