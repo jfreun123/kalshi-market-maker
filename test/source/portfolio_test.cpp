@@ -13,7 +13,7 @@ namespace {
 // the Portfolio read-model can be tested in isolation. A struct (passive data
 // holder) so its maps are intentionally public for direct test setup.
 struct FakeOrderManager : public kalshi::IOrderManager {
-  std::unordered_map<std::string, int> positions;
+  std::unordered_map<std::string, kalshi::Quantity> positions;
   std::unordered_map<std::string, double> realized;
   std::unordered_map<std::string, double> unrealized;
   std::unordered_map<std::string, double> cost;
@@ -27,9 +27,10 @@ struct FakeOrderManager : public kalshi::IOrderManager {
   void cancel_all(std::string_view /*ticker*/) override {}
   void record_fill(const kalshi::Fill & /*fill*/) override {}
 
-  [[nodiscard]] int net_position(std::string_view ticker) const override {
+  [[nodiscard]] kalshi::Quantity
+  net_position(std::string_view ticker) const override {
     auto iter = positions.find(std::string{ticker});
-    return iter == positions.end() ? 0 : iter->second;
+    return iter == positions.end() ? kalshi::Quantity{} : iter->second;
   }
   [[nodiscard]] double realized_pnl(std::string_view ticker) const override {
     auto iter = realized.find(std::string{ticker});
@@ -161,17 +162,20 @@ TEST(PortfolioTest, ByEventSortedByNotionalDescending) {
 // ---- reconcile ----
 
 namespace {
-kalshi::MarketPosition exchange_pos(const std::string &ticker, int position) {
+kalshi::MarketPosition exchange_pos(const std::string &ticker,
+                                    kalshi::Quantity position) {
   kalshi::MarketPosition pos;
   pos.ticker = ticker;
   pos.position = position;
   return pos;
 }
 
-constexpr int kLocalYes = 5;
-constexpr int kLocalNo = -3;
-constexpr int kExchangeMismatch = 3;
-constexpr int kUntrackedPosition = 4;
+constexpr kalshi::Quantity kLocalYes = kalshi::Quantity::from_contracts(5);
+constexpr kalshi::Quantity kLocalNo = kalshi::Quantity::from_contracts(-3);
+constexpr kalshi::Quantity kExchangeMismatch =
+    kalshi::Quantity::from_contracts(3);
+constexpr kalshi::Quantity kUntrackedPosition =
+    kalshi::Quantity::from_contracts(4);
 } // namespace
 
 TEST(PortfolioTest, ReconcileInSyncWhenPositionsMatch) {
@@ -219,7 +223,7 @@ TEST(PortfolioTest, ReconcileFlagsUntrackedExchangePosition) {
   EXPECT_FALSE(result.in_sync);
   ASSERT_EQ(result.diffs.size(), 1U);
   EXPECT_EQ(result.diffs.at(0).ticker, "KXSURPRISE-26-T1");
-  EXPECT_EQ(result.diffs.at(0).local_position, 0);
+  EXPECT_EQ(result.diffs.at(0).local_position, kalshi::Quantity{});
   EXPECT_EQ(result.diffs.at(0).exchange_position, kUntrackedPosition);
 }
 
@@ -229,7 +233,7 @@ TEST(PortfolioTest, ReconcileIgnoresZeroExchangePositions) {
   FakeOrderManager order_mgr;
 
   const std::vector<kalshi::MarketPosition> exchange = {
-      exchange_pos("KXOLD-26-T1", 0)};
+      exchange_pos("KXOLD-26-T1", kalshi::Quantity{})};
 
   const auto result = kalshi::reconcile(order_mgr, {}, exchange);
 

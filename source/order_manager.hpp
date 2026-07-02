@@ -21,7 +21,7 @@ namespace kalshi {
 struct ExposureDecomposition {
   double spread_capture_cents{
       0.0};                 // realized profit from matched complete sets
-  int net_inventory{0};     // signed open contracts (+YES / -NO)
+  Quantity net_inventory{}; // signed open contracts (+YES / -NO)
   double e_win_cents{0.0};  // payoff if the held side WINS
   double e_loss_cents{0.0}; // payoff if it LOSES (≤ 0; -capital at risk)
 };
@@ -42,7 +42,8 @@ public:
   virtual void cancel_all(std::string_view ticker) = 0;
   virtual void record_fill(const Fill &fill) = 0;
 
-  [[nodiscard]] virtual int net_position(std::string_view ticker) const = 0;
+  [[nodiscard]] virtual Quantity
+  net_position(std::string_view ticker) const = 0;
   [[nodiscard]] virtual double realized_pnl(std::string_view ticker) const = 0;
 
   // Mark-to-market PnL of open inventory at the given YES mid price (cents).
@@ -85,7 +86,7 @@ public:
   void cancel_all(std::string_view ticker) override;
   void record_fill(const Fill &fill) override;
 
-  [[nodiscard]] int net_position(std::string_view ticker) const override;
+  [[nodiscard]] Quantity net_position(std::string_view ticker) const override;
   [[nodiscard]] double realized_pnl(std::string_view ticker) const override;
   [[nodiscard]] double unrealized_pnl(std::string_view ticker,
                                       int yes_mid_cents) const override;
@@ -98,14 +99,14 @@ public:
 private:
   struct Lot {
     int price_cents;
-    int remaining;
+    Quantity remaining;
   };
 
   static std::string fill_key(const Fill &fill);
 
   RestClient &rest_client_;
   std::unordered_map<std::string, Order> open_orders_;
-  std::unordered_map<std::string, int> net_position_;
+  std::unordered_map<std::string, Quantity> net_position_;
   std::unordered_map<std::string, double> realized_pnl_;
   std::unordered_map<std::string, std::deque<Lot>> yes_lots_;
   std::unordered_map<std::string, std::deque<Lot>> no_lots_;

@@ -37,8 +37,10 @@ std::string base64_encode(const unsigned char *data, size_t len) {
   return result;
 }
 
-// Signs message with RSA-PSS (SHA-256, MGF1-SHA256, max salt length).
+// Signs message with RSA-PSS (SHA-256, MGF1-SHA256, salt = digest length).
 // Kalshi's REST and WS API require RSA-PSS — PKCS1v15 is rejected.
+// Salt length must equal the digest size (32 bytes for SHA-256); the server
+// rejects signatures produced with any other salt length.
 std::string rsa_pss_sha256_sign(const std::string &pem_key,
                                 const std::string &message) {
   BIO *bio = BIO_new_mem_buf(pem_key.data(), static_cast<int>(pem_key.size()));
@@ -62,7 +64,7 @@ std::string rsa_pss_sha256_sign(const std::string &pem_key,
     EVP_PKEY_free(pkey);
     throw std::runtime_error("auth: EVP_PKEY_CTX_set_rsa_padding failed");
   }
-  if (EVP_PKEY_CTX_set_rsa_pss_saltlen(pctx, RSA_PSS_SALTLEN_MAX) != 1) {
+  if (EVP_PKEY_CTX_set_rsa_pss_saltlen(pctx, RSA_PSS_SALTLEN_DIGEST) != 1) {
     EVP_MD_CTX_free(ctx);
     EVP_PKEY_free(pkey);
     throw std::runtime_error("auth: EVP_PKEY_CTX_set_rsa_pss_saltlen failed");

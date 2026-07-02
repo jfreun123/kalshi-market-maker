@@ -48,8 +48,10 @@ constexpr std::string_view kAskPriceExtremeClamp =
 // Flow imbalance: default spread 4 → half 2 → bid 50; +2 imbalance → half 3 →
 // bid 49.
 constexpr std::string_view kBidPriceImbalanced = R"("price":"0.4900")";
-constexpr int kImbalanceYesQty = 30;
-constexpr int kImbalanceNoQty = 5;
+constexpr kalshi::Quantity kImbalanceYesQty =
+    kalshi::Quantity::from_contracts(30);
+constexpr kalshi::Quantity kImbalanceNoQty =
+    kalshi::Quantity::from_contracts(5);
 // Spread floor: target 2 (half 1 → bid 51) is overridden by min_spread 8
 // (half 4 → bid 48 at mid 52).
 constexpr int kLowTargetSpread = 2;
@@ -59,7 +61,7 @@ constexpr std::string_view kBidPriceFloored = R"("price":"0.4800")";
 // default spread 4 (half 2) widens to half 4 → bid 48 ("0.4800").
 constexpr double kMakerFeeRate = 0.07;
 
-constexpr int kObLevelQty = 100;
+constexpr kalshi::Quantity kObLevelQty = kalshi::Quantity::from_contracts(100);
 constexpr int kFillPrice = 52;
 constexpr long long kTs1Ns = 1'000'000LL;
 constexpr int kHttpOk = 200;
@@ -96,8 +98,8 @@ std::string generate_rsa_pem() {
 // order.
 std::string order_json(const std::string &order_id, int qty) {
   return R"({"order_id":")" + order_id +
-         R"(","fill_count":"0.00","remaining_count":")" + std::to_string(qty) +
-         R"(.00","ts_ms":1718000000000})";
+         R"(","fill_count_fp":"0.00","remaining_count":")" +
+         std::to_string(qty) + R"(.00","ts_ms":1718000000000})";
 }
 
 // Builds a LocalOrderbook with the given YES and NO bid levels.
@@ -121,7 +123,7 @@ void record_position_fill(kalshi::OrderManager &order_mgr,
   fill.market_ticker = kTicker;
   fill.side = side;
   fill.price_cents = kFillPrice;
-  fill.quantity = quantity;
+  fill.quantity = kalshi::Quantity::from_contracts(quantity);
   fill.timestamp = std::chrono::system_clock::time_point{
       std::chrono::duration_cast<std::chrono::system_clock::duration>(
           std::chrono::nanoseconds{kTs1Ns})};

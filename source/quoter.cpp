@@ -143,7 +143,7 @@ void Quoter::update(std::string_view ticker, const LocalOrderbook &book) {
   }
   const int half_spread = base_half_spread + fee_cents;
   const double inventory_skew =
-      static_cast<double>(order_mgr_.net_position(ticker_str)) *
+      order_mgr_.net_position(ticker_str).contracts() *
       config_.skew_per_contract_cents;
 
   const auto [desired_bid, desired_ask] =

@@ -111,8 +111,8 @@ std::string generate_rsa_pem() {
 
 std::string order_response_json(const std::string &order_id, int qty) {
   return R"({"order_id":")" + order_id +
-         R"(","fill_count":"0.00","remaining_count":")" + std::to_string(qty) +
-         R"(.00","ts_ms":1718000000000})";
+         R"(","fill_count_fp":"0.00","remaining_count":")" +
+         std::to_string(qty) + R"(.00","ts_ms":1718000000000})";
 }
 
 // NOLINTBEGIN(bugprone-easily-swappable-parameters)
@@ -124,7 +124,7 @@ kalshi::Fill make_fill(const std::string &order_id, const std::string &ticker,
   fill.market_ticker = ticker;
   fill.side = side;
   fill.price_cents = price_cents;
-  fill.quantity = quantity;
+  fill.quantity = kalshi::Quantity::from_contracts(quantity);
   fill.timestamp = std::chrono::system_clock::time_point{
       std::chrono::duration_cast<std::chrono::system_clock::duration>(
           std::chrono::nanoseconds{timestamp_ns})};

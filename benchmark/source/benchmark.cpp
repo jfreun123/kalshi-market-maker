@@ -7,10 +7,12 @@
 namespace {
 
 constexpr int kMidPrice = 50;
-constexpr int kLevelQuantity = 100;
+constexpr kalshi::Quantity kLevelQuantity =
+    kalshi::Quantity::from_contracts(100);
 constexpr int kAltPriceA = 49;
 constexpr int kAltPriceB = 48;
-constexpr int kDeltaQuantity = 200;
+constexpr kalshi::Quantity kDeltaQuantity =
+    kalshi::Quantity::from_contracts(200);
 constexpr int kSmallLevelCount = 10;
 constexpr int kMediumLevelCount = 50;
 constexpr int kLargeLevelCount = 100;
@@ -24,8 +26,10 @@ kalshi::Orderbook make_snapshot(int level_count) {
   kalshi::Orderbook snap;
   snap.ticker = "BENCH-TICKER";
   for (int index = 0; index < level_count; ++index) {
-    snap.yes.push_back({.price_cents = kMidPrice - index, .quantity = kLevelQuantity});
-    snap.no.push_back({.price_cents = kMidPrice - index, .quantity = kLevelQuantity});
+    snap.yes.push_back(
+        {.price_cents = kMidPrice - index, .quantity = kLevelQuantity});
+    snap.no.push_back(
+        {.price_cents = kMidPrice - index, .quantity = kLevelQuantity});
   }
   return snap;
 }

@@ -102,7 +102,7 @@ TEST(ReplayTest, SyntheticSessionProducesValidOrderbookAndFills) {
       [&book](const kalshi::Orderbook &snap) { book.apply_snapshot(snap); });
   ws_client.on_orderbook_delta(
       [&book](const std::string & /*ticker*/, kalshi::Side side, int price,
-              int qty) { book.apply_delta(side, price, qty); });
+              kalshi::Quantity qty) { book.apply_delta(side, price, qty); });
   ws_client.on_fill(
       [&fill_count](const kalshi::Fill & /*fill*/) { ++fill_count; });
 
@@ -130,9 +130,9 @@ TEST(ReplayTest, MalformedMessagesAreDroppedGracefully) {
   int callback_count = 0;
   ws_client.on_orderbook_snapshot(
       [&callback_count](const kalshi::Orderbook &) { ++callback_count; });
-  ws_client.on_orderbook_delta([&callback_count](const std::string &,
-                                                 kalshi::Side, int,
-                                                 int) { ++callback_count; });
+  ws_client.on_orderbook_delta(
+      [&callback_count](const std::string &, kalshi::Side, int,
+                        kalshi::Quantity) { ++callback_count; });
   ws_client.on_fill(
       [&callback_count](const kalshi::Fill &) { ++callback_count; });
 

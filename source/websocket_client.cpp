@@ -144,9 +144,8 @@ int dollars_to_cents(const std::string &dollars_str) {
   return static_cast<int>(std::round(std::stod(dollars_str) * kCentsPerDollar));
 }
 
-// "10.00" -> 10
-int parse_fp_count(const std::string &fp_str) {
-  return static_cast<int>(std::round(std::stod(fp_str)));
+Quantity parse_fp_count(const std::string &fp_str) {
+  return Quantity::from_fp_string(fp_str);
 }
 
 Side parse_side(const std::string &side_str) {
@@ -156,21 +155,23 @@ Side parse_side(const std::string &side_str) {
   return Side::No;
 }
 
-// Snapshot msg uses yes_dollars_fp / no_dollars_fp: arrays of [price_str,
-// count_str] pairs.
+Level parse_snapshot_level(const nlohmann::json &level) {
+  constexpr std::size_t kPriceField = 0;
+  constexpr std::size_t kCountField = 1;
+  return {dollars_to_cents(level.at(kPriceField).get<std::string>()),
+          parse_fp_count(level.at(kCountField).get<std::string>())};
+}
+
 Orderbook parse_snapshot(const nlohmann::json &msg) {
   Orderbook book;
   book.ticker = msg.at("market_ticker").get<std::string>();
 
-  for (const auto &entry : msg.at("yes_dollars_fp")) {
-    const int price = dollars_to_cents(entry.at(0).get<std::string>());
-    const int qty = parse_fp_count(entry.at(1).get<std::string>());
-    book.yes.push_back({price, qty});
+  static const nlohmann::json kEmptyArray = nlohmann::json::array();
+  for (const auto &level : msg.value("yes_dollars_fp", kEmptyArray)) {
+    book.yes.push_back(parse_snapshot_level(level));
   }
-  for (const auto &entry : msg.at("no_dollars_fp")) {
-    const int price = dollars_to_cents(entry.at(0).get<std::string>());
-    const int qty = parse_fp_count(entry.at(1).get<std::string>());
-    book.no.push_back({price, qty});
+  for (const auto &level : msg.value("no_dollars_fp", kEmptyArray)) {
+    book.no.push_back(parse_snapshot_level(level));
   }
   return book;
 }
@@ -228,6 +229,7 @@ void WebSocketClient::send_subscribe(const std::string &ticker) {
   msg["cmd"] = "subscribe";
   msg["params"]["channels"] = {"orderbook_delta"};
   msg["params"]["market_tickers"] = {ticker};
+  msg["params"]["use_yes_price"] = true;
   ws_->send(msg.dump());
 }
 
@@ -279,7 +281,8 @@ void dispatch_delta(const WebSocketClient::DeltaCallback &callback,
     const Side side = parse_side(msg_body.at("side").get<std::string>());
     const int price =
         dollars_to_cents(msg_body.at("price_dollars").get<std::string>());
-    const int qty = parse_fp_count(msg_body.at("delta_fp").get<std::string>());
+    const Quantity qty =
+        parse_fp_count(msg_body.at("delta_fp").get<std::string>());
     callback(ticker, side, price, qty);
   } catch (const nlohmann::json::exception &ex) {
     get_logger()->debug("ws dropped malformed delta: {}", ex.what());
@@ -297,7 +300,7 @@ void dispatch_fill(const WebSocketClient::FillCallback &callback,
     Fill fill;
     fill.order_id = msg_body.at("order_id").get<std::string>();
     fill.market_ticker = msg_body.at("market_ticker").get<std::string>();
-    fill.side = parse_side(msg_body.at("side").get<std::string>());
+    fill.side = parse_side(msg_body.at("outcome_side").get<std::string>());
     fill.price_cents =
         dollars_to_cents(msg_body.at("yes_price_dollars").get<std::string>());
     fill.quantity = parse_fp_count(msg_body.at("count_fp").get<std::string>());

@@ -41,7 +41,8 @@ public:
   // Replace a market's book from a fresh snapshot (no re-quote).
   void on_snapshot(const Orderbook &snapshot);
   // Apply an incremental book update and re-quote that market.
-  void on_delta(const std::string &ticker, Side side, int price_cents, int qty);
+  void on_delta(const std::string &ticker, Side side, int price_cents,
+                Quantity qty);
   // Record a fill, refresh per-market risk, and notify the PnL listener.
   void on_fill(const Fill &fill);
   // Cancel all resting orders (called when the market-data feed drops).

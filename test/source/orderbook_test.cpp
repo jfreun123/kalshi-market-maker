@@ -1,25 +1,30 @@
 #include "orderbook.hpp"
+#include "quantity.hpp"
 
 #include <gtest/gtest.h>
 
-// ---- Test constants ----
-
 namespace {
 
-// A typical Kalshi market with a 4-cent spread:
-//   YES bid 52, NO bid 44 => YES ask = 56, spread = 4, mid = 54
+using kalshi::Quantity;
+
 constexpr int kYesBid = 52;
 constexpr int kYesBid2 = 51;
 constexpr int kNoBid = 44;
 constexpr int kNoBid2 = 43;
-constexpr int kYesAsk = 56; // 100 - kNoBid
+constexpr int kYesAsk = 56;
 constexpr int kExpectedMid = 54;
 constexpr int kExpectedSpread = 4;
-constexpr int kQtyLarge = 200;
-constexpr int kQtySmall = 100;
-constexpr int kQtyUpdated = 75;
+constexpr Quantity kQtyLarge = Quantity::from_contracts(200);
+constexpr Quantity kQtySmall = Quantity::from_contracts(100);
 constexpr int kNewPrice = 50;
-constexpr int kNewQty = 300;
+constexpr Quantity kNewQty = Quantity::from_contracts(300);
+
+constexpr Quantity kPositiveDelta = Quantity::from_contracts(75);
+constexpr Quantity kNegativeDelta = Quantity::from_contracts(-50);
+constexpr Quantity kQtyAfterIncrease = kQtyLarge + kPositiveDelta;
+constexpr Quantity kQtyAfterDecrease = kQtyLarge + kNegativeDelta;
+constexpr Quantity kRemoveDelta = -kQtyLarge;
+constexpr Quantity kOverRemoveDelta = -(kQtyLarge + kQtySmall);
 constexpr std::size_t kOneLevel = 1U;
 constexpr std::size_t kTwoLevels = 2U;
 constexpr std::size_t kThreeLevels = 3U;
@@ -101,8 +106,12 @@ TEST(LocalOrderbookTest, ApplySnapshotSortsExchangeAscendingLevelsDescending) {
   // level and the computed mid is garbage (this caused post-only-cross quotes).
   kalshi::Orderbook book;
   book.ticker = "KXBTCD";
-  book.yes = {{1, 5000}, {46, 100}, {53, 200}}; // ascending as on the wire
-  book.no = {{1, 5000}, {40, 100}, {44, 300}};  // ascending as on the wire
+  book.yes = {{1, Quantity::from_contracts(5000)},
+              {46, Quantity::from_contracts(100)},
+              {53, Quantity::from_contracts(200)}};
+  book.no = {{1, Quantity::from_contracts(5000)},
+             {40, Quantity::from_contracts(100)},
+             {44, Quantity::from_contracts(300)}};
 
   kalshi::LocalOrderbook orderbook;
   orderbook.apply_snapshot(book);
@@ -120,12 +129,16 @@ TEST(LocalOrderbookTest, DeltaMaintainsOrderAfterAscendingSnapshot) {
   // too).
   kalshi::Orderbook book;
   book.ticker = "KXBTCD";
-  book.yes = {{1, 5000}, {46, 100}, {53, 200}};
-  book.no = {{1, 5000}, {40, 100}, {44, 300}};
+  book.yes = {{1, Quantity::from_contracts(5000)},
+              {46, Quantity::from_contracts(100)},
+              {53, Quantity::from_contracts(200)}};
+  book.no = {{1, Quantity::from_contracts(5000)},
+             {40, Quantity::from_contracts(100)},
+             {44, Quantity::from_contracts(300)}};
   kalshi::LocalOrderbook orderbook;
   orderbook.apply_snapshot(book);
 
-  orderbook.apply_delta(kalshi::Side::Yes, 55, 75); // new top-of-book YES bid
+  orderbook.apply_delta(kalshi::Side::Yes, 55, Quantity::from_contracts(75));
 
   ASSERT_TRUE(orderbook.best_bid().has_value());
   EXPECT_EQ(orderbook.best_bid()->price_cents, 55);
@@ -181,37 +194,86 @@ TEST(LocalOrderbookTest, ApplyDeltaAddsNewYesLevel) {
   EXPECT_EQ(yes.back().quantity, kNewQty);
 }
 
-TEST(LocalOrderbookTest, ApplyDeltaUpdatesExistingYesLevel) {
+TEST(LocalOrderbookTest, ApplyDeltaIncrementsExistingYesLevel) {
   kalshi::LocalOrderbook orderbook;
   orderbook.apply_snapshot(make_orderbook());
 
-  orderbook.apply_delta(kalshi::Side::Yes, kYesBid, kQtyUpdated);
+  orderbook.apply_delta(kalshi::Side::Yes, kYesBid, kPositiveDelta);
 
   const auto &yes = orderbook.state().yes;
   ASSERT_EQ(yes.size(), kTwoLevels);
   EXPECT_EQ(yes[0].price_cents, kYesBid);
-  EXPECT_EQ(yes[0].quantity, kQtyUpdated);
+  EXPECT_EQ(yes[0].quantity, kQtyAfterIncrease);
 }
 
-TEST(LocalOrderbookTest, ApplyDeltaRemovesYesLevelWhenQuantityZero) {
+TEST(LocalOrderbookTest, ApplyDeltaDecrementsExistingYesLevel) {
   kalshi::LocalOrderbook orderbook;
   orderbook.apply_snapshot(make_orderbook());
 
-  orderbook.apply_delta(kalshi::Side::Yes, kYesBid, 0);
+  orderbook.apply_delta(kalshi::Side::Yes, kYesBid, kNegativeDelta);
+
+  const auto &yes = orderbook.state().yes;
+  ASSERT_EQ(yes.size(), kTwoLevels);
+  EXPECT_EQ(yes[0].price_cents, kYesBid);
+  EXPECT_EQ(yes[0].quantity, kQtyAfterDecrease);
+}
+
+TEST(LocalOrderbookTest, ApplyDeltaAccumulatesAcrossMultipleUpdates) {
+  kalshi::LocalOrderbook orderbook;
+  orderbook.apply_snapshot(make_orderbook());
+
+  orderbook.apply_delta(kalshi::Side::Yes, kYesBid, kPositiveDelta);
+  orderbook.apply_delta(kalshi::Side::Yes, kYesBid, kNegativeDelta);
+  orderbook.apply_delta(kalshi::Side::Yes, kYesBid, kNegativeDelta);
+
+  const auto &yes = orderbook.state().yes;
+  ASSERT_EQ(yes.size(), kTwoLevels);
+  EXPECT_EQ(yes[0].quantity,
+            kQtyLarge + kPositiveDelta + kNegativeDelta + kNegativeDelta);
+}
+
+TEST(LocalOrderbookTest, ApplyDeltaCarriesFractionalSizeInsteadOfDropping) {
+  kalshi::LocalOrderbook orderbook;
+  orderbook.apply_snapshot(make_orderbook());
+
+  orderbook.apply_delta(kalshi::Side::Yes, kYesBid,
+                        Quantity::from_fp_string("-0.16"));
+
+  const auto &yes = orderbook.state().yes;
+  ASSERT_EQ(yes.size(), kTwoLevels);
+  EXPECT_EQ(yes[0].quantity, kQtyLarge - Quantity::from_fp_string("0.16"));
+  EXPECT_EQ(yes[0].quantity, Quantity::from_fp_string("199.84"));
+}
+
+TEST(LocalOrderbookTest, ApplyDeltaRemovesYesLevelWhenSizeReachesZero) {
+  kalshi::LocalOrderbook orderbook;
+  orderbook.apply_snapshot(make_orderbook());
+
+  orderbook.apply_delta(kalshi::Side::Yes, kYesBid, kRemoveDelta);
 
   const auto &yes = orderbook.state().yes;
   ASSERT_EQ(yes.size(), kOneLevel);
   EXPECT_EQ(yes[0].price_cents, kYesBid2);
 }
 
-TEST(LocalOrderbookTest, ApplyDeltaIgnoresRemoveForNonExistentLevel) {
+TEST(LocalOrderbookTest, ApplyDeltaRemovesYesLevelWhenSizeGoesNegative) {
   kalshi::LocalOrderbook orderbook;
   orderbook.apply_snapshot(make_orderbook());
 
-  orderbook.apply_delta(kalshi::Side::Yes, kNewPrice,
-                        0); // kNewPrice not in book
+  orderbook.apply_delta(kalshi::Side::Yes, kYesBid, kOverRemoveDelta);
 
-  EXPECT_EQ(orderbook.state().yes.size(), kTwoLevels); // unchanged
+  const auto &yes = orderbook.state().yes;
+  ASSERT_EQ(yes.size(), kOneLevel);
+  EXPECT_EQ(yes[0].price_cents, kYesBid2);
+}
+
+TEST(LocalOrderbookTest, ApplyDeltaIgnoresShrinkForNonExistentLevel) {
+  kalshi::LocalOrderbook orderbook;
+  orderbook.apply_snapshot(make_orderbook());
+
+  orderbook.apply_delta(kalshi::Side::Yes, kNewPrice, kNegativeDelta);
+
+  EXPECT_EQ(orderbook.state().yes.size(), kTwoLevels);
 }
 
 TEST(LocalOrderbookTest, ApplyDeltaAddsNoLevel) {
@@ -245,7 +307,7 @@ TEST(LocalOrderbookTest, BestBidUpdatesAfterDeltaRemovesTopLevel) {
   kalshi::LocalOrderbook orderbook;
   orderbook.apply_snapshot(make_orderbook());
 
-  orderbook.apply_delta(kalshi::Side::Yes, kYesBid, 0); // remove top bid
+  orderbook.apply_delta(kalshi::Side::Yes, kYesBid, kRemoveDelta);
 
   auto bid = orderbook.best_bid();
   ASSERT_TRUE(bid.has_value());
@@ -261,7 +323,7 @@ TEST(LocalOrderbookTest, EmptyYesBookAfterRemovingAllLevels) {
   snap.yes = {{kYesBid, kQtySmall}};
   orderbook.apply_snapshot(snap);
 
-  orderbook.apply_delta(kalshi::Side::Yes, kYesBid, 0);
+  orderbook.apply_delta(kalshi::Side::Yes, kYesBid, -kQtySmall);
 
   EXPECT_FALSE(orderbook.best_bid().has_value());
 }
