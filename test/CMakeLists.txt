@@ -77,6 +77,27 @@ if(KALSHI_INTEGRATION_TESTS)
     gtest_discover_tests(replay_session_test)
 endif()
 
+# Conformance smoke tests against the REAL Kalshi demo environment: send each
+# request / subscribe each channel and assert the response parses into our
+# types. Needs demo credentials + network, so OFF by default. Each test skips
+# cleanly if KALSHI_DEMO_CONFIG (or repo config-demo.json) is unavailable or not
+# a demo endpoint, so enabling the option never breaks a credential-less build.
+option(KALSHI_DEMO_TESTS "Build demo-environment conformance smoke tests" OFF)
+if(KALSHI_DEMO_TESTS)
+    add_executable(demo_conformance_test integration/demo_conformance_test.cpp)
+    target_link_libraries(demo_conformance_test PRIVATE kalshi_lib GTest::gtest_main OpenSSL::Crypto)
+    target_include_directories(demo_conformance_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/source"
+        "${PROJECT_SOURCE_DIR}/source"
+    )
+    target_compile_features(demo_conformance_test PRIVATE cxx_std_23)
+    target_compile_options(demo_conformance_test PRIVATE -Werror)
+    target_compile_definitions(demo_conformance_test PRIVATE
+        KALSHI_DEMO_CONFIG_DEFAULT="${PROJECT_SOURCE_DIR}/config-demo.json"
+    )
+    gtest_discover_tests(demo_conformance_test)
+endif()
+
 # ---- Fuzz targets (KALSHI_FUZZ_TESTS=ON, fuzz preset) ----
 
 option(KALSHI_FUZZ_TESTS "Build libFuzzer fuzz targets (requires Clang -fsanitize=fuzzer)" OFF)
