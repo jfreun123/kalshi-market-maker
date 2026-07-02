@@ -98,8 +98,8 @@ std::string generate_rsa_pem() {
 // order.
 std::string order_json(const std::string &order_id, int qty) {
   return R"({"order_id":")" + order_id +
-         R"(","fill_count_fp":"0.00","remaining_count":")" +
-         std::to_string(qty) + R"(.00","ts_ms":1718000000000})";
+         R"(","fill_count":"0.00","remaining_count":")" + std::to_string(qty) +
+         R"(.00","ts_ms":1718000000000})";
 }
 
 // Builds a LocalOrderbook with the given YES and NO bid levels.

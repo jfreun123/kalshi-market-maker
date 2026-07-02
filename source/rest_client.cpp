@@ -354,7 +354,7 @@ Order RestClient::place_order(std::string_view ticker, Side side,
   auto json_data = nlohmann::json::parse(resp.body);
   const Quantity ordered = Quantity::from_contracts(quantity);
   const Quantity filled_qty =
-      parse_fp_count(json_data.at("fill_count_fp").get<std::string>());
+      parse_fp_count(json_data.at("fill_count").get<std::string>());
 
   OrderStatus status = OrderStatus::Open;
   if (filled_qty >= ordered) {
