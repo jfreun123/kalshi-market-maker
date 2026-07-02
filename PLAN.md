@@ -59,13 +59,27 @@
 
 ### P2 — Operational robustness & strategy
 
-- [ ] **6. D3 — staleness flapping on quiet markets.** Thin markets send no WS
+- [ ] **6. Run the full test suite under sanitizers (and wire it into CI).** The
+  `asan` and `tsan` CMake presets already exist (`-fsanitize=address` /
+  `-fsanitize=thread`, each carrying the full `-Wall -Wextra -Wpedantic
+  -Wconversion -Wsign-conversion -Wshadow` set). Add a CI job — and a documented
+  local command — that builds and runs the **entire** suite under **ASan+UBSan**
+  (memory errors, leaks, undefined behavior) and **TSan** (data races). TSan
+  matters most here: the engine is two threads (WS feed + 100ms poll loop)
+  sharing all state under one `engine_mtx`, so a race would corrupt order/PnL
+  state — catch it before live trading, not after. Add `-fsanitize=undefined` to
+  the asan preset if not already covered. Fix or suppress-with-reason every
+  finding and keep the suite green under each sanitizer. (Static analysis is
+  already wired: cppcheck runs in-build per target; clang-tidy runs in the
+  pre-commit hook — consider also running clang-tidy over the whole tree in CI.)
+
+- [ ] **7. D3 — staleness flapping on quiet markets.** Thin markets send no WS
   traffic for >30s and trip `kStaleBook` repeatedly → flatten/re-quote churn.
   Count heartbeats toward freshness, or lengthen the threshold for low-activity
   markets (don't loosen blindly — it weakens staleness protection on active
   markets).
 
-- [ ] **7. Queue-position awareness (strategy).** Orders join a price-time FIFO
+- [ ] **8. Queue-position awareness (strategy).** Orders join a price-time FIFO
   queue; at a deep level a small quote sits at the back (observed queue position
   ~115,081 behind a ~115k-contract level) and only fills on adverse selection —
   i.e. when the market runs *through* us. Consider level choice / quote sizing /
@@ -74,21 +88,21 @@
 
 ### P3 — Structural refactors (PR #1 review — detail in *Code Review Follow-ups*)
 
-- [ ] **8. R3 — `Cents` strong type for prices.** The `Quantity` half is done
+- [ ] **9. R3 — `Cents` strong type for prices.** The `Quantity` half is done
   (see Done); prices are still bare `int` cents everywhere. Wrap them in a strong
   `Cents` type so price/count/dollar values can't be silently mixed.
-- [ ] **9. FIX transport.** Replace REST order entry with FIX (Kalshi supports
+- [ ] **10. FIX transport.** Replace REST order entry with FIX (Kalshi supports
   FIX for order entry; tag `21006` = CancelOrderOnPause, drop-copy for missed
   exec reports). Lower latency than REST, better for high-frequency requoting.
   Market data still comes via WebSocket. See §12 of the API reference and
   `https://docs.kalshi.com/fix/*`.
-- [ ] **10. R2 — break up `main.cpp`** (also flagged by clang-tidy:
+- [ ] **11. R2 — break up `main.cpp`** (also flagged by clang-tidy:
   cognitive complexity 27 > 25).
-- [ ] **11. R1 — split `source/`** into `Calculations/ Quoter/
+- [ ] **12. R1 — split `source/`** into `Calculations/ Quoter/
   PortfolioManagement/ Networking/ Common/`.
-- [ ] **12. R4 — Constraints-vs-Guards framework.**
-- [ ] **13. R5 — `KalshiSession` + a `Session` concept** (multi-exchange).
-- [ ] **14. Process-per-exchange isolation.** Today the whole system is a
+- [ ] **13. R4 — Constraints-vs-Guards framework.**
+- [ ] **14. R5 — `KalshiSession` + a `Session` concept** (multi-exchange).
+- [ ] **15. Process-per-exchange isolation.** Today the whole system is a
   **single process, two threads** (WS feed + 100ms poll loop) with **one global
   `engine_mtx`** serializing all state; all markets share one WebSocket
   connection and are distinguished only by a ticker key into per-ticker maps.
@@ -100,7 +114,7 @@
   seam; this is the runtime/deployment boundary). Open design questions:
   shared vs. per-process risk/PnL ledger, cross-exchange netting, and how a
   supervisor starts/monitors/flattens each process.
-- [ ] **15. R7 — `docs/kalshi-messages.md` + rate-limiting review.**
+- [ ] **16. R7 — `docs/kalshi-messages.md` + rate-limiting review.**
 
 ### Done (recent sessions, committed)
 
