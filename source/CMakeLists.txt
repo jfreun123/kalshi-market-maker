@@ -5,12 +5,14 @@ add_library(kalshi_lib STATIC auth.cpp config.cpp http_transport.cpp paper_trans
 add_executable(kalshi_mm main.cpp)
 target_link_libraries(kalshi_mm PRIVATE kalshi_lib)
 target_compile_features(kalshi_mm PRIVATE cxx_std_23)
-set_target_properties(kalshi_mm PROPERTIES CXX_CLANG_TIDY "clang-tidy")
+target_compile_options(kalshi_mm PRIVATE -Werror)
+target_compile_options(kalshi_lib PRIVATE -Werror)
 
 target_include_directories(
     kalshi_lib
     PUBLIC
     "$<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/source>"
+    ${OPENSSL_INCLUDE_DIR}
 )
 
 target_compile_features(kalshi_lib PUBLIC cxx_std_23)

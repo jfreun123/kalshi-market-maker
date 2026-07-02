@@ -7,9 +7,9 @@ function(kalshi_add_test target source)
     target_link_libraries(${target} PRIVATE kalshi_lib GTest::gtest_main)
     target_include_directories(${target} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/source")
     target_compile_features(${target} PRIVATE cxx_std_23)
+    target_compile_options(${target} PRIVATE -Werror)
     set_target_properties(${target} PROPERTIES
-        CXX_CLANG_TIDY "clang-tidy"
-        CXX_CPPCHECK "cppcheck;--inline-suppr"
+        CXX_CPPCHECK "cppcheck;--inline-suppr;--error-exitcode=1;--suppress=*:${CMAKE_BINARY_DIR}/_deps/*"
     )
     gtest_discover_tests(${target})
 endfunction()
@@ -47,10 +47,10 @@ target_include_directories(replay_test PRIVATE
     "${PROJECT_SOURCE_DIR}/source"
 )
 target_compile_features(replay_test PRIVATE cxx_std_23)
+target_compile_options(replay_test PRIVATE -Werror)
 target_compile_definitions(replay_test PRIVATE
     KALSHI_FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
 )
-set_target_properties(replay_test PROPERTIES CXX_CLANG_TIDY "clang-tidy")
 gtest_discover_tests(replay_test)
 
 # ---- Integration tests ----
@@ -68,10 +68,10 @@ if(KALSHI_INTEGRATION_TESTS)
         "${PROJECT_SOURCE_DIR}/source"
     )
     target_compile_features(replay_session_test PRIVATE cxx_std_23)
+    target_compile_options(replay_session_test PRIVATE -Werror)
     target_compile_definitions(replay_session_test PRIVATE
         KALSHI_FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
     )
-    set_target_properties(replay_session_test PROPERTIES CXX_CLANG_TIDY "clang-tidy")
     gtest_discover_tests(replay_session_test)
 endif()
 
