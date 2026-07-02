@@ -357,7 +357,7 @@ Order RestClient::place_order(std::string_view ticker, Side side,
   // V2 returns a minimal response; reconstruct the Order from input params.
   auto json_data = nlohmann::json::parse(resp.body);
   const int filled_qty =
-      parse_fp_count(json_data.at("fill_count").get<std::string>());
+      parse_fp_count(json_data.at("fill_count_fp").get<std::string>());
 
   OrderStatus status = OrderStatus::Open;
   if (filled_qty >= quantity) {

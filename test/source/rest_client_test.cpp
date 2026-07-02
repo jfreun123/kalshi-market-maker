@@ -31,7 +31,7 @@ constexpr int kHttpInternalError = 500;
 
 // V2 minimal create-order response.
 constexpr std::string_view kPlaceOrderResponse =
-    R"({"order_id":"order-abc","fill_count":"0.00","remaining_count":"10.00","ts_ms":1718000000000})";
+    R"({"order_id":"order-abc","fill_count_fp":"0.00","remaining_count":"10.00","ts_ms":1718000000000})";
 
 // V2 GET order with a partial fill (fill_count_fp > 0, still resting).
 constexpr std::string_view kPartialOrderJson =

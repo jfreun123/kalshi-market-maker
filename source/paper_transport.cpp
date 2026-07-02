@@ -131,7 +131,7 @@ PaperTransport::post(std::string_view /*url*/,
   // V2 minimal response; RestClient reconstructs the Order from input params.
   nlohmann::json response_json;
   response_json["order_id"] = order.id;
-  response_json["fill_count"] = "0.00";
+  response_json["fill_count_fp"] = "0.00";
   response_json["ts_ms"] = kPaperOrderTsMs;
   return {kHttpCreated, response_json.dump()};
 }
