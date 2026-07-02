@@ -116,7 +116,8 @@ std::string delta_message(const std::string &ticker, const std::string &side,
 
 std::string fill_message(const std::string &order_id, const std::string &ticker,
                          const std::string &side, int price, int count,
-                         bool is_taker = false) {
+                         bool is_taker = false,
+                         const std::string &fee_cost = "") {
   nlohmann::json msg;
   msg["type"] = "fill";
   msg["msg"]["order_id"] = order_id;
@@ -126,6 +127,9 @@ std::string fill_message(const std::string &order_id, const std::string &ticker,
   msg["msg"]["count_fp"] = format_count(count);
   msg["msg"]["ts_ms"] = kFillTsMs;
   msg["msg"]["is_taker"] = is_taker;
+  if (!fee_cost.empty()) {
+    msg["msg"]["fee_cost"] = fee_cost;
+  }
   return msg.dump();
 }
 
@@ -417,6 +421,24 @@ TEST_F(WebSocketClientTest, FillFieldsParsedCorrectly) {
   EXPECT_EQ(received.price_cents, kFillPrice);
   EXPECT_EQ(received.quantity, kalshi::Quantity::from_contracts(kFillCount));
   EXPECT_FALSE(received.is_taker); // default fill_message is maker (passive)
+  EXPECT_DOUBLE_EQ(received.fee_cents, 0.0); // absent fee_cost defaults to zero
+}
+
+TEST_F(WebSocketClientTest, FillFeeCostParsedFromDollarsToCents) {
+  constexpr double kExpectedFeeCents = 2.0; // "0.0200" dollars = 2.00 cents
+  auto fake_ws = std::make_unique<kalshi::FakeWebSocket>();
+  kalshi::FakeWebSocket *ws_raw = fake_ws.get();
+  ws_raw->enqueue_message(fill_message("order-abc", kTestTicker, "yes",
+                                       kFillPrice, kFillCount,
+                                       /*is_taker=*/true, "0.0200"));
+
+  auto client = make_client(std::move(fake_ws));
+
+  kalshi::Fill received;
+  client.on_fill([&](const kalshi::Fill &fill) { received = fill; });
+  client.run();
+
+  EXPECT_NEAR(received.fee_cents, kExpectedFeeCents, 1e-9);
 }
 
 TEST_F(WebSocketClientTest, ThrowingCallbackIsContainedNotPropagated) {

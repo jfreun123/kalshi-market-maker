@@ -82,7 +82,7 @@ void OrderManager::record_fill(const Fill &fill) {
   while (remaining.is_positive() && !opposing_inventory.empty()) {
     Lot &front = opposing_inventory.front();
     const Quantity matched = kalshi::min(remaining, front.remaining);
-    realized_pnl_[fill.market_ticker] +=
+    realized_spread_[fill.market_ticker] +=
         static_cast<double>(kContractMaxCents - fill.price_cents -
                             front.price_cents) *
         matched.contracts();
@@ -100,6 +100,8 @@ void OrderManager::record_fill(const Fill &fill) {
   const Quantity signed_qty =
       (fill.side == Side::Yes) ? fill.quantity : -fill.quantity;
   net_position_[fill.market_ticker] += signed_qty;
+
+  fees_paid_[fill.market_ticker] += fill.fee_cents;
 
   // Update the order's filled quantity if it's still open.
   auto order_iter = open_orders_.find(fill.order_id);
@@ -119,9 +121,18 @@ Quantity OrderManager::net_position(std::string_view ticker) const {
   return position_it == net_position_.end() ? Quantity{} : position_it->second;
 }
 
+double OrderManager::fees_paid(std::string_view ticker) const {
+  auto fees_it = fees_paid_.find(std::string{ticker});
+  return fees_it == fees_paid_.end() ? 0.0 : fees_it->second;
+}
+
+double OrderManager::realized_spread(std::string_view ticker) const {
+  auto spread_it = realized_spread_.find(std::string{ticker});
+  return spread_it == realized_spread_.end() ? 0.0 : spread_it->second;
+}
+
 double OrderManager::realized_pnl(std::string_view ticker) const {
-  auto pnl_it = realized_pnl_.find(std::string{ticker});
-  return pnl_it == realized_pnl_.end() ? 0.0 : pnl_it->second;
+  return realized_spread(ticker) - fees_paid(ticker);
 }
 
 double OrderManager::unrealized_pnl(std::string_view ticker,
@@ -198,7 +209,7 @@ OrderManager::exposure_decomposition(std::string_view ticker) const {
   const auto [no_qty, no_cost] = sum_side(no_lots_);
 
   ExposureDecomposition decomp;
-  decomp.spread_capture_cents = realized_pnl(ticker);
+  decomp.spread_capture_cents = realized_spread(ticker);
   decomp.net_inventory = yes_qty - no_qty;
 
   // Inventory sits on at most one side; value the dominant side against its

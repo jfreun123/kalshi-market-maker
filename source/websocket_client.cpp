@@ -304,6 +304,8 @@ void dispatch_fill(const WebSocketClient::FillCallback &callback,
     fill.price_cents =
         dollars_to_cents(msg_body.at("yes_price_dollars").get<std::string>());
     fill.quantity = parse_fp_count(msg_body.at("count_fp").get<std::string>());
+    fill.fee_cents = std::stod(msg_body.value("fee_cost", std::string{"0"})) *
+                     kCentsPerDollar;
     fill.is_taker = msg_body.at("is_taker").get<bool>();
     const auto ts_ms = msg_body.at("ts_ms").get<long long>();
     fill.timestamp =

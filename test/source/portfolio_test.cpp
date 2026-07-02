@@ -15,6 +15,7 @@ namespace {
 struct FakeOrderManager : public kalshi::IOrderManager {
   std::unordered_map<std::string, kalshi::Quantity> positions;
   std::unordered_map<std::string, double> realized;
+  std::unordered_map<std::string, double> fees;
   std::unordered_map<std::string, double> unrealized;
   std::unordered_map<std::string, double> cost;
   std::unordered_map<std::string, kalshi::Order> open_map;
@@ -35,6 +36,10 @@ struct FakeOrderManager : public kalshi::IOrderManager {
   [[nodiscard]] double realized_pnl(std::string_view ticker) const override {
     auto iter = realized.find(std::string{ticker});
     return iter == realized.end() ? 0.0 : iter->second;
+  }
+  [[nodiscard]] double fees_paid(std::string_view ticker) const override {
+    auto iter = fees.find(std::string{ticker});
+    return iter == fees.end() ? 0.0 : iter->second;
   }
   [[nodiscard]] double unrealized_pnl(std::string_view ticker,
                                       int /*yes_mid_cents*/) const override {

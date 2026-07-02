@@ -34,6 +34,9 @@ constexpr int kNoMatchQty = 3; // partial offset against a 5-lot YES position
 constexpr double kExpectedPnlPerPair = 4.0;
 constexpr double kExpectedPnl5Pairs = 20.0;
 constexpr double kExpectedPnlMixed = 30.0;
+constexpr double kYesFillFee = 2.0;
+constexpr double kNoFillFee = 1.0;
+constexpr double kTotalPairFees = kYesFillFee + kNoFillFee;
 constexpr std::size_t kOneOrder = 1U;
 constexpr long long kTs1Ns = 1'000'000LL;
 constexpr long long kTs2Ns = 2'000'000LL;
@@ -79,13 +82,15 @@ std::string order_response_json(const std::string &order_id, int qty) {
 // NOLINTBEGIN(bugprone-easily-swappable-parameters)
 kalshi::Fill make_fill(const std::string &order_id, const std::string &ticker,
                        kalshi::Side side, int price_cents, int quantity,
-                       long long timestamp_ns = kTs1Ns) {
+                       long long timestamp_ns = kTs1Ns,
+                       double fee_cents = 0.0) {
   kalshi::Fill fill;
   fill.order_id = order_id;
   fill.market_ticker = ticker;
   fill.side = side;
   fill.price_cents = price_cents;
   fill.quantity = kalshi::Quantity::from_contracts(quantity);
+  fill.fee_cents = fee_cents;
   fill.timestamp = std::chrono::system_clock::time_point{
       std::chrono::duration_cast<std::chrono::system_clock::duration>(
           std::chrono::nanoseconds{timestamp_ns})};
@@ -399,6 +404,46 @@ TEST_F(OrderManagerTest, UnmatchedFillsHaveZeroRealizedPnl) {
       make_fill(kOrderId, kTicker, kalshi::Side::Yes, kYesFillPrice, kFillQty));
 
   EXPECT_DOUBLE_EQ(mgr.realized_pnl(kTicker), 0.0);
+}
+
+TEST_F(OrderManagerTest, FeesReduceRealizedPnlBelowGrossSpread) {
+  auto rest_client = make_rest_client(std::make_unique<FakeTransport>());
+  kalshi::OrderManager mgr{rest_client};
+
+  mgr.record_fill(make_fill(kOrderId, kTicker, kalshi::Side::Yes, kYesFillPrice,
+                            kFillQty, kTs1Ns, kYesFillFee));
+  mgr.record_fill(make_fill(kOrderId2, kTicker, kalshi::Side::No, kNoFillPrice,
+                            kFillQty, kTs2Ns, kNoFillFee));
+
+  const double gross_spread = kExpectedPnlPerPair * kFillQty;
+  EXPECT_DOUBLE_EQ(mgr.fees_paid(kTicker), kTotalPairFees);
+  EXPECT_DOUBLE_EQ(mgr.realized_pnl(kTicker), gross_spread - kTotalPairFees);
+}
+
+TEST_F(OrderManagerTest, SpreadCaptureStaysGrossWhileRealizedPnlIsNet) {
+  auto rest_client = make_rest_client(std::make_unique<FakeTransport>());
+  kalshi::OrderManager mgr{rest_client};
+
+  mgr.record_fill(make_fill(kOrderId, kTicker, kalshi::Side::Yes, kYesFillPrice,
+                            kFillQty, kTs1Ns, kYesFillFee));
+  mgr.record_fill(make_fill(kOrderId2, kTicker, kalshi::Side::No, kNoFillPrice,
+                            kFillQty, kTs2Ns, kNoFillFee));
+
+  const double gross_spread = kExpectedPnlPerPair * kFillQty;
+  const auto exposure = mgr.exposure_decomposition(kTicker);
+  EXPECT_DOUBLE_EQ(exposure.spread_capture_cents, gross_spread);
+  EXPECT_DOUBLE_EQ(mgr.realized_pnl(kTicker), gross_spread - kTotalPairFees);
+}
+
+TEST_F(OrderManagerTest, FeesOnUnmatchedFillMakeRealizedPnlNegative) {
+  auto rest_client = make_rest_client(std::make_unique<FakeTransport>());
+  kalshi::OrderManager mgr{rest_client};
+
+  mgr.record_fill(make_fill(kOrderId, kTicker, kalshi::Side::Yes, kYesFillPrice,
+                            kFillQty, kTs1Ns, kYesFillFee));
+
+  EXPECT_DOUBLE_EQ(mgr.fees_paid(kTicker), kYesFillFee);
+  EXPECT_DOUBLE_EQ(mgr.realized_pnl(kTicker), -kYesFillFee);
 }
 
 TEST_F(OrderManagerTest, PnlIsolatedPerTicker) {

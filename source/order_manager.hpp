@@ -45,6 +45,7 @@ public:
   [[nodiscard]] virtual Quantity
   net_position(std::string_view ticker) const = 0;
   [[nodiscard]] virtual double realized_pnl(std::string_view ticker) const = 0;
+  [[nodiscard]] virtual double fees_paid(std::string_view ticker) const = 0;
 
   // Mark-to-market PnL of open inventory at the given YES mid price (cents).
   // YES lots mark at yes_mid; NO lots mark at (100 - yes_mid).
@@ -88,6 +89,7 @@ public:
 
   [[nodiscard]] Quantity net_position(std::string_view ticker) const override;
   [[nodiscard]] double realized_pnl(std::string_view ticker) const override;
+  [[nodiscard]] double fees_paid(std::string_view ticker) const override;
   [[nodiscard]] double unrealized_pnl(std::string_view ticker,
                                       int yes_mid_cents) const override;
   [[nodiscard]] double position_cost(std::string_view ticker) const override;
@@ -104,10 +106,13 @@ private:
 
   static std::string fill_key(const Fill &fill);
 
+  [[nodiscard]] double realized_spread(std::string_view ticker) const;
+
   RestClient &rest_client_;
   std::unordered_map<std::string, Order> open_orders_;
   std::unordered_map<std::string, Quantity> net_position_;
-  std::unordered_map<std::string, double> realized_pnl_;
+  std::unordered_map<std::string, double> realized_spread_;
+  std::unordered_map<std::string, double> fees_paid_;
   std::unordered_map<std::string, std::deque<Lot>> yes_lots_;
   std::unordered_map<std::string, std::deque<Lot>> no_lots_;
   std::unordered_set<std::string> seen_fills_;
