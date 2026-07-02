@@ -43,8 +43,7 @@ constexpr std::string_view kAskPriceMid52 =
 constexpr std::string_view kBidPriceMid52Long20 = R"("price":"0.4900")";
 constexpr std::string_view kBidPriceMid52Short20 = R"("price":"0.5100")";
 constexpr std::string_view kBidPriceExtremeClamp = R"("price":"0.0100")";
-constexpr std::string_view kAskPriceExtremeClamp =
-    R"("price":"0.0400")"; // YES=100-96=4
+constexpr std::string_view kAskPriceExtremeClamp = R"("price":"0.5200")";
 // Flow imbalance: default spread 4 → half 2 → bid 50; +2 imbalance → half 3 →
 // bid 49.
 constexpr std::string_view kBidPriceImbalanced = R"("price":"0.4900")";
@@ -436,8 +435,6 @@ TEST_F(QuoterTest, SelfCrossGuardSkipsBidWhenItWouldCrossOwnAsk) {
 }
 
 TEST_F(QuoterTest, AskAlwaysHigherThanBidWithExtremeInventory) {
-  // pos=+1000: inv_skew=50 → bid=0→1 (clamped), ask=4→NO=96.
-  // Verifies ask(4) > bid(1) after clamping at extreme inventory.
   auto transport_ptr = std::make_unique<FakeTransport>();
   FakeTransport &transport = *transport_ptr;
   transport.enqueue(
@@ -470,11 +467,41 @@ TEST_F(QuoterTest, AskAlwaysHigherThanBidWithExtremeInventory) {
   EXPECT_NE(bid_body.find("\"side\":\"bid\""), std::string::npos);
   EXPECT_NE(bid_body.find(std::string(kBidPriceExtremeClamp)),
             std::string::npos);
-  // kExpectedNoAskExtremeClamp = 96 → YES complement = 4 → "0.0400".
   const std::string &ask_body = transport.recorded_requests().at(1).body;
   EXPECT_NE(ask_body.find("\"side\":\"ask\""), std::string::npos);
   EXPECT_NE(ask_body.find(std::string(kAskPriceExtremeClamp)),
             std::string::npos);
+}
+
+TEST_F(QuoterTest, BidClampedToStayPassiveBelowMarketAsk) {
+  auto transport_ptr = std::make_unique<FakeTransport>();
+  FakeTransport &transport = *transport_ptr;
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId1, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId2, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  kalshi::RestClient rest{kalshi::Auth{kApiKey, kPemPrivateKey},
+                          std::move(transport_ptr), kBaseUrl};
+  kalshi::OrderManager order_mgr{rest};
+  record_position_fill(order_mgr, kOrderId1, kalshi::Side::No,
+                       kExtremeLongPosition);
+
+  constexpr int kWidestBandMin = 1;
+  constexpr int kWidestBandMax = 99;
+  kalshi::RiskLimits limits;
+  limits.min_quote_price_cents = kWidestBandMin;
+  limits.max_quote_price_cents = kWidestBandMax;
+  kalshi::RiskManager risk_mgr{limits};
+  kalshi::Quoter quoter{kalshi::QuoterConfig{}, order_mgr, risk_mgr};
+  quoter.update(kTicker, make_ob(kYesBid52, kNoBid52));
+
+  ASSERT_FALSE(transport.recorded_requests().empty());
+  const std::string &bid_body = transport.recorded_requests().at(0).body;
+  EXPECT_NE(bid_body.find("\"side\":\"bid\""), std::string::npos);
+  EXPECT_NE(bid_body.find(R"("price":"0.5200")"), std::string::npos);
+  EXPECT_EQ(bid_body.find(R"("price":"0.9800")"), std::string::npos);
 }
 
 TEST_F(QuoterTest, ImbalancedFlowWidensSpread) {
