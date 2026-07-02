@@ -32,8 +32,8 @@ public:
 // Production HTTP transport backed by cpp-httplib with OpenSSL HTTPS support.
 class HttpTransport : public IHttpTransport {
 public:
-  HttpTransport() = default;
-  ~HttpTransport() override = default;
+  HttpTransport();
+  ~HttpTransport() override;
 
   HttpTransport(const HttpTransport &) = delete;
   HttpTransport &operator=(const HttpTransport &) = delete;
@@ -51,6 +51,10 @@ public:
   [[nodiscard]] HttpResponse
   delete_(std::string_view url,
           const std::map<std::string, std::string> &headers) override;
+
+private:
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
 };
 
 } // namespace kalshi
