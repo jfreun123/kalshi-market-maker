@@ -30,6 +30,12 @@ On a fresh clone, install the hook once: `bash scripts/install-hooks.sh`
 
 Only suppress a clang-tidy warning (`// NOLINT(check-name)`) when you have a specific, documented reason it doesn't apply. "It's test code" is not a reason.
 
+## Comments
+
+**No comments, with one exception: a single header-doc comment at the very top of a `.hpp` file** describing what that header provides. Nowhere else — no inline comments, no comments above functions/classes/members, no explanatory comments in `.cpp` files, no comments in tests. Code must read clearly on its own: descriptive names, small functions, named `constexpr` constants instead of a comment explaining a literal. If code seems to need a comment to be understood, restructure or rename until it doesn't.
+
+`// NOLINT(...)` suppressions and `#pragma` directives are not comments in this sense and remain allowed where justified.
+
 ## Secrets — Never Commit
 
 **NEVER write secrets to git or GitHub under any circumstances.** This includes:
