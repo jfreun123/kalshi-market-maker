@@ -1,9 +1,15 @@
 #include "http_transport.hpp"
 
+#include "logger.hpp"
+
 #include <httplib.h>
 
+#include <chrono>
+#include <map>
+#include <mutex>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 namespace kalshi {
 
@@ -39,7 +45,6 @@ SplitUrl split_url(std::string_view url_view) {
   return {url.substr(0, path_start), url.substr(path_start)};
 }
 
-// Performs a request via a pre-configured httplib::Client and returns response.
 HttpResponse make_response(const httplib::Result &result) {
   if (!result) {
     throw std::runtime_error("HTTP request failed: " +
@@ -48,30 +53,57 @@ HttpResponse make_response(const httplib::Result &result) {
   return {result->status, result->body};
 }
 
-} // namespace
-
-namespace {
-
 constexpr int kConnectTimeoutSec = 10;
 constexpr int kReadTimeoutSec = 30;
 
-httplib::Client make_client(const std::string &base) {
-  httplib::Client client{base};
+void configure(httplib::Client &client) {
   client.set_follow_location(true);
   client.set_connection_timeout(kConnectTimeoutSec, 0);
   client.set_read_timeout(kReadTimeoutSec, 0);
-  return client;
+  client.set_keep_alive(true);
+}
+
+template <typename PerformFn>
+HttpResponse timed(std::string_view method, const std::string &path,
+                   PerformFn &&perform) {
+  const auto start = std::chrono::steady_clock::now();
+  httplib::Result result = std::forward<PerformFn>(perform)();
+  const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                              std::chrono::steady_clock::now() - start)
+                              .count();
+  const int status = result ? result->status : -1;
+  get_logger()->debug("http {} {} status={} rtt={}ms", method, path, status,
+                      elapsed_ms);
+  return make_response(result);
 }
 
 } // namespace
+
+struct HttpTransport::Impl {
+  std::mutex mutex;
+  std::map<std::string, httplib::Client> clients;
+
+  httplib::Client &client_for(const std::string &base) {
+    auto iter = clients.find(base);
+    if (iter == clients.end()) {
+      iter = clients.try_emplace(base, base).first;
+      configure(iter->second);
+    }
+    return iter->second;
+  }
+};
+
+HttpTransport::HttpTransport() : impl_{std::make_unique<Impl>()} {}
+HttpTransport::~HttpTransport() = default;
 
 HttpResponse
 HttpTransport::get(std::string_view url,
                    const std::map<std::string, std::string> &headers) {
   auto [base, path] = split_url(url);
-  auto client = make_client(base);
   auto httplib_headers = to_httplib_headers(headers);
-  return make_response(client.Get(path, httplib_headers));
+  const std::lock_guard<std::mutex> lock{impl_->mutex};
+  httplib::Client &client = impl_->client_for(base);
+  return timed("GET", path, [&] { return client.Get(path, httplib_headers); });
 }
 
 HttpResponse
@@ -79,19 +111,24 @@ HttpTransport::post(std::string_view url,
                     const std::map<std::string, std::string> &headers,
                     std::string_view body) {
   auto [base, path] = split_url(url);
-  auto client = make_client(base);
   auto httplib_headers = to_httplib_headers(headers);
-  return make_response(client.Post(path, httplib_headers, std::string(body),
-                                   "application/json"));
+  const std::lock_guard<std::mutex> lock{impl_->mutex};
+  httplib::Client &client = impl_->client_for(base);
+  return timed("POST", path, [&] {
+    return client.Post(path, httplib_headers, std::string(body),
+                       "application/json");
+  });
 }
 
 HttpResponse
 HttpTransport::delete_(std::string_view url,
                        const std::map<std::string, std::string> &headers) {
   auto [base, path] = split_url(url);
-  auto client = make_client(base);
   auto httplib_headers = to_httplib_headers(headers);
-  return make_response(client.Delete(path, httplib_headers));
+  const std::lock_guard<std::mutex> lock{impl_->mutex};
+  httplib::Client &client = impl_->client_for(base);
+  return timed("DELETE", path,
+               [&] { return client.Delete(path, httplib_headers); });
 }
 
 } // namespace kalshi
