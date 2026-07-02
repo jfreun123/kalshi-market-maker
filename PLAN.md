@@ -9,20 +9,20 @@
 
 ### P0 — Correctness & safety (do these first)
 
-- [ ] **1. Orderbook deltas are applied wrong — the book corrupts on every
+- [x] **1. Orderbook deltas are applied wrong — the book corrupts on every
   update.** `orderbook_delta.delta_fp` is an *increment* to the resting size at
-  a price level, but `LocalOrderbook::apply_delta` treats it as the *absolute*
+  a price level, but `LocalOrderbook::apply_delta` treated it as the *absolute*
   new quantity (`existing->quantity = new_quantity`, not `+=`). Confirmed from
   captured frames: deltas are signed (`-0.16`, `-1.47`, `680.27`). Two failure
-  modes today: a shrink like `-1.47` rounds to `-1` and *sets* the level
-  negative; a small shrink like `-0.16` rounds to `0` and our zero-branch
-  **erases the whole level**. Also the exchange uses *fractional* contract
-  counts and `parse_fp_count` rounds to `int`, so sub-unit changes vanish.
-  Fix: apply as `quantity += delta`, remove a level only when it reaches ≤ 0,
-  and carry fractional size (ties to the quantity-type work, R3). Tests:
-  snapshot + a stream of incremental deltas, assert the book matches the
-  exchange. **Top priority — every quote is computed against this book, so it
-  silently re-corrupts within seconds even after the snapshot-sort fix.**
+  modes: a shrink like `-1.47` rounded to `-1` and *set* the level negative; a
+  small shrink like `-0.16` rounded to `0` and the zero-branch **erased the
+  whole level**. Fixed: `apply_delta` now applies `quantity += delta` and
+  removes a level only when it reaches ≤ 0; a negative delta on a missing level
+  is ignored. Regression tests cover increment/decrement, accumulation across a
+  delta stream, and removal at zero and negative. **Remaining (folded into R3,
+  item 8): the exchange uses *fractional* contract counts and `parse_fp_count`
+  still rounds to `int`, so sub-unit deltas (e.g. `-0.16`) round to 0 and are
+  dropped — a slow drift, no longer catastrophic corruption.**
 
 - [ ] **2. `ensure()` fail-fast invariant primitive.** Flatten all orders, then
   crash, on a broken invariant. Safety-critical and explicitly requested. Full

@@ -7,12 +7,8 @@ namespace kalshi {
 
 namespace {
 
-// Finds the iterator to the level at price_cents in a descending-sorted vector.
-// Returns end() if not found.
-auto find_level(std::vector<Level> &levels,
-                int price_cents) -> std::vector<Level>::iterator {
-  // lower_bound with descending comparator finds first element where
-  // price_cents >= element, i.e. the position of price_cents.
+auto find_level(std::vector<Level> &levels, int price_cents)
+    -> std::vector<Level>::iterator {
   auto level_pos =
       std::lower_bound(levels.begin(), levels.end(), Level{price_cents, 0},
                        [](const Level &level, const Level &target) {
@@ -24,10 +20,8 @@ auto find_level(std::vector<Level> &levels,
   return levels.end();
 }
 
-// Returns insertion point for price_cents in a descending-sorted vector
-// (or the position of an existing level with that price).
-auto insertion_point(std::vector<Level> &levels,
-                     int price_cents) -> std::vector<Level>::iterator {
+auto insertion_point(std::vector<Level> &levels, int price_cents)
+    -> std::vector<Level>::iterator {
   return std::lower_bound(levels.begin(), levels.end(), Level{price_cents, 0},
                           [](const Level &level, const Level &target) {
                             return level.price_cents > target.price_cents;
@@ -38,9 +32,6 @@ auto insertion_point(std::vector<Level> &levels,
 
 void LocalOrderbook::apply_snapshot(const Orderbook &snap) {
   state_ = snap;
-  // The exchange sends levels in ascending price order, but best_bid/best_ask
-  // and the delta search/insert all rely on descending order (best at front).
-  // Sort on ingest so that invariant holds regardless of wire order.
   const auto by_price_descending = [](const Level &left, const Level &right) {
     return left.price_cents > right.price_cents;
   };
@@ -48,22 +39,21 @@ void LocalOrderbook::apply_snapshot(const Orderbook &snap) {
   std::sort(state_.no.begin(), state_.no.end(), by_price_descending);
 }
 
-void LocalOrderbook::apply_delta(Side side, int price_cents, int new_quantity) {
+void LocalOrderbook::apply_delta(Side side, int price_cents, int delta) {
   auto &levels = (side == Side::Yes) ? state_.yes : state_.no;
   auto existing = find_level(levels, price_cents);
 
-  if (new_quantity == 0) {
-    if (existing != levels.end()) {
+  if (existing != levels.end()) {
+    existing->quantity += delta;
+    if (existing->quantity <= 0) {
       levels.erase(existing);
     }
     return;
   }
 
-  if (existing != levels.end()) {
-    existing->quantity = new_quantity;
-  } else {
+  if (delta > 0) {
     auto insert_pos = insertion_point(levels, price_cents);
-    levels.insert(insert_pos, {price_cents, new_quantity});
+    levels.insert(insert_pos, {price_cents, delta});
   }
 }
 
