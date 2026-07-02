@@ -490,6 +490,15 @@ int main(int argc, char *argv[]) {
       persist_pnl(pnl_path, pnl, log);
     });
 
+    if (paper_ptr == nullptr) {
+      try {
+        session.cancel_preexisting_orders(rest.get_open_orders());
+      } catch (const std::exception &ex) {
+        log->warn("startup: could not fetch/cancel pre-existing orders: {}",
+                  ex.what());
+      }
+    }
+
     for (const auto &ticker : app_config.target_tickers) {
       // Contain per-ticker startup failures (closed/invalid market, transient
       // REST error): skip that ticker rather than aborting the whole session.

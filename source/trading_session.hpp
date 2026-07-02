@@ -52,6 +52,8 @@ public:
   // throws — safe to call from shutdown / error paths.
   void cancel_all_quotes();
 
+  void cancel_preexisting_orders(const std::vector<Order> &resting_orders);
+
   // Safety net: if risk is halted, cancel all resting quotes so a halt can't
   // leave orders on the book to fill adversely. Idempotent and cheap once flat;
   // call it once per loop iteration.
