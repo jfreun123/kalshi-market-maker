@@ -67,7 +67,19 @@
   PortfolioManagement/ Networking/ Common/`.
 - [ ] **11. R4 — Constraints-vs-Guards framework.**
 - [ ] **12. R5 — `KalshiSession` + a `Session` concept** (multi-exchange).
-- [ ] **13. R7 — `docs/kalshi-messages.md` + rate-limiting review.**
+- [ ] **13. Process-per-exchange isolation.** Today the whole system is a
+  **single process, two threads** (WS feed + 100ms poll loop) with **one global
+  `engine_mtx`** serializing all state; all markets share one WebSocket
+  connection and are distinguished only by a ticker key into per-ticker maps.
+  There is no cross-market parallelism and no failure isolation — a stall on one
+  market (or one exchange) blocks everything. **Target: each exchange (Kalshi,
+  Polymarket, …) runs as its own OS process** — independent connection, event
+  loop, order state, rate-limit budget, and crash/restart domain, able to use a
+  separate core. Pairs with R5 (the `Session` abstraction is the in-process
+  seam; this is the runtime/deployment boundary). Open design questions:
+  shared vs. per-process risk/PnL ledger, cross-exchange netting, and how a
+  supervisor starts/monitors/flattens each process.
+- [ ] **14. R7 — `docs/kalshi-messages.md` + rate-limiting review.**
 
 ### Done (recent sessions, committed)
 
@@ -90,6 +102,44 @@
   making markets); **quoter resync on flatten** (re-quotes after halt/disconnect);
   **seed order-error containment** (one bad market can't crash startup); **paper
   mode against the V2 API**. See *Demo Run Findings*.
+
+### North-star architecture (long-horizon — not yet prioritized)
+
+Where this is headed once there is more than one strategy and more than one
+exchange. Deliberately *way* out; captured so the near-term refactors (R1, R5,
+item 13) don't paint us into a corner.
+
+- **Process-per-strategy/exchange for crash protection.** Generalize item 13:
+  each strategy instance (and each exchange it trades) runs as its own OS
+  process with its own connection, event loop, and order state. A **supervisor**
+  starts, health-checks, and restarts them, and **flattens a process's book if
+  it dies** so a crash is contained instead of taking down the whole system or
+  leaking live orders. Independent failure/restart domains; free use of multiple
+  cores.
+- **Central risk / portfolio aggregation layer.** A process above the strategy
+  fleet that each strategy reports positions, fills, and PnL to. It maintains the
+  **aggregate** position / exposure / PnL across all strategies and exchanges,
+  enforces **global** risk limits (not just per-strategy), does cross-strategy
+  and cross-exchange **netting**, and can issue a **global kill / flatten-all**.
+  Individual strategies keep their own local guards; this layer is the
+  firm-level backstop and the single source of truth for "what do we actually
+  hold and what are we risking right now."
+- **Aggregated pricing inputs (fed back to each exchange/strategy).** The same
+  layer that sees every venue is also the natural place to *produce* consolidated
+  market-data signals and push them back down to each strategy's pricing. The
+  motivating example: the same (or economically equivalent) contract trades on
+  Kalshi, Polymarket, and others, so compute a **consolidated BBO across all
+  prediction markets** — the true best bid/offer and a blended fair value over
+  every venue — and feed it in as a pricing input (external view / fair-value
+  anchor) so each exchange quotes against the whole market, not just its own
+  local book. Extends the existing `external_prob` / view-based-model hook from a
+  single-market signal to a cross-venue one. Requires a contract-equivalence map
+  (which tickers across venues are the same underlying) and careful handling of
+  fees, settlement rules, and staleness per venue before treating two books as
+  comparable.
+- Open questions: transport between processes (shared memory / IPC / a message
+  bus), whether the risk layer is advisory or has hard veto over order
+  submission, and how netting interacts with per-exchange margin/settlement.
 
 ---
 

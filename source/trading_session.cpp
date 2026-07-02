@@ -167,12 +167,14 @@ void TradingSession::log_status() const {
   for (const auto &ticker : tickers_) {
     const Quantity pos = order_mgr_.net_position(ticker);
     const double session_pnl = order_mgr_.realized_pnl(ticker);
+    const double fees = order_mgr_.fees_paid(ticker);
     const double prior = prior_pnl_for(prior_pnl_, ticker);
     log->info("status ticker={} net_pos={} session_pnl_dollars={:.2f} "
-              "total_pnl_dollars={:.2f} halted={} constraints={}",
+              "fees_dollars={:.2f} total_pnl_dollars={:.2f} halted={} "
+              "constraints={}",
               ticker, pos.to_fp_string(), session_pnl / kCentsPerDollar,
-              (prior + session_pnl) / kCentsPerDollar, risk_mgr_.is_halted(),
-              risk_mgr_.active_constraints());
+              fees / kCentsPerDollar, (prior + session_pnl) / kCentsPerDollar,
+              risk_mgr_.is_halted(), risk_mgr_.active_constraints());
 
     // E_win decomposition: locked spread capture vs. the directional bet.
     const auto exposure = order_mgr_.exposure_decomposition(ticker);
