@@ -15,7 +15,12 @@ struct FairValueInput {
 // Strategy interface: all pricing models implement this.
 class IPricingModel {
 public:
+  IPricingModel() = default;
   virtual ~IPricingModel() = default;
+  IPricingModel(const IPricingModel &) = delete;
+  IPricingModel &operator=(const IPricingModel &) = delete;
+  IPricingModel(IPricingModel &&) = delete;
+  IPricingModel &operator=(IPricingModel &&) = delete;
   [[nodiscard]] virtual double estimate(const FairValueInput &input) const = 0;
 };
 

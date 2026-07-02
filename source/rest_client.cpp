@@ -333,10 +333,9 @@ Order RestClient::place_order(std::string_view ticker, Side side,
 
   // V2 uses a single-book model: "bid" = buy YES, "ask" = sell YES (= buy NO).
   // All prices are in the YES dimension.
-  constexpr int kMaxPriceCents = 100;
   const std::string v2_side = (side == Side::Yes) ? "bid" : "ask";
   const int yes_price_cents =
-      (side == Side::Yes) ? price_cents : (kMaxPriceCents - price_cents);
+      (side == Side::Yes) ? price_cents : (kPriceBasis - price_cents);
   const std::string v2_tif = (type == OrderType::Market) ? "immediate_or_cancel"
                                                          : "good_till_canceled";
 

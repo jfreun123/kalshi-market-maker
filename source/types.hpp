@@ -1,6 +1,7 @@
 #pragma once
 
 #include <chrono>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -8,9 +9,9 @@ namespace kalshi {
 
 // ---- Enums ----
 
-enum class Side { Yes, No };
-enum class OrderStatus { Open, PartiallyFilled, Filled, Cancelled };
-enum class OrderType { Limit, Market };
+enum class Side : std::uint8_t { Yes, No };
+enum class OrderStatus : std::uint8_t { Open, PartiallyFilled, Filled, Cancelled };
+enum class OrderType : std::uint8_t { Limit, Market };
 
 // ---- Orderbook types ----
 
@@ -90,14 +91,18 @@ struct MarketPosition {
 
 // ---- Price helpers ----
 
+constexpr int kMinPriceCents = 1;
+constexpr int kMaxPriceCents = 99;
+constexpr int kPriceBasis = 100;
+
 // Kalshi prices are integers in [1, 99] representing cents (= probability %).
 [[nodiscard]] inline bool is_valid_price(int price_cents) {
-  return price_cents >= 1 && price_cents <= 99;
+  return price_cents >= kMinPriceCents && price_cents <= kMaxPriceCents;
 }
 
 // YES price + NO price = 100 (ignoring spread).
 [[nodiscard]] inline int complement_price(int price_cents) {
-  return 100 - price_cents;
+  return kPriceBasis - price_cents;
 }
 
 } // namespace kalshi
