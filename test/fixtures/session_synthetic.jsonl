@@ -2,5 +2,5 @@
 {"type":"orderbook_delta","msg":{"market_ticker":"REPLAY-TICK","side":"yes","price_dollars":"0.5200","delta_fp":"50.00"}}
 {"type":"orderbook_delta","msg":{"market_ticker":"REPLAY-TICK","side":"no","price_dollars":"0.4400","delta_fp":"75.00"}}
 {"type":"orderbook_delta","msg":{"market_ticker":"REPLAY-TICK","side":"yes","price_dollars":"0.5000","delta_fp":"0.00"}}
-{"type":"fill","msg":{"order_id":"ord-replay-001","market_ticker":"REPLAY-TICK","side":"yes","yes_price_dollars":"0.5100","count_fp":"5.00","ts_ms":1735725600000,"is_taker":false}}
-{"type":"fill","msg":{"order_id":"ord-replay-002","market_ticker":"REPLAY-TICK","side":"no","yes_price_dollars":"0.4800","count_fp":"3.00","ts_ms":1735725601000,"is_taker":false}}
+{"type":"fill","msg":{"order_id":"ord-replay-001","market_ticker":"REPLAY-TICK","outcome_side":"yes","yes_price_dollars":"0.5100","count_fp":"5.00","ts_ms":1735725600000,"is_taker":false}}
+{"type":"fill","msg":{"order_id":"ord-replay-002","market_ticker":"REPLAY-TICK","outcome_side":"no","yes_price_dollars":"0.4800","count_fp":"3.00","ts_ms":1735725601000,"is_taker":false}}

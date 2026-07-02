@@ -162,12 +162,13 @@ Orderbook parse_snapshot(const nlohmann::json &msg) {
   Orderbook book;
   book.ticker = msg.at("market_ticker").get<std::string>();
 
-  for (const auto &entry : msg.at("yes_dollars_fp")) {
+  static const nlohmann::json kEmptyArray = nlohmann::json::array();
+  for (const auto &entry : msg.value("yes_dollars_fp", kEmptyArray)) {
     const int price = dollars_to_cents(entry.at(0).get<std::string>());
     const int qty = parse_fp_count(entry.at(1).get<std::string>());
     book.yes.push_back({price, qty});
   }
-  for (const auto &entry : msg.at("no_dollars_fp")) {
+  for (const auto &entry : msg.value("no_dollars_fp", kEmptyArray)) {
     const int price = dollars_to_cents(entry.at(0).get<std::string>());
     const int qty = parse_fp_count(entry.at(1).get<std::string>());
     book.no.push_back({price, qty});
@@ -228,6 +229,7 @@ void WebSocketClient::send_subscribe(const std::string &ticker) {
   msg["cmd"] = "subscribe";
   msg["params"]["channels"] = {"orderbook_delta"};
   msg["params"]["market_tickers"] = {ticker};
+  msg["params"]["use_yes_price"] = true;
   ws_->send(msg.dump());
 }
 
@@ -297,7 +299,7 @@ void dispatch_fill(const WebSocketClient::FillCallback &callback,
     Fill fill;
     fill.order_id = msg_body.at("order_id").get<std::string>();
     fill.market_ticker = msg_body.at("market_ticker").get<std::string>();
-    fill.side = parse_side(msg_body.at("side").get<std::string>());
+    fill.side = parse_side(msg_body.at("outcome_side").get<std::string>());
     fill.price_cents =
         dollars_to_cents(msg_body.at("yes_price_dollars").get<std::string>());
     fill.quantity = parse_fp_count(msg_body.at("count_fp").get<std::string>());

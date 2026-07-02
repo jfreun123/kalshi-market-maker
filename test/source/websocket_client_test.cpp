@@ -121,7 +121,7 @@ std::string fill_message(const std::string &order_id, const std::string &ticker,
   msg["type"] = "fill";
   msg["msg"]["order_id"] = order_id;
   msg["msg"]["market_ticker"] = ticker;
-  msg["msg"]["side"] = side;
+  msg["msg"]["outcome_side"] = side;
   msg["msg"]["yes_price_dollars"] = cents_to_dollars(price);
   msg["msg"]["count_fp"] = format_count(count);
   msg["msg"]["ts_ms"] = kFillTsMs;

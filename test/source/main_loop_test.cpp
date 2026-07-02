@@ -108,7 +108,7 @@ std::string fill_msg(const std::string &order_id, const std::string &ticker,
   msg["type"] = "fill";
   msg["msg"]["order_id"] = order_id;
   msg["msg"]["market_ticker"] = ticker;
-  msg["msg"]["side"] = side;
+  msg["msg"]["outcome_side"] = side;
   msg["msg"]["yes_price_dollars"] =
       std::format("{:.4f}", price / kCentsPerDollar);
   msg["msg"]["count_fp"] = std::format("{:.2f}", static_cast<double>(count));
@@ -121,7 +121,7 @@ std::string fill_msg(const std::string &order_id, const std::string &ticker,
 // order.
 std::string order_json(const std::string &order_id, int qty) {
   return R"({"order_id":")" + order_id +
-         R"(","fill_count":"0.00","remaining_count":")" + std::to_string(qty) +
+         R"(","fill_count_fp":"0.00","remaining_count":")" + std::to_string(qty) +
          R"(.00","ts_ms":1718000000000})";
 }
 
