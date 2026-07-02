@@ -126,7 +126,8 @@ kalshi::Fill make_fill(const std::string &order_id, const std::string &ticker,
   fill.price_cents = price_cents;
   fill.quantity = quantity;
   fill.timestamp = std::chrono::system_clock::time_point{
-      std::chrono::nanoseconds{timestamp_ns}};
+      std::chrono::duration_cast<std::chrono::system_clock::duration>(
+          std::chrono::nanoseconds{timestamp_ns})};
   return fill;
 }
 // NOLINTEND(bugprone-easily-swappable-parameters)

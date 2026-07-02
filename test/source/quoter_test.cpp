@@ -122,8 +122,9 @@ void record_position_fill(kalshi::OrderManager &order_mgr,
   fill.side = side;
   fill.price_cents = kFillPrice;
   fill.quantity = quantity;
-  fill.timestamp =
-      std::chrono::system_clock::time_point{std::chrono::nanoseconds{kTs1Ns}};
+  fill.timestamp = std::chrono::system_clock::time_point{
+      std::chrono::duration_cast<std::chrono::system_clock::duration>(
+          std::chrono::nanoseconds{kTs1Ns})};
   order_mgr.record_fill(fill);
 }
 
