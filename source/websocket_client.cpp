@@ -23,6 +23,7 @@ struct IxWebSocket::Impl {
   MessageHandler on_message_cb;
   ConnectHandler on_connect_cb;
   DisconnectHandler on_disconnect_cb;
+  HeartbeatHandler on_heartbeat_cb;
   std::mutex run_mtx;
   std::condition_variable run_cv;
   bool done{false};
@@ -32,6 +33,9 @@ IxWebSocket::IxWebSocket() : impl_{std::make_unique<Impl>()} {
   // Let WebSocketClient handle reconnect logic; IxWebSocket's internal
   // auto-reconnect would reuse stale auth timestamps.
   impl_->ws.disableAutomaticReconnection();
+
+  constexpr int kIdlePingIntervalSeconds = 10;
+  impl_->ws.setPingInterval(kIdlePingIntervalSeconds);
 
   impl_->ws.setOnMessageCallback([this](const ix::WebSocketMessagePtr &msg) {
     switch (msg->type) {
@@ -66,6 +70,12 @@ IxWebSocket::IxWebSocket() : impl_{std::make_unique<Impl>()} {
         impl_->on_message_cb(msg->str);
       }
       break;
+    case ix::WebSocketMessageType::Ping:
+    case ix::WebSocketMessageType::Pong:
+      if (impl_->on_heartbeat_cb) {
+        impl_->on_heartbeat_cb();
+      }
+      break;
     default:
       break;
     }
@@ -94,6 +104,10 @@ void IxWebSocket::on_connect(ConnectHandler handler) {
 
 void IxWebSocket::on_disconnect(DisconnectHandler handler) {
   impl_->on_disconnect_cb = std::move(handler);
+}
+
+void IxWebSocket::on_heartbeat(HeartbeatHandler handler) {
+  impl_->on_heartbeat_cb = std::move(handler);
 }
 
 void IxWebSocket::run() {
@@ -320,6 +334,10 @@ void dispatch_fill(const WebSocketClient::FillCallback &callback,
 
 } // namespace
 
+void WebSocketClient::handle_heartbeat() {
+  last_message_time_.store(std::chrono::steady_clock::now());
+}
+
 void WebSocketClient::handle_message(const std::string &raw) {
   last_message_time_.store(std::chrono::steady_clock::now());
   nlohmann::json parsed;
@@ -356,6 +374,7 @@ void WebSocketClient::run() {
 
   ws_->on_connect([this]() { handle_connect(); });
   ws_->on_message([this](const std::string &raw) { handle_message(raw); });
+  ws_->on_heartbeat([this]() { handle_heartbeat(); });
   ws_->on_disconnect([this]() {
     get_logger()->warn("websocket disconnected url={}", ws_url_);
     if (disconnect_callback_) {

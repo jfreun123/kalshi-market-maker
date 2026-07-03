@@ -24,6 +24,7 @@ public:
   using MessageHandler = std::function<void(const std::string &)>;
   using ConnectHandler = std::function<void()>;
   using DisconnectHandler = std::function<void()>;
+  using HeartbeatHandler = std::function<void()>;
 
   virtual ~IWebSocket() = default;
 
@@ -38,6 +39,7 @@ public:
   virtual void on_message(MessageHandler handler) = 0;
   virtual void on_connect(ConnectHandler handler) = 0;
   virtual void on_disconnect(DisconnectHandler handler) = 0;
+  virtual void on_heartbeat(HeartbeatHandler handler) = 0;
 
   // Block until the connection closes or stop() is called.
   virtual void run() = 0;
@@ -64,6 +66,7 @@ public:
   void on_message(MessageHandler handler) override;
   void on_connect(ConnectHandler handler) override;
   void on_disconnect(DisconnectHandler handler) override;
+  void on_heartbeat(HeartbeatHandler handler) override;
   void run() override;
   void stop() override;
 
@@ -117,6 +120,7 @@ private:
   void send_subscribe_fills();
   void handle_connect();
   void handle_message(const std::string &raw);
+  void handle_heartbeat();
 
   [[nodiscard]] std::map<std::string, std::string> auth_headers() const;
 

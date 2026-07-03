@@ -28,6 +28,9 @@ public:
   // Cause the on_disconnect handler to fire at the end of the next run().
   void trigger_disconnect() { fire_disconnect_ = true; }
 
+  // Cause the on_heartbeat handler to fire at the start of the next run().
+  void trigger_heartbeat() { fire_heartbeat_ = true; }
+
   // Inspection
   [[nodiscard]] int connect_count() const { return connect_count_; }
   [[nodiscard]] const std::string &connected_url() const {
@@ -66,9 +69,19 @@ public:
     disconnect_handler_ = std::move(handler);
   }
 
+  void on_heartbeat(HeartbeatHandler handler) override {
+    heartbeat_handler_ = std::move(handler);
+  }
+
   void run() override {
     if (connect_handler_) {
       connect_handler_();
+    }
+    if (fire_heartbeat_) {
+      fire_heartbeat_ = false;
+      if (heartbeat_handler_) {
+        heartbeat_handler_();
+      }
     }
     for (const auto &msg : messages_) {
       if (msg_handler_) {
@@ -95,11 +108,13 @@ private:
   std::map<std::string, std::string> connected_headers_;
   int connect_count_{0};
   bool fire_disconnect_{false};
+  bool fire_heartbeat_{false};
   bool stopped_{false};
 
   MessageHandler msg_handler_;
   ConnectHandler connect_handler_;
   DisconnectHandler disconnect_handler_;
+  HeartbeatHandler heartbeat_handler_;
 };
 
 } // namespace kalshi

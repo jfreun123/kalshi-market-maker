@@ -39,6 +39,10 @@ void CapturingWebSocket::on_disconnect(DisconnectHandler handler) {
   inner_->on_disconnect(std::move(handler));
 }
 
+void CapturingWebSocket::on_heartbeat(HeartbeatHandler handler) {
+  inner_->on_heartbeat(std::move(handler));
+}
+
 void CapturingWebSocket::run() { inner_->run(); }
 
 void CapturingWebSocket::stop() { inner_->stop(); }

@@ -586,3 +586,18 @@ TEST_F(WebSocketClientTest, LastMessageTimeUpdatesOnMessage) {
   EXPECT_GE(last, before);
   EXPECT_LE(last, after);
 }
+
+TEST_F(WebSocketClientTest, HeartbeatRefreshesLastMessageTimeWithoutMessages) {
+  auto fake_ws = std::make_unique<kalshi::FakeWebSocket>();
+  kalshi::FakeWebSocket *ws_raw = fake_ws.get();
+  ws_raw->trigger_heartbeat();
+
+  auto client = make_client(std::move(fake_ws));
+  const auto before = std::chrono::steady_clock::now();
+  client.run();
+  const auto after = std::chrono::steady_clock::now();
+
+  const auto last = client.last_message_time();
+  EXPECT_GE(last, before);
+  EXPECT_LE(last, after);
+}
