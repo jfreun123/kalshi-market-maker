@@ -66,6 +66,9 @@ void TradingSession::on_delta(const std::string &ticker, Side side,
 
 void TradingSession::on_fill(const Fill &fill) {
   order_mgr_.record_fill(fill);
+  if (!order_mgr_.open_orders().contains(fill.order_id)) {
+    quoter_.forget_order(fill.market_ticker, fill.order_id);
+  }
   risk_mgr_.update(order_mgr_, tickers_);
   if (flow_guard_ != nullptr) {
     flow_guard_->record_fill(fill.market_ticker, fill.side, fill.quantity,

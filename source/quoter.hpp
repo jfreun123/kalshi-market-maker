@@ -66,6 +66,11 @@ public:
   // and never re-quote once the feed recovers.
   void reset_quotes();
 
+  // Forget a single tracked quote whose order left the book (e.g. it fully
+  // filled). Without this the quoter believes the side is still quoted and
+  // never re-places it — the side goes dark after its first complete fill.
+  void forget_order(std::string_view ticker, std::string_view order_id);
+
 private:
   struct LiveQuote {
     std::string bid_order_id;
@@ -82,6 +87,7 @@ private:
 
   void refresh_bid(const std::string &ticker, int desired_bid);
   void refresh_ask(const std::string &ticker, int desired_ask);
+  [[nodiscard]] bool release_order(const std::string &order_id);
 
   QuoterConfig config_;
   FairValueEngine fv_engine_;

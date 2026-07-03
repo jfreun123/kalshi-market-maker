@@ -81,7 +81,7 @@ void Quoter::refresh_bid(const std::string &ticker, int desired_bid) {
     live.current_bid_cents = desired_bid;
   } else if (std::abs(live.current_bid_cents - desired_bid) >
              config_.reprice_threshold_cents) {
-    if (!order_mgr_.cancel(live.bid_order_id)) {
+    if (!release_order(live.bid_order_id)) {
       return;
     }
     live.bid_order_id.clear();
@@ -118,7 +118,7 @@ void Quoter::refresh_ask(const std::string &ticker, int desired_ask) {
     live.current_ask_cents = desired_ask;
   } else if (std::abs(live.current_ask_cents - desired_ask) >
              config_.reprice_threshold_cents) {
-    if (!order_mgr_.cancel(live.ask_order_id)) {
+    if (!release_order(live.ask_order_id)) {
       return;
     }
     live.ask_order_id.clear();
@@ -200,5 +200,37 @@ void Quoter::update(std::string_view ticker, const LocalOrderbook &book) {
 }
 
 void Quoter::reset_quotes() { live_quotes_.clear(); }
+
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters) - ticker vs order id
+void Quoter::forget_order(std::string_view ticker, std::string_view order_id) {
+  auto live_it = live_quotes_.find(std::string{ticker});
+  if (live_it == live_quotes_.end()) {
+    return;
+  }
+  if (live_it->second.bid_order_id == order_id) {
+    live_it->second.bid_order_id.clear();
+  }
+  if (live_it->second.ask_order_id == order_id) {
+    live_it->second.ask_order_id.clear();
+  }
+}
+
+bool Quoter::release_order(const std::string &order_id) {
+  if (order_mgr_.cancel(order_id)) {
+    return true;
+  }
+  // The exchange rejected the cancel. If the order manager no longer tracks
+  // the order it was already filled or cancelled out-of-band — safe to forget
+  // and re-quote. If it is still tracked the rejection is transient (e.g. a
+  // 429); keep the quote state untouched and retry on a later update.
+  if (!order_mgr_.open_orders().contains(order_id)) {
+    get_logger()->warn(
+        "cancel rejected for order_id={} which is no longer tracked — "
+        "forgetting stale quote",
+        order_id);
+    return true;
+  }
+  return false;
+}
 
 } // namespace kalshi

@@ -232,6 +232,49 @@ TEST_F(TradingSessionTest, CancelPreexistingOrdersNoOpWhenNoneResting) {
   EXPECT_EQ(count_method(transport_, "DELETE"), 0);
 }
 
+TEST_F(TradingSessionTest, FullyFilledQuoteSideRequotesOnNextDelta) {
+  // A complete fill removes the resting order from the exchange. The quoter
+  // must forget its id and re-place that side — not sit dark believing a quote
+  // is still live (the phantom-quote livelock).
+  transport_.enqueue({kHttpOk, order_json(kOrderId1, kDefaultQuoteSize)});
+  transport_.enqueue({kHttpOk, order_json(kOrderId2, kDefaultQuoteSize)});
+  session_.on_snapshot(make_orderbook(kTicker, kYesBid, kNoBid, kObQty));
+  session_.on_delta(kTicker, kalshi::Side::Yes, kSubBboDeltaPrice,
+                    kSubBboDeltaQty);
+  ASSERT_EQ(count_method(transport_, "POST"), 2); // bid + ask resting
+
+  // Fully fill the bid (kOrderId1 was the first placement).
+  session_.on_fill(make_fill(kOrderId1, kTicker, kalshi::Side::Yes, kYesBid,
+                             kDefaultQuoteSize));
+
+  transport_.enqueue({kHttpOk, order_json(kOrderId3, kDefaultQuoteSize)});
+  session_.on_delta(kTicker, kalshi::Side::Yes, kSubBboDeltaPrice,
+                    kSubBboDeltaQty);
+
+  EXPECT_EQ(count_method(transport_, "POST"), 3)
+      << "bid side must re-quote after its order fully filled";
+}
+
+TEST_F(TradingSessionTest, PartiallyFilledQuoteSideIsNotReplaced) {
+  transport_.enqueue({kHttpOk, order_json(kOrderId1, kDefaultQuoteSize)});
+  transport_.enqueue({kHttpOk, order_json(kOrderId2, kDefaultQuoteSize)});
+  session_.on_snapshot(make_orderbook(kTicker, kYesBid, kNoBid, kObQty));
+  session_.on_delta(kTicker, kalshi::Side::Yes, kSubBboDeltaPrice,
+                    kSubBboDeltaQty);
+  ASSERT_EQ(count_method(transport_, "POST"), 2);
+
+  // Partial fill: the order still rests on the exchange, so the quoter must
+  // keep tracking it rather than re-placing a duplicate.
+  session_.on_fill(
+      make_fill(kOrderId1, kTicker, kalshi::Side::Yes, kYesBid, kOneLot));
+
+  session_.on_delta(kTicker, kalshi::Side::Yes, kSubBboDeltaPrice,
+                    kSubBboDeltaQty);
+
+  EXPECT_EQ(count_method(transport_, "POST"), 2)
+      << "a partially filled quote still rests — no duplicate placement";
+}
+
 TEST_F(TradingSessionTest, FillUpdatesPositionAndNotifiesPnlListener) {
   kalshi::TradingSession::PnlMap persisted;
   bool notified = false;
