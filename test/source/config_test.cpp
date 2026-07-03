@@ -173,8 +173,7 @@ TEST(ConfigTest, DefaultsAppliedWhenOptionalSectionsAbsent) {
             kalshi::FlowImbalanceConfig::kDefaultWindowSeconds);
   EXPECT_DOUBLE_EQ(config.flow.imbalance_ratio_threshold,
                    kalshi::FlowImbalanceConfig::kDefaultRatioThreshold);
-  EXPECT_EQ(config.flow.min_flow_volume,
-            kalshi::FlowImbalanceConfig::kDefaultMinFlowVolume);
+  EXPECT_EQ(config.flow.min_flow_volume, config.quoter.quote_size);
   EXPECT_EQ(config.risk.max_position_per_market,
             kalshi::RiskLimits::kDefaultMaxPosition);
   EXPECT_EQ(config.risk.max_open_orders_per_market,
@@ -193,6 +192,43 @@ TEST(ConfigTest, DefaultsAppliedWhenOptionalSectionsAbsent) {
             kalshi::RiskLimits::kDefaultMaxQuotePrice);
   EXPECT_DOUBLE_EQ(config.risk.max_drawdown_dollars,
                    kalshi::RiskLimits::kDefaultMaxDrawdown);
+}
+
+TEST(ConfigTest, MinFlowVolumeDefaultsToConfiguredQuoteSize) {
+  constexpr int kSmallQuoteSize = 7;
+  auto config_json = minimal_config_json();
+  config_json["quoter"] = {{"quote_size", kSmallQuoteSize}};
+  const auto path = write_temp_config(config_json);
+  const auto config = kalshi::load_config(path);
+  std::filesystem::remove(path);
+
+  EXPECT_EQ(config.flow.min_flow_volume, kSmallQuoteSize)
+      << "the guard must engage once ~one quote of one-sided flow is absorbed";
+}
+
+TEST(ConfigTest, MinFlowVolumeDefaultsToQuoteSizeWhenFlowSectionOmitsIt) {
+  constexpr int kSmallQuoteSize = 7;
+  auto config_json = minimal_config_json();
+  config_json["quoter"] = {{"quote_size", kSmallQuoteSize}};
+  config_json["flow"] = {{"window_seconds", 60}};
+  const auto path = write_temp_config(config_json);
+  const auto config = kalshi::load_config(path);
+  std::filesystem::remove(path);
+
+  EXPECT_EQ(config.flow.min_flow_volume, kSmallQuoteSize);
+}
+
+TEST(ConfigTest, ExplicitMinFlowVolumeOverridesQuoteSizeDefault) {
+  constexpr int kSmallQuoteSize = 7;
+  constexpr int kExplicitFloor = 25;
+  auto config_json = minimal_config_json();
+  config_json["quoter"] = {{"quote_size", kSmallQuoteSize}};
+  config_json["flow"] = {{"min_flow_volume", kExplicitFloor}};
+  const auto path = write_temp_config(config_json);
+  const auto config = kalshi::load_config(path);
+  std::filesystem::remove(path);
+
+  EXPECT_EQ(config.flow.min_flow_volume, kExplicitFloor);
 }
 
 TEST(ConfigTest, ThrowsOnMissingApiKey) {
