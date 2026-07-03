@@ -108,6 +108,53 @@ TEST_F(RestClientTest, GetMarketsParsesSingleMarket) {
             std::chrono::system_clock::time_point{}); // non-default
 }
 
+// ---- get_incentive_programs ----
+
+TEST_F(RestClientTest, GetIncentiveProgramsParses) {
+  auto transport = std::make_unique<FakeTransport>();
+  FakeTransport *const transport_raw = transport.get();
+  transport_raw->enqueue(
+      {kHttpOk, R"({"incentive_programs":[{"market_ticker":"KXNBA-LAL",)"
+                R"("period_reward":650000,"target_size_fp":"1000.00",)"
+                R"("discount_factor_bps":5000}],"next_cursor":""})"});
+  auto client = make_client(std::move(transport));
+
+  const auto programs = client.get_incentive_programs();
+
+  ASSERT_EQ(programs.size(), kOneResult);
+  EXPECT_EQ(programs.front().market_ticker, "KXNBA-LAL");
+  EXPECT_EQ(programs.front().period_reward_centicents, 650000);
+  EXPECT_EQ(programs.front().target_size,
+            kalshi::Quantity::from_contracts(1000));
+  EXPECT_EQ(programs.front().discount_factor_bps, 5000);
+}
+
+TEST_F(RestClientTest, GetIncentiveProgramsToleratesNullOptionalFields) {
+  auto transport = std::make_unique<FakeTransport>();
+  FakeTransport *const transport_raw = transport.get();
+  transport_raw->enqueue(
+      {kHttpOk,
+       R"({"incentive_programs":[{"market_ticker":"KXFOO","period_reward":50000,)"
+       R"("target_size_fp":null,"discount_factor_bps":null}]})"});
+  auto client = make_client(std::move(transport));
+
+  const auto programs = client.get_incentive_programs();
+
+  ASSERT_EQ(programs.size(), kOneResult);
+  EXPECT_EQ(programs.front().period_reward_centicents, 50000);
+  EXPECT_EQ(programs.front().target_size, kalshi::Quantity{});
+  EXPECT_EQ(programs.front().discount_factor_bps, 0);
+}
+
+TEST_F(RestClientTest, GetIncentiveProgramsEmptyBodyYieldsNoPrograms) {
+  auto transport = std::make_unique<FakeTransport>();
+  FakeTransport *const transport_raw = transport.get();
+  transport_raw->enqueue({kHttpOk, R"({})"});
+  auto client = make_client(std::move(transport));
+
+  EXPECT_TRUE(client.get_incentive_programs().empty());
+}
+
 TEST_F(RestClientTest, GetMarketsParsesDailyVolume) {
   // The scanner ranks on 24h volume (live flow), not lifetime volume_fp.
   constexpr double kExpectedDailyVolume = 6024216.16;

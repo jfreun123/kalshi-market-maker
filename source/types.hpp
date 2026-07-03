@@ -97,6 +97,19 @@ struct MarketPosition {
   int resting_orders_count{0};
 };
 
+// ---- IncentiveProgram ----
+
+// A Kalshi Liquidity Incentive pool for one market, from
+// GET /incentive_programs. Resting top-of-book size earns a pro-rata share of
+// period_reward; target_size and discount_factor describe how score is
+// calibrated. Used to bias scanner ranking toward incentivized markets.
+struct IncentiveProgram {
+  std::string market_ticker;
+  long long period_reward_centicents{0};
+  Quantity target_size{};
+  int discount_factor_bps{0};
+};
+
 // ---- Price helpers ----
 
 constexpr int kMinPriceCents = 1;

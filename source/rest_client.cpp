@@ -289,6 +289,57 @@ std::vector<MarketPosition> RestClient::get_positions() {
   return all_positions;
 }
 
+std::vector<IncentiveProgram> RestClient::get_incentive_programs() {
+  constexpr int kPageLimit = 1000;
+  const std::string path = path_prefix_ + "/incentive_programs";
+  const std::string base_query =
+      "status=active&type=liquidity&limit=" + std::to_string(kPageLimit);
+
+  std::vector<IncentiveProgram> all_programs;
+  std::string cursor;
+
+  auto fetch_page = [&]() {
+    std::string url = base_url_ + "/incentive_programs?" + base_query;
+    if (!cursor.empty()) {
+      url += "&cursor=" + cursor;
+    }
+    auto headers = auth_.sign("GET", path);
+    auto resp = transport_->get(url, headers);
+    check_response(resp);
+
+    auto json_data = nlohmann::json::parse(resp.body);
+    static const nlohmann::json kEmptyArray = nlohmann::json::array();
+    for (const auto &program_json :
+         json_data.value("incentive_programs", kEmptyArray)) {
+      IncentiveProgram program;
+      program.market_ticker =
+          program_json.value("market_ticker", std::string{});
+      if (const auto reward = program_json.find("period_reward");
+          reward != program_json.end() && reward->is_number()) {
+        program.period_reward_centicents = reward->get<long long>();
+      }
+      if (const auto target = program_json.find("target_size_fp");
+          target != program_json.end() && target->is_string()) {
+        program.target_size = parse_fp_count(target->get<std::string>());
+      }
+      if (const auto discount = program_json.find("discount_factor_bps");
+          discount != program_json.end() && discount->is_number()) {
+        program.discount_factor_bps = discount->get<int>();
+      }
+      all_programs.push_back(std::move(program));
+    }
+    cursor = json_data.value("next_cursor",
+                             json_data.value("cursor", std::string{}));
+  };
+
+  fetch_page();
+  while (!cursor.empty()) {
+    fetch_page();
+  }
+
+  return all_programs;
+}
+
 Orderbook RestClient::get_orderbook(std::string_view ticker) {
   std::string ticker_str{ticker};
   std::string path = path_prefix_ + "/markets/" + ticker_str + "/orderbook";

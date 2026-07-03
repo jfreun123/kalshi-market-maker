@@ -181,9 +181,10 @@ static int run_scan_mode(kalshi::RestClient &rest,
     const auto &market = results[rank];
     log->info(
         "  {:>2}. ticker={} mid={}c spread={}c vol_24h={:.0f} days={:.1f} "
-        "score={:.3f} cat={} \"{}\"",
+        "reward=${:.0f} score={:.3f} cat={} \"{}\"",
         rank + 1U, market.ticker, market.mid_price_cents, market.spread_cents,
-        market.volume_24h, market.days_to_close, market.score, market.category,
+        market.volume_24h, market.days_to_close,
+        market.incentive_reward_dollars, market.score, market.category,
         market.title);
   }
 

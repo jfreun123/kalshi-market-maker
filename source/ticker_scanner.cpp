@@ -3,12 +3,14 @@
 #include <algorithm>
 #include <cmath>
 #include <string>
+#include <unordered_map>
 
 namespace kalshi {
 
 namespace {
 
 constexpr double kSecondsPerDay = 86400.0;
+constexpr double kCentiCentsPerDollar = 10000.0;
 
 constexpr double kWeightVolume = 0.70;
 constexpr double kWeightSpread = 0.30;
@@ -26,10 +28,39 @@ double compute_score(const MarketScore &market, double max_volume) {
 
   const double spread_term =
       1.0 -
-      std::abs(static_cast<double>(market.spread_cents) - kSpreadMidCents) /
-          kSpreadHalfRange;
+      (std::abs(static_cast<double>(market.spread_cents) - kSpreadMidCents) /
+       kSpreadHalfRange);
 
-  return kWeightVolume * vol_term + kWeightSpread * std::max(0.0, spread_term);
+  return (kWeightVolume * vol_term) +
+         (kWeightSpread * std::max(0.0, spread_term));
+}
+
+double incentive_term(const MarketScore &market, double max_reward) {
+  if (market.incentive_reward_dollars <= 0.0 || max_reward <= 1.0) {
+    return 0.0;
+  }
+  return std::log(market.incentive_reward_dollars + 1.0) /
+         std::log(max_reward + 1.0);
+}
+
+double join_incentives(std::vector<MarketScore> &candidates,
+                       const std::vector<IncentiveProgram> &programs) {
+  std::unordered_map<std::string, double> reward_by_ticker;
+  for (const auto &program : programs) {
+    reward_by_ticker[program.market_ticker] =
+        static_cast<double>(program.period_reward_centicents) /
+        kCentiCentsPerDollar;
+  }
+
+  double max_reward = 0.0;
+  for (auto &candidate : candidates) {
+    const auto reward = reward_by_ticker.find(candidate.ticker);
+    if (reward != reward_by_ticker.end()) {
+      candidate.incentive_reward_dollars = reward->second;
+      max_reward = std::max(max_reward, reward->second);
+    }
+  }
+  return max_reward;
 }
 
 std::vector<Market> fetch_markets(RestClient &rest,
@@ -107,8 +138,13 @@ TickerScanner::scan(int top_n,
     }
   }
 
+  const double max_reward =
+      join_incentives(candidates, rest_.get_incentive_programs());
+
   for (auto &candidate : candidates) {
-    candidate.score = compute_score(candidate, max_volume);
+    candidate.score =
+        compute_score(candidate, max_volume) +
+        (config_.incentive_weight * incentive_term(candidate, max_reward));
   }
 
   std::sort(candidates.begin(), candidates.end(),

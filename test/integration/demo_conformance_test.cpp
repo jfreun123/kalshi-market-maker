@@ -152,6 +152,16 @@ TEST_F(DemoConformanceTest, GetOpenOrdersParses) {
   EXPECT_NO_THROW((void)rest.get_open_orders());
 }
 
+TEST_F(DemoConformanceTest, GetIncentiveProgramsParses) {
+  auto rest = make_rest();
+  std::vector<kalshi::IncentiveProgram> programs;
+  ASSERT_NO_THROW(programs = rest.get_incentive_programs());
+  for (const auto &program : programs) {
+    EXPECT_FALSE(program.market_ticker.empty());
+    EXPECT_GE(program.period_reward_centicents, 0);
+  }
+}
+
 TEST_F(DemoConformanceTest, CreateOrderResponseParsesRestsAndCancels) {
   const std::string ticker = first_target_ticker();
   if (ticker.empty()) {

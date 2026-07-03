@@ -28,6 +28,10 @@ public:
   // authoritative position state used to reconcile against local accounting.
   std::vector<MarketPosition> get_positions();
 
+  // Fetches active liquidity incentive pools (public endpoint, paginated).
+  // Used to bias scanner ranking toward markets that pay for resting size.
+  std::vector<IncentiveProgram> get_incentive_programs();
+
 private:
   Auth auth_;
   std::unique_ptr<IHttpTransport> transport_;
