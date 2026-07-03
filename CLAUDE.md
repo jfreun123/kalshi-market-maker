@@ -62,6 +62,14 @@ fix: clamp complement_price to valid range
 refactor: extract kalshi_add_test helper in test CMakeLists
 ```
 
+## Pull Requests
+
+Every PR description **must begin with a `## Review order` section** stating whether the PR depends on any other open PR:
+- If independent: `**No dependencies — review in any order.**` plus a one-line justification (e.g., no shared files with other open PRs).
+- If dependent: name the PR(s) to review/merge first (e.g., `**Review #28 first** — this PR is stacked on it; merging out of order forces a rebase before the diff reads cleanly`), and say why (stacked branch, shared files, supersedes/duplicates another PR).
+
+The reviewer should never have to figure out ordering themselves. When opening a new PR, check the currently open PRs for overlapping files or stacked branches and reflect that in the section. If a later PR changes the ordering of an existing open PR, update that PR's description too.
+
 ## Architecture Diagrams
 
 Every phase of the build plan has a Mermaid diagram. When adding a new component:
