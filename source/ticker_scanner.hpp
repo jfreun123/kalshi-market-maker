@@ -17,6 +17,10 @@ struct ScannerConfig {
   static constexpr double kDefaultMinVolume24h = 1000.0;
   static constexpr double kDefaultMinDaysToClose = 1.0;
   static constexpr double kDefaultMaxDaysToClose = 90.0;
+  // Additive score bonus (on top of the [0,1] volume+spread score) for markets
+  // with an active liquidity incentive pool. Rebates can dominate thin spreads,
+  // so this is a strong but not overwhelming nudge.
+  static constexpr double kDefaultIncentiveWeight = 0.50;
   // Number of top-ranked tickers written into the generated trade config.
   // PLAN.md notes the Basic rate tier is safe at <=5 concurrent tickers.
   static constexpr int kDefaultTradeTopN = 5;
@@ -28,6 +32,7 @@ struct ScannerConfig {
   double min_volume_24h{kDefaultMinVolume24h};
   double min_days_to_close{kDefaultMinDaysToClose};
   double max_days_to_close{kDefaultMaxDaysToClose};
+  double incentive_weight{kDefaultIncentiveWeight};
   int trade_top_n{kDefaultTradeTopN};
   // When non-empty, scan fetches each event series separately instead of
   // using the global /markets listing (which returns zero-volume junk).
@@ -42,6 +47,7 @@ struct MarketScore {
   int spread_cents{0};
   double volume_24h{0.0};
   double days_to_close{0.0};
+  double incentive_reward_dollars{0.0};
   double score{0.0};
 };
 

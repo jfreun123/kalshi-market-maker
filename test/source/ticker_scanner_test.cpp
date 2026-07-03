@@ -134,6 +134,25 @@ make_markets_response(std::initializer_list<std::string_view> markets) {
   return body;
 }
 
+std::string make_incentives_response(
+    std::initializer_list<std::pair<std::string_view, long long>> pools) {
+  std::string body = R"({"incentive_programs":[)";
+  bool first = true;
+  for (const auto &[ticker, reward] : pools) {
+    if (!first) {
+      body += ',';
+    }
+    body += R"({"market_ticker":")";
+    body += ticker;
+    body += R"(","period_reward":)";
+    body += std::to_string(reward);
+    body += R"(,"target_size_fp":"1000.00","discount_factor_bps":5000})";
+    first = false;
+  }
+  body += R"(],"next_cursor":""})";
+  return body;
+}
+
 std::string generate_test_private_key() {
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-cstyle-cast) — OpenSSL C API
   EVP_PKEY *pkey = EVP_RSA_gen(static_cast<unsigned int>(kRsaKeyBits));
@@ -185,6 +204,37 @@ TEST_F(TickerScannerTest, ScanReturnsGoodCandidates) {
   auto results = scanner.scan(kScanTopN, kTestNow);
 
   EXPECT_EQ(results.size(), 3U);
+}
+
+TEST_F(TickerScannerTest, IncentivizedMarketOutranksEquivalentPeer) {
+  auto [client, transport] = make_client_with_transport();
+  constexpr long long kPoolRewardCentiCents = 650000; // $65
+  transport->enqueue(
+      {kHttpOk, make_markets_response({kMarketGoodA, kMarketCryptoEqualVol})});
+  transport->enqueue({kHttpOk, make_incentives_response(
+                                   {{"KXBTCH-P", kPoolRewardCentiCents}})});
+
+  kalshi::TickerScanner scanner{client};
+  const auto results = scanner.scan(kScanTopN, kTestNow);
+
+  ASSERT_EQ(results.size(), 2U);
+  EXPECT_EQ(results[0].ticker, "KXBTCH-P");
+  EXPECT_GT(results[0].incentive_reward_dollars, 0.0);
+  EXPECT_EQ(results[1].ticker, "KXFED-A");
+  EXPECT_DOUBLE_EQ(results[1].incentive_reward_dollars, 0.0);
+  EXPECT_GT(results[0].score, results[1].score);
+}
+
+TEST_F(TickerScannerTest, NoIncentivePoolsLeaveRewardZero) {
+  auto [client, transport] = make_client_with_transport();
+  transport->enqueue({kHttpOk, make_markets_response({kMarketGoodA})});
+  transport->enqueue({kHttpOk, make_incentives_response({})});
+
+  kalshi::TickerScanner scanner{client};
+  const auto results = scanner.scan(kScanTopN, kTestNow);
+
+  ASSERT_EQ(results.size(), 1U);
+  EXPECT_DOUBLE_EQ(results[0].incentive_reward_dollars, 0.0);
 }
 
 TEST_F(TickerScannerTest, ScanFiltersDeepLongshotMarkets) {
