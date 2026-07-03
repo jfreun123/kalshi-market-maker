@@ -45,6 +45,8 @@ void CapturingWebSocket::on_heartbeat(HeartbeatHandler handler) {
 
 void CapturingWebSocket::run() { inner_->run(); }
 
+void CapturingWebSocket::request_close() { inner_->request_close(); }
+
 void CapturingWebSocket::stop() { inner_->stop(); }
 
 CapturingHttpTransport::CapturingHttpTransport(
