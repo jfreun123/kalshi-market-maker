@@ -132,3 +132,28 @@ TEST(TheoGridTest, DefaultConfigLookupIsInRange) {
   EXPECT_GE(theo, kTheoMin);
   EXPECT_LE(theo, kTheoMax);
 }
+
+// ---- Degenerate single-breakpoint axes ----
+
+TEST(TheoGridTest, SingleBreakpointBothAxesReturnsOnlyValue) {
+  kalshi::TheoGridConfig cfg;
+  cfg.ttc_breakpoints = {kTtcMid};
+  cfg.mid_breakpoints = {kMidMid};
+  cfg.values = {{kValLowMid}};
+  kalshi::TheoGrid grid{cfg};
+
+  EXPECT_DOUBLE_EQ(grid.lookup(kTtcBelowMin, kMidBelowMin), kValLowMid);
+  EXPECT_DOUBLE_EQ(grid.lookup(kTtcMid, kMidMid), kValLowMid);
+  EXPECT_DOUBLE_EQ(grid.lookup(kTtcAboveMax, kMidAboveMax), kValLowMid);
+}
+
+TEST(TheoGridTest, SingleTtcBreakpointInterpolatesAlongMidAxis) {
+  kalshi::TheoGridConfig cfg;
+  cfg.ttc_breakpoints = {kTtcMid};
+  cfg.mid_breakpoints = {kMidLow, kMidMid, kMidHigh};
+  cfg.values = {{kMidLow, kMidMid, kMidHigh}};
+  kalshi::TheoGrid grid{cfg};
+
+  EXPECT_DOUBLE_EQ(grid.lookup(kTtcBelowMin, kMidInterp), kExpectedMidInterp);
+  EXPECT_DOUBLE_EQ(grid.lookup(kTtcAboveMax, kMidMid), kMidMid);
+}

@@ -69,23 +69,19 @@ double TheoGrid::lookup(double ttc_hours, double mid_cents) const {
   auto ttc_it = std::lower_bound(ttc_bp.begin(), ttc_bp.end(), ttc_hours);
   std::size_t ttc_hi =
       static_cast<std::size_t>(ttc_it - ttc_bp.begin()); // first index >= ttc
-  if (ttc_hi == 0) {
-    ttc_hi = 1; // clamp below
-  } else if (ttc_hi >= ttc_bp.size()) {
+  if (ttc_hi >= ttc_bp.size()) {
     ttc_hi = ttc_bp.size() - 1; // clamp above
   }
-  const std::size_t ttc_lo = ttc_hi - 1;
+  const std::size_t ttc_lo = (ttc_hi == 0) ? 0 : ttc_hi - 1;
 
   // Find bracketing index along mid axis (clamped).
   auto mid_it = std::lower_bound(mid_bp.begin(), mid_bp.end(), mid_cents);
   std::size_t mid_hi =
       static_cast<std::size_t>(mid_it - mid_bp.begin()); // first index >= mid
-  if (mid_hi == 0) {
-    mid_hi = 1;
-  } else if (mid_hi >= mid_bp.size()) {
+  if (mid_hi >= mid_bp.size()) {
     mid_hi = mid_bp.size() - 1;
   }
-  const std::size_t mid_lo = mid_hi - 1;
+  const std::size_t mid_lo = (mid_hi == 0) ? 0 : mid_hi - 1;
 
   // Interpolation fractions.
   const double ttc_range = ttc_bp.at(ttc_hi) - ttc_bp.at(ttc_lo);
