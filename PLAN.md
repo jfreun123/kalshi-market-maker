@@ -34,10 +34,15 @@ game. Fixes ship one PR each, TDD, per CLAUDE.md.
    Gate 1 is judged by; plan live-vs-paper fill-divergence measurement. Output:
    `docs/PRE_LIVE_CHECKLIST.md`. *This defines what "profitable in demo" means —
    do it first.*
-2. [ ] **31. Brier/markout calibration logger (S).** Persist
-   `(ticker, t, P_fair, P_market, config flags)` per quote decision; join
-   settlement outcomes; score offline. The measurement backbone for every knob
-   below and for Gate 1 itself. (Bawa p.9/11.)
+2. [ ] **31. Measurement backbone: calibration + fill analytics (S/M).**
+   (a) Brier logger: persist `(ticker, t, P_fair, P_market, config flags)` per
+   quote decision, join settlement outcomes, score offline (Bawa p.9/11).
+   (b) Per-fill quality: log fair value, mid, expected edge, and inventory at
+   fill time; compute markout (mark at +30s/+5min) and effective spread
+   offline — every fill should answer "was this a good fill, or adverse
+   selection?" (c) PnL attribution split: realized spread vs. mark-to-market
+   vs. inventory vs. fees (extends `exposure_decomposition`). Required for
+   Gate 1 and for tuning every knob below.
 3. [ ] **22. Round quotes in the maker's favor (S).** `compute_quotes` uses
    `std::round` both sides — up to 0.5c/fill giveaway. `floor` bid, `ceil` ask.
    (Berg & Proebsting pp.53–54.)
@@ -48,36 +53,66 @@ game. Fixes ship one PR each, TDD, per CLAUDE.md.
    repricing (Bürgi p.27): if VAMP/theo moves > k cents against a resting
    order, cancel out-of-cycle instead of waiting for the next tick. Directly
    attacks the −2.4c/contract measured in run 3.
-6. [ ] **32. Directional flow lean (M).** IR > 0.65 → bounded fair-value offset
+6. [ ] **43. Visible-book sanity guard (S — found by external log review).**
+   Run 3 placed `yes@28`, `yes@29`, and bid `55` in a market quoting 46–52:
+   during fast sweeps the visible book (after own-quote subtraction) flickers
+   crossed/degenerate, a junk level becomes best ask, and `passive_bid =
+   min(desired, ask−1)` drags the quote to garbage (post-only rejected the
+   crossing ones; the deep ones rested briefly). Fix: skip the update (keep
+   resting quotes) when the visible book is crossed (`best_bid ≥ best_ask`) or
+   the inside jumps implausibly vs. the last mid; log the skip with the book
+   state.
+7. [ ] **32. Directional flow lean (M).** IR > 0.65 → bounded fair-value offset
    (±1c) or asymmetric size, decaying over 15–30 min (Bawa p.8). Validate
    thresholds via item 31 markout — the headline R² is an equities number.
-7. [ ] **29. Asymmetric quoting — longshot-side edge floor (M).** Maker returns
+8. [ ] **29. Asymmetric quoting — longshot-side edge floor (M).** Maker returns
    are negative on all sub-50c buys (Bürgi Fig. 6); require extra edge or less
    size on the cheap-side bid.
-8. [ ] **25. LMSR log-odds inventory skew (S).** Replace linear
+9. [ ] **25. LMSR log-odds inventory skew (S).** Replace linear
    `skew_per_contract_cents` with `fv' = c/(1+(c/fv−1)·e^{q/b})`; derive `b`
    from the risk budget (hit `max_position` ⇒ reservation price reaches
    P_upper). Fixes the invisible-skew half of D5. (Berg & Proebsting pp.49–56.)
-9. [ ] **24. Layered quoting — queue priming (S/M).** Rest 2–3 size layers 1–3c
+10. [ ] **24. Layered quoting — queue priming (S/M).** Rest 2–3 size layers 1–3c
    behind the inside: price-time FIFO means queue position is earned by resting
    *before* the move (item 9's measurement: ~115k ahead when joining late);
    sweeps pay progressively more; each layer earns incentive score. Genuine
    intent-to-fill laddering — avoid the word "layering" externally (regulators
    use it for the manipulative variant). Depends on own-quote subtraction
    (shipped, PR #44).
-10. [ ] **3. Passive clamp vs. fresher BBO (D1 residual, M) + 37. deploy near
+11. [ ] **3. Passive clamp vs. fresher BBO (D1 residual, M) + 37. deploy near
     the matching engine (S, ops).** Run 3 measured ~6 `post only cross`
     rejects/10min on an in-play book — the ~300ms local RTT is the cause. Item
     37 (a US-East VM: measure RTT → demo session → compare reject rates) likely
     buys more than any software mitigation and gates whether FIX (item 11) is
     ever worth it.
-11. [ ] **42. Minimum quote rest time / two-tick reprice hysteresis (S).**
-    Defense-in-depth vs. oscillation sources other than self-feedback; also
-    keeps behavior unambiguously far from manipulative-cancel patterns
-    (see item 24 note). Follow-up to item 38 (shipped).
-12. [ ] **41. `spdlog::flush_every(3s)` (S, ops).** Info-level lines buffer up
+12. [ ] **42. Reprice hysteresis + queue-position value (S/M).** (a) Minimum
+    quote rest time / two-consecutive-ticks agreement before cancel/replace —
+    defense-in-depth vs. oscillation, keeps behavior far from
+    manipulative-cancel patterns (item 24 note). (b) Jacob's queue-value rule:
+    a resting order's price-time priority is an asset — sometimes keep the
+    quote even though fair value moved, because expected fill quality from the
+    front of the queue exceeds the small edge loss from being 1c off. Rough
+    rule: only reprice when `|fv − quoted| · fill_prob` exceeds the queue
+    value being abandoned; start with "never reprice on a 1-tick move if we're
+    near the front."
+12b. [ ] **44. Amend orders instead of cancel+replace (M).** Kalshi has
+    [Amend Order V2](https://docs.kalshi.com/api-reference/orders/amend-order-v2)
+    — update price/size on a resting order in one call instead of
+    cancel+create (two calls, 3 rate-limit tokens, and a window with no quote
+    resting). Adopt in `refresh_bid/ask`'s reprice branch. **Verify semantics
+    first** (conformance test + docs): whether a price amend forfeits queue
+    priority (it usually does everywhere) and whether a size-down keeps it —
+    that determines how it composes with item 42's queue-value rule.
+13. [ ] **41. `spdlog::flush_every(3s)` (S, ops).** Info-level lines buffer up
     to ~4KB on quiet sessions (flush_on is warn+) — `tail -f` lags minutes
     behind. Found in run 2.
+14. [ ] **45. Decision-oriented quote logging (S).** Today's logs say *what*
+    (place/cancel); they should say *why*: per placement log fair value, mid,
+    visible inside, inventory + skew, spread components (base/imbalance/fee),
+    and the reprice reason. The debug-level `reprice` line has half of this —
+    complete it, make it info on actions, and add latency counters
+    (quote-generation time, REST RTT, ack latency, WS heartbeat delay) to feed
+    the item 37 experiment. (From the external log review.)
 
 **Situational (apply when trading near-close or multi-outcome markets):**
 
@@ -164,6 +199,13 @@ R4 constraints-vs-guards · R7 message docs + rate-limit review ·
 - **Measurements**: adverse-selection cost of pure passive quoting =
   **−2.4c/contract**; ~6 post-only-cross rejects/10min (D1 residual → items
   3/37); info-log buffering on quiet sessions (→ item 41).
+- **External log review (LLM, 2026-07-03)** corroborated the priority order
+  (inventory-aware quoting, churn hysteresis, fill analytics, decision
+  logging — items 25/32, 42, 31, 45) and caught a real pricing anomaly the
+  monitors missed: isolated `yes@28/29` and `bid 55` placements amid 46–52
+  quoting → crossed/degenerate visible-book flicker → **item 43** (sanity
+  guard). Quoter hot path benchmarked and ~2× faster (PR #51):
+  256–315 ns/update steady-state.
 
 ### 2026-07-03 — run 1 findings D4–D8: all resolved same day
 
