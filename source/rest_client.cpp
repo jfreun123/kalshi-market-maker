@@ -423,6 +423,8 @@ Order RestClient::place_order(std::string_view ticker, Side side,
   OrderStatus status = OrderStatus::Open;
   if (filled_qty >= count) {
     status = OrderStatus::Filled;
+  } else if (type == OrderType::Market) {
+    status = OrderStatus::Cancelled;
   } else if (filled_qty.is_positive()) {
     status = OrderStatus::PartiallyFilled;
   }
