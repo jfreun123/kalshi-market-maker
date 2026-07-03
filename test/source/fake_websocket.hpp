@@ -31,6 +31,10 @@ public:
   // Cause the on_heartbeat handler to fire at the start of the next run().
   void trigger_heartbeat() { fire_heartbeat_ = true; }
 
+  // Simulate a failed handshake: run() returns immediately without ever
+  // firing the on_connect handler.
+  void set_handshake_failure(bool fails) { handshake_fails_ = fails; }
+
   // Inspection
   [[nodiscard]] int connect_count() const { return connect_count_; }
   [[nodiscard]] const std::string &connected_url() const {
@@ -74,6 +78,9 @@ public:
   }
 
   void run() override {
+    if (handshake_fails_) {
+      return;
+    }
     if (connect_handler_) {
       connect_handler_();
     }
@@ -113,6 +120,7 @@ private:
   int connect_count_{0};
   bool fire_disconnect_{false};
   bool fire_heartbeat_{false};
+  bool handshake_fails_{false};
   bool stopped_{false};
   bool close_requested_{false};
 

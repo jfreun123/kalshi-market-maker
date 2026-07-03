@@ -78,6 +78,12 @@ private:
   std::unique_ptr<Impl> impl_;
 };
 
+inline constexpr std::chrono::seconds kMaxReconnectDelay{60};
+
+[[nodiscard]] std::chrono::milliseconds
+reconnect_backoff(std::chrono::milliseconds base_delay,
+                  int consecutive_failures);
+
 // ---- Kalshi protocol client ----
 //
 // Wraps IWebSocket and handles:
@@ -96,7 +102,8 @@ public:
   // max_reconnects: number of reconnect attempts after the first disconnect.
   //   -1 = unlimited (production default).
   //    0 = no reconnect (single run).
-  // reconnect_delay: wait between reconnects; 0ms is useful in tests.
+  // reconnect_delay: base wait between reconnects, doubled per consecutive
+  //   failed connection up to kMaxReconnectDelay; 0ms is useful in tests.
   explicit WebSocketClient(
       Auth auth, std::unique_ptr<IWebSocket> ws_transport,
       std::string base_url = "wss://external-api-ws.kalshi.com/trade-api/ws/v2",
@@ -118,6 +125,8 @@ public:
   void run();
   void stop();
 
+  [[nodiscard]] std::chrono::milliseconds next_reconnect_delay() const;
+
 private:
   void send_subscribe(const std::string &ticker);
   void send_subscribe_fills();
@@ -136,6 +145,7 @@ private:
 
   bool running_{false};
   int next_msg_id_{1};
+  int consecutive_connect_failures_{0};
   std::vector<std::string> subscribed_tickers_;
   std::map<long long, long long> last_seq_by_sid_;
 

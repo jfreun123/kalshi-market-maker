@@ -642,6 +642,48 @@ TEST_F(WebSocketClientTest, DisconnectCallbackFiredOnDisconnect) {
   EXPECT_EQ(disconnect_count, 1);
 }
 
+TEST_F(WebSocketClientTest, ReconnectBackoffDoublesPerFailureAndCaps) {
+  using std::chrono::milliseconds;
+  constexpr milliseconds kBase{5000};
+  constexpr milliseconds kCap{60000};
+  EXPECT_EQ(kalshi::reconnect_backoff(kBase, 1), milliseconds{5000});
+  EXPECT_EQ(kalshi::reconnect_backoff(kBase, 2), milliseconds{10000});
+  EXPECT_EQ(kalshi::reconnect_backoff(kBase, 4), milliseconds{40000});
+  EXPECT_EQ(kalshi::reconnect_backoff(kBase, 5), kCap);
+  constexpr int kManyFailures = 100;
+  EXPECT_EQ(kalshi::reconnect_backoff(kBase, kManyFailures), kCap);
+  EXPECT_EQ(kalshi::reconnect_backoff(milliseconds{0}, 3), milliseconds{0});
+  EXPECT_EQ(kalshi::reconnect_backoff(kBase, 0), kBase);
+}
+
+TEST_F(WebSocketClientTest, FailedHandshakesEscalateReconnectDelay) {
+  auto fake_ws = std::make_unique<kalshi::FakeWebSocket>();
+  fake_ws->set_handshake_failure(true);
+  constexpr std::chrono::milliseconds kBase{4};
+  constexpr int kThreeReconnects = 3;
+  constexpr std::chrono::milliseconds kEscalatedDelay{32};
+
+  kalshi::Auth auth{kApiKey, kPemPrivateKey};
+  kalshi::WebSocketClient client{auth, std::move(fake_ws), kWsUrl,
+                                 kThreeReconnects, kBase};
+  client.run();
+
+  EXPECT_EQ(client.next_reconnect_delay(), kEscalatedDelay);
+}
+
+TEST_F(WebSocketClientTest, SuccessfulConnectResetsReconnectBackoff) {
+  auto fake_ws = std::make_unique<kalshi::FakeWebSocket>();
+  constexpr std::chrono::milliseconds kBase{4};
+  constexpr int kThreeReconnects = 3;
+
+  kalshi::Auth auth{kApiKey, kPemPrivateKey};
+  kalshi::WebSocketClient client{auth, std::move(fake_ws), kWsUrl,
+                                 kThreeReconnects, kBase};
+  client.run();
+
+  EXPECT_EQ(client.next_reconnect_delay(), kBase);
+}
+
 TEST_F(WebSocketClientTest, LastMessageTimeUpdatesOnMessage) {
   auto fake_ws = std::make_unique<kalshi::FakeWebSocket>();
   kalshi::FakeWebSocket *ws_raw = fake_ws.get();

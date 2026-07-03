@@ -6,6 +6,7 @@
 #include <ixwebsocket/IXWebSocket.h>
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
@@ -131,6 +132,23 @@ void IxWebSocket::stop() {
 
 void IxWebSocket::request_close() { impl_->ws.close(); }
 
+std::chrono::milliseconds
+reconnect_backoff(std::chrono::milliseconds base_delay,
+                  int consecutive_failures) {
+  constexpr int kMaxDoublings = 30;
+  const auto cap =
+      std::chrono::duration_cast<std::chrono::milliseconds>(kMaxReconnectDelay);
+  auto delay = std::min(base_delay, cap);
+  const int doublings = std::min(consecutive_failures - 1, kMaxDoublings);
+  for (int i = 0; i < doublings; ++i) {
+    delay *= 2;
+    if (delay >= cap) {
+      return cap;
+    }
+  }
+  return delay;
+}
+
 // ---- WebSocketClient helpers ----
 
 namespace {
@@ -237,6 +255,10 @@ void WebSocketClient::stop() {
   ws_->stop();
 }
 
+std::chrono::milliseconds WebSocketClient::next_reconnect_delay() const {
+  return reconnect_backoff(reconnect_delay_, consecutive_connect_failures_ + 1);
+}
+
 std::map<std::string, std::string> WebSocketClient::auth_headers() const {
   const std::string ws_path = extract_ws_path(ws_url_);
   return auth_.sign("GET", ws_path);
@@ -261,6 +283,7 @@ void WebSocketClient::send_subscribe_fills() {
 
 void WebSocketClient::handle_connect() {
   get_logger()->info("websocket connected url={}", ws_url_);
+  consecutive_connect_failures_ = 0;
   last_seq_by_sid_.clear();
   send_subscribe_fills();
   for (const auto &ticker : subscribed_tickers_) {
@@ -436,9 +459,14 @@ void WebSocketClient::run() {
       break;
     }
     ++reconnect_attempts;
+    ++consecutive_connect_failures_;
 
-    if (reconnect_delay_.count() > 0) {
-      std::this_thread::sleep_for(reconnect_delay_);
+    const auto delay =
+        reconnect_backoff(reconnect_delay_, consecutive_connect_failures_);
+    if (delay.count() > 0) {
+      get_logger()->info("ws reconnecting in {}ms (attempt {})", delay.count(),
+                         reconnect_attempts);
+      std::this_thread::sleep_for(delay);
     }
   }
 
