@@ -518,6 +518,37 @@ TEST_F(RestClientTest, IocOrderPartialFillRemainderIsCancelledNotOpen) {
   EXPECT_EQ(order.status, kalshi::OrderStatus::Cancelled);
 }
 
+TEST_F(RestClientTest, PlaceOrderParsesAverageFillPriceSideNative) {
+  constexpr int kAvgYesCents = 56;
+  const std::string filled_response =
+      R"({"order_id":"order-abc","fill_count":"10.00","remaining_count":"0.00",)"
+      R"("average_fill_price":"0.5600","ts_ms":1718000000000})";
+  auto transport = std::make_unique<FakeTransport>();
+  FakeTransport *const transport_raw = transport.get();
+  transport_raw->enqueue({kHttpOk, filled_response});
+  auto client = make_client(std::move(transport));
+
+  auto order = client.place_order(kTestTicker, kalshi::Side::No, kTestYesPrice,
+                                  kTestQuantity, kalshi::OrderType::Market);
+
+  EXPECT_EQ(order.average_fill_price_cents, kalshi::kPriceBasis - kAvgYesCents)
+      << "average_fill_price is the YES leg; a NO order books its complement";
+}
+
+TEST_F(RestClientTest, PlaceOrderWithoutAverageFillPriceLeavesZero) {
+  const std::string unfilled_response =
+      R"({"order_id":"order-abc","fill_count":"0.00","remaining_count":"10.00","ts_ms":1718000000000})";
+  auto transport = std::make_unique<FakeTransport>();
+  FakeTransport *const transport_raw = transport.get();
+  transport_raw->enqueue({kHttpOk, unfilled_response});
+  auto client = make_client(std::move(transport));
+
+  auto order = client.place_order(kTestTicker, kalshi::Side::Yes, kTestYesPrice,
+                                  kTestQuantity, kalshi::OrderType::Limit);
+
+  EXPECT_EQ(order.average_fill_price_cents, 0);
+}
+
 TEST_F(RestClientTest, PlaceOrderParsesImmediateFillCountFromResponse) {
   constexpr int kImmediateFill = 3;
   const std::string partial_fill_response =

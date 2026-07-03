@@ -271,7 +271,8 @@ static int run_reconcile_mode(kalshi::RestClient &rest,
 // Best-effort: logs and continues past a single-ticker failure. Returns the
 // number of positions it attempted to close.
 static int flatten_all_positions(kalshi::RestClient &rest,
-                                 std::shared_ptr<spdlog::logger> &log) {
+                                 std::shared_ptr<spdlog::logger> &log,
+                                 kalshi::TradingSession *session) {
   int closed = 0;
   for (const auto &position : rest.get_positions()) {
     if (position.position.is_zero()) {
@@ -282,6 +283,9 @@ static int flatten_all_positions(kalshi::RestClient &rest,
       log->info("flatten ticker={} net={} filled={} order_id={}",
                 position.ticker, position.position.to_fp_string(),
                 order.filled_quantity.to_fp_string(), order.id);
+      if (session != nullptr) {
+        session->record_flatten(order);
+      }
       ++closed;
     } catch (const std::exception &ex) {
       log->error("flatten ticker={} failed: {}", position.ticker, ex.what());
@@ -295,7 +299,7 @@ static int flatten_all_positions(kalshi::RestClient &rest,
 static int run_flatten_mode(kalshi::RestClient &rest,
                             std::shared_ptr<spdlog::logger> &log) {
   log->info("flatten mode — closing all open positions");
-  const int closed = flatten_all_positions(rest, log);
+  const int closed = flatten_all_positions(rest, log, nullptr);
   log->info("flatten mode — closed {} position(s)", closed);
   return 0;
 }
@@ -566,7 +570,7 @@ int main(int argc, char *argv[]) {
           session.cancel_all_quotes();
           if (!cli.paper_mode) {
             try {
-              const int closed = flatten_all_positions(rest, log);
+              const int closed = flatten_all_positions(rest, log, &session);
               if (closed > 0) {
                 log->info("shutdown — flattened {} position(s) to end flat",
                           closed);

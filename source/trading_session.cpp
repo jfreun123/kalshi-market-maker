@@ -96,6 +96,37 @@ void TradingSession::on_fill(const Fill &fill) {
   }
 }
 
+void TradingSession::record_flatten(const Order &order) {
+  if (!order.filled_quantity.is_positive()) {
+    return;
+  }
+  Fill fill;
+  fill.order_id = order.id;
+  fill.market_ticker = order.market_ticker;
+  fill.side = order.side;
+  fill.price_cents = (order.average_fill_price_cents != 0)
+                         ? order.average_fill_price_cents
+                         : order.price_cents;
+  fill.quantity = order.filled_quantity;
+  fill.timestamp = order.created_at;
+  fill.is_taker = true;
+  order_mgr_.record_fill(fill);
+
+  const double session_pnl = order_mgr_.realized_pnl(order.market_ticker);
+  const double total_pnl =
+      prior_pnl_for(prior_pnl_, order.market_ticker) + session_pnl;
+  get_logger()->info(
+      "flatten fill ticker={} side={} price={} qty={} session_pnl=${:.2f} "
+      "total_pnl=${:.2f}",
+      order.market_ticker, side_name(order.side), fill.price_cents,
+      fill.quantity.to_fp_string(), session_pnl / kCentsPerDollar,
+      total_pnl / kCentsPerDollar);
+
+  if (pnl_listener_) {
+    pnl_listener_(carried_totals());
+  }
+}
+
 TradingSession::PnlMap TradingSession::carried_totals() const {
   PnlMap totals = prior_pnl_;
   for (const auto &ticker : tickers_) {

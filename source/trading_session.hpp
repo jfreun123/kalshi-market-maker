@@ -56,6 +56,10 @@ public:
                 Quantity qty);
   // Record a fill, refresh per-market risk, and notify the PnL listener.
   void on_fill(const Fill &fill);
+  // Record a shutdown-flatten execution so its realized PnL reaches the
+  // OrderManager and the persisted carry (the WS feed is already down when the
+  // flatten runs, so no fill message will ever arrive for it).
+  void record_flatten(const Order &order);
   // Cancel all resting orders (called when the market-data feed drops).
   void on_disconnect();
 

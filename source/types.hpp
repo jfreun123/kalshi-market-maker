@@ -47,6 +47,7 @@ struct Order {
   OrderStatus status{OrderStatus::Open};
   OrderType type{OrderType::Limit};
   std::chrono::system_clock::time_point created_at;
+  int average_fill_price_cents{0};
 
   [[nodiscard]] Quantity remaining_quantity() const {
     return quantity - filled_quantity;

@@ -434,6 +434,16 @@ Order RestClient::place_order(std::string_view ticker, Side side,
   const auto created_at =
       std::chrono::system_clock::time_point(std::chrono::milliseconds(ts_ms));
 
+  // average_fill_price is the YES-leg VWAP, present only when fill_count > 0;
+  // store it side-native to match the Fill price convention.
+  int avg_fill_cents = 0;
+  const auto avg_str = json_data.value("average_fill_price", std::string{});
+  if (!avg_str.empty()) {
+    const int avg_yes_cents = parse_dollars_to_cents(avg_str);
+    avg_fill_cents = (side == Side::Yes) ? avg_yes_cents
+                                         : complement_price(avg_yes_cents);
+  }
+
   return Order{
       .id = json_data.at("order_id").get<std::string>(),
       .market_ticker = std::string(ticker),
@@ -444,6 +454,7 @@ Order RestClient::place_order(std::string_view ticker, Side side,
       .status = status,
       .type = type,
       .created_at = created_at,
+      .average_fill_price_cents = avg_fill_cents,
   };
 }
 
