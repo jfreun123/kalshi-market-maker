@@ -326,6 +326,63 @@ TEST_F(TradingSessionTest, CarriedPnlDoesNotDoubleCountAcrossFills) {
   EXPECT_DOUBLE_EQ(session_.prior_pnl().at(kTicker), kPriorCents);
 }
 
+TEST_F(TradingSessionTest, RecordFlattenRealizesPnlAndNotifiesListener) {
+  // Session accumulates 10 NO @44 (no round trip → realized 0), then shutdown
+  // flattens by buying 10 YES at an average fill of 60. Each complete set
+  // realizes 100-60-44 = -4c, so the persisted total must move from the prior
+  // alone to prior - 40c. Pre-fix the flatten execution was never recorded and
+  // the session's true result vanished (demo finding D7).
+  constexpr double kPriorCents = 100.0;
+  constexpr int kOpenNoPrice = 44;
+  constexpr int kFlattenLots = 10;
+  constexpr int kAvgYesFill = 60;
+  constexpr double kFlattenPnlCents = -40.0;
+  session_.set_prior_pnl({{kTicker, kPriorCents}});
+
+  kalshi::TradingSession::PnlMap persisted;
+  session_.set_pnl_listener(
+      [&persisted](const kalshi::TradingSession::PnlMap &totals) {
+        persisted = totals;
+      });
+
+  session_.on_fill(make_fill("open-no", kTicker, kalshi::Side::No,
+                             kOpenNoPrice, kFlattenLots));
+  ASSERT_EQ(order_mgr_.net_position(kTicker),
+            kalshi::Quantity::from_contracts(-kFlattenLots));
+
+  kalshi::Order flatten_order;
+  flatten_order.id = "flatten-1";
+  flatten_order.market_ticker = kTicker;
+  flatten_order.side = kalshi::Side::Yes;
+  flatten_order.price_cents = kalshi::kMaxPriceCents;
+  flatten_order.quantity = kalshi::Quantity::from_contracts(kFlattenLots);
+  flatten_order.filled_quantity =
+      kalshi::Quantity::from_contracts(kFlattenLots);
+  flatten_order.status = kalshi::OrderStatus::Filled;
+  flatten_order.average_fill_price_cents = kAvgYesFill;
+  session_.record_flatten(flatten_order);
+
+  EXPECT_TRUE(order_mgr_.net_position(kTicker).is_zero());
+  ASSERT_TRUE(persisted.contains(kTicker));
+  EXPECT_DOUBLE_EQ(persisted.at(kTicker), kPriorCents + kFlattenPnlCents);
+}
+
+TEST_F(TradingSessionTest, RecordFlattenWithNoFillIsIgnored) {
+  bool notified = false;
+  session_.set_pnl_listener(
+      [&notified](const kalshi::TradingSession::PnlMap &) { notified = true; });
+
+  kalshi::Order empty_flatten;
+  empty_flatten.id = "flatten-empty";
+  empty_flatten.market_ticker = kTicker;
+  empty_flatten.side = kalshi::Side::Yes;
+  empty_flatten.status = kalshi::OrderStatus::Cancelled;
+  session_.record_flatten(empty_flatten);
+
+  EXPECT_TRUE(order_mgr_.net_position(kTicker).is_zero());
+  EXPECT_FALSE(notified);
+}
+
 TEST_F(TradingSessionTightExposureTest, RunPortfolioRiskHaltsOnOverExposure) {
   session_.on_fill(make_fill(kFillOrderId, kTicker, kalshi::Side::Yes,
                              kHighYesPrice, kOneLot));
