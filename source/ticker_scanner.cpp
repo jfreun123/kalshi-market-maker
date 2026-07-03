@@ -15,12 +15,23 @@ constexpr double kCentiCentsPerDollar = 10000.0;
 constexpr double kWeightVolume = 0.70;
 constexpr double kWeightSpread = 0.30;
 
-// Spread scoring peaks at the midpoint of the [min_spread, max_spread] filter
-// range ([3, 10]c) and falls to zero at the edges.
-constexpr double kSpreadMidCents = 6.5;
-constexpr double kSpreadHalfRange = 3.5;
+// Spread scoring peaks at the midpoint of the configured
+// [min_spread, max_spread] filter range and falls to zero at the edges.
+struct SpreadCurve {
+  double mid_cents;
+  double half_range_cents;
+};
 
-double compute_score(const MarketScore &market, double max_volume) {
+SpreadCurve spread_curve(const ScannerConfig &config) {
+  constexpr double kMinHalfRange = 0.5;
+  const double mid = (config.min_spread_cents + config.max_spread_cents) / 2.0;
+  const double half_range = std::max(
+      kMinHalfRange, (config.max_spread_cents - config.min_spread_cents) / 2.0);
+  return {.mid_cents = mid, .half_range_cents = half_range};
+}
+
+double compute_score(const MarketScore &market, double max_volume,
+                     const SpreadCurve &curve) {
   double vol_term = 0.0;
   if (max_volume > 1.0 && market.volume_24h > 1.0) {
     vol_term = std::log(market.volume_24h) / std::log(max_volume);
@@ -28,8 +39,8 @@ double compute_score(const MarketScore &market, double max_volume) {
 
   const double spread_term =
       1.0 -
-      (std::abs(static_cast<double>(market.spread_cents) - kSpreadMidCents) /
-       kSpreadHalfRange);
+      (std::abs(static_cast<double>(market.spread_cents) - curve.mid_cents) /
+       curve.half_range_cents);
 
   return (kWeightVolume * vol_term) +
          (kWeightSpread * std::max(0.0, spread_term));
@@ -141,9 +152,10 @@ TickerScanner::scan(int top_n,
   const double max_reward =
       join_incentives(candidates, rest_.get_incentive_programs());
 
+  const SpreadCurve curve = spread_curve(config_);
   for (auto &candidate : candidates) {
     candidate.score =
-        compute_score(candidate, max_volume) +
+        compute_score(candidate, max_volume, curve) +
         (config_.incentive_weight * incentive_term(candidate, max_reward));
   }
 
