@@ -76,6 +76,10 @@ AppConfig load_config(const std::filesystem::path &path) {
         quoter_json.value("maker_fee_rate", QuoterConfig{}.maker_fee_rate);
   }
 
+  // The imbalance guard should engage once roughly one full quote of one-sided
+  // flow is absorbed; an absolute floor above quote_size can never trigger
+  // before the damage is done (demo finding D5).
+  config.flow.min_flow_volume = config.quoter.quote_size;
   if (json_data.contains("flow")) {
     const auto &flow_json = json_data.at("flow");
     config.flow.window_seconds = flow_json.value(
@@ -83,8 +87,8 @@ AppConfig load_config(const std::filesystem::path &path) {
     config.flow.imbalance_ratio_threshold =
         flow_json.value("imbalance_ratio_threshold",
                         FlowImbalanceConfig::kDefaultRatioThreshold);
-    config.flow.min_flow_volume = flow_json.value(
-        "min_flow_volume", FlowImbalanceConfig::kDefaultMinFlowVolume);
+    config.flow.min_flow_volume =
+        flow_json.value("min_flow_volume", config.quoter.quote_size);
   }
 
   if (json_data.contains("risk")) {
