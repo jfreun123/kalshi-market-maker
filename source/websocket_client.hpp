@@ -46,6 +46,8 @@ public:
 
   // Signals run() to return.
   virtual void stop() = 0;
+
+  virtual void request_close() = 0;
 };
 
 // Production IWebSocket backed by ixwebsocket.
@@ -69,6 +71,7 @@ public:
   void on_heartbeat(HeartbeatHandler handler) override;
   void run() override;
   void stop() override;
+  void request_close() override;
 
 private:
   struct Impl;
@@ -121,6 +124,7 @@ private:
   void handle_connect();
   void handle_message(const std::string &raw);
   void handle_heartbeat();
+  [[nodiscard]] bool sequence_intact(long long sid, long long seq);
 
   [[nodiscard]] std::map<std::string, std::string> auth_headers() const;
 
@@ -133,6 +137,7 @@ private:
   bool running_{false};
   int next_msg_id_{1};
   std::vector<std::string> subscribed_tickers_;
+  std::map<long long, long long> last_seq_by_sid_;
 
   SnapshotCallback snapshot_callback_;
   DeltaCallback delta_callback_;

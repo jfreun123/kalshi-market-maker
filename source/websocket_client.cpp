@@ -129,6 +129,8 @@ void IxWebSocket::stop() {
   impl_->run_cv.notify_one();
 }
 
+void IxWebSocket::request_close() { impl_->ws.close(); }
+
 // ---- WebSocketClient helpers ----
 
 namespace {
@@ -166,7 +168,10 @@ Side parse_side(const std::string &side_str) {
   if (side_str == "yes") {
     return Side::Yes;
   }
-  return Side::No;
+  if (side_str == "no") {
+    return Side::No;
+  }
+  throw std::runtime_error("ws: unknown side: " + side_str);
 }
 
 Level parse_snapshot_level(const nlohmann::json &level) {
@@ -243,7 +248,6 @@ void WebSocketClient::send_subscribe(const std::string &ticker) {
   msg["cmd"] = "subscribe";
   msg["params"]["channels"] = {"orderbook_delta"};
   msg["params"]["market_tickers"] = {ticker};
-  msg["params"]["use_yes_price"] = true;
   ws_->send(msg.dump());
 }
 
@@ -257,6 +261,7 @@ void WebSocketClient::send_subscribe_fills() {
 
 void WebSocketClient::handle_connect() {
   get_logger()->info("websocket connected url={}", ws_url_);
+  last_seq_by_sid_.clear();
   send_subscribe_fills();
   for (const auto &ticker : subscribed_tickers_) {
     send_subscribe(ticker);
@@ -338,6 +343,24 @@ void WebSocketClient::handle_heartbeat() {
   last_message_time_.store(std::chrono::steady_clock::now());
 }
 
+bool WebSocketClient::sequence_intact(long long sid, long long seq) {
+  const auto [seq_it, first_message] = last_seq_by_sid_.try_emplace(sid, seq);
+  if (first_message) {
+    return true;
+  }
+  if (seq == seq_it->second + 1) {
+    seq_it->second = seq;
+    return true;
+  }
+  get_logger()->critical(
+      "ws seq gap sid={} expected={} got={} — book untrusted, forcing "
+      "reconnect to resync",
+      sid, seq_it->second + 1, seq);
+  last_seq_by_sid_.clear();
+  ws_->request_close();
+  return false;
+}
+
 void WebSocketClient::handle_message(const std::string &raw) {
   last_message_time_.store(std::chrono::steady_clock::now());
   nlohmann::json parsed;
@@ -352,11 +375,30 @@ void WebSocketClient::handle_message(const std::string &raw) {
     return;
   }
   const std::string &msg_type = type_it->get<std::string>();
+
+  if (msg_type == "error") {
+    get_logger()->error("ws server error response: {}", raw);
+    return;
+  }
+
   const auto msg_it = parsed.find("msg");
   if (msg_it == parsed.end()) {
     return;
   }
   const auto &msg_body = *msg_it;
+
+  if (msg_type == "subscribed") {
+    get_logger()->debug("ws subscription confirmed: {}", raw);
+    return;
+  }
+
+  const auto sid_it = parsed.find("sid");
+  const auto seq_it = parsed.find("seq");
+  if (sid_it != parsed.end() && seq_it != parsed.end() &&
+      sid_it->is_number_integer() && seq_it->is_number_integer() &&
+      !sequence_intact(sid_it->get<long long>(), seq_it->get<long long>())) {
+    return;
+  }
 
   if (msg_type == "orderbook_snapshot") {
     dispatch_snapshot(snapshot_callback_, msg_body);

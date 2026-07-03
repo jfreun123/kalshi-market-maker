@@ -133,6 +133,13 @@ std::string fill_message(const std::string &order_id, const std::string &ticker,
   return msg.dump();
 }
 
+std::string with_seq(const std::string &message, long long sid, long long seq) {
+  auto parsed = nlohmann::json::parse(message);
+  parsed["sid"] = sid;
+  parsed["seq"] = seq;
+  return parsed.dump();
+}
+
 // NOLINTEND(bugprone-easily-swappable-parameters)
 
 } // namespace
@@ -204,6 +211,7 @@ TEST_F(WebSocketClientTest, SubscribeSendsOrderbookDeltaChannel) {
   const auto &channels = market_sub["params"]["channels"];
   ASSERT_FALSE(channels.empty());
   EXPECT_EQ(channels[0], "orderbook_delta");
+  EXPECT_FALSE(market_sub["params"].contains("use_yes_price"));
 }
 
 TEST_F(WebSocketClientTest, TwoMarketSubscribesSendThreeMessages) {
@@ -439,6 +447,69 @@ TEST_F(WebSocketClientTest, FillFeeCostParsedFromDollarsToCents) {
   client.run();
 
   EXPECT_NEAR(received.fee_cents, kExpectedFeeCents, 1e-9);
+}
+
+TEST_F(WebSocketClientTest, ContiguousSeqDispatchesAllDeltas) {
+  auto fake_ws = std::make_unique<kalshi::FakeWebSocket>();
+  kalshi::FakeWebSocket *ws_raw = fake_ws.get();
+  constexpr long long kSid = 2;
+  ws_raw->enqueue_message(
+      with_seq(snapshot_message(kTestTicker, kYesBidPrice, kYesBidQty,
+                                kNoBidPrice, kNoBidQty),
+               kSid, 1));
+  ws_raw->enqueue_message(with_seq(
+      delta_message(kTestTicker, "yes", kYesBidPrice, kYesBidQty), kSid, 2));
+  ws_raw->enqueue_message(with_seq(
+      delta_message(kTestTicker, "yes", kYesBidPrice, kYesBidQty), kSid, 3));
+
+  auto client = make_client(std::move(fake_ws));
+  int deltas = 0;
+  client.on_orderbook_delta([&deltas](const std::string &, kalshi::Side, int,
+                                      kalshi::Quantity) { ++deltas; });
+  client.run();
+
+  EXPECT_EQ(deltas, 2);
+  EXPECT_FALSE(ws_raw->close_requested());
+}
+
+TEST_F(WebSocketClientTest, SeqGapDiscardsDeltaAndRequestsReconnect) {
+  auto fake_ws = std::make_unique<kalshi::FakeWebSocket>();
+  kalshi::FakeWebSocket *ws_raw = fake_ws.get();
+  constexpr long long kSid = 2;
+  ws_raw->enqueue_message(
+      with_seq(snapshot_message(kTestTicker, kYesBidPrice, kYesBidQty,
+                                kNoBidPrice, kNoBidQty),
+               kSid, 1));
+  ws_raw->enqueue_message(with_seq(
+      delta_message(kTestTicker, "yes", kYesBidPrice, kYesBidQty), kSid, 2));
+  constexpr long long kGappedSeq = 4;
+  ws_raw->enqueue_message(
+      with_seq(delta_message(kTestTicker, "yes", kYesBidPrice, kYesBidQty),
+               kSid, kGappedSeq));
+
+  auto client = make_client(std::move(fake_ws));
+  int deltas = 0;
+  client.on_orderbook_delta([&deltas](const std::string &, kalshi::Side, int,
+                                      kalshi::Quantity) { ++deltas; });
+  client.run();
+
+  EXPECT_EQ(deltas, 1) << "the gapped delta must not reach the book";
+  EXPECT_TRUE(ws_raw->close_requested());
+}
+
+TEST_F(WebSocketClientTest, MalformedDeltaSideIsDroppedNotMisparsed) {
+  auto fake_ws = std::make_unique<kalshi::FakeWebSocket>();
+  kalshi::FakeWebSocket *ws_raw = fake_ws.get();
+  ws_raw->enqueue_message(
+      delta_message(kTestTicker, "bogus", kYesBidPrice, kYesBidQty));
+
+  auto client = make_client(std::move(fake_ws));
+  int deltas = 0;
+  client.on_orderbook_delta([&deltas](const std::string &, kalshi::Side, int,
+                                      kalshi::Quantity) { ++deltas; });
+  client.run();
+
+  EXPECT_EQ(deltas, 0);
 }
 
 TEST_F(WebSocketClientTest, ThrowingCallbackIsContainedNotPropagated) {

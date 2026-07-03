@@ -99,7 +99,11 @@ public:
 
   void stop() override { stopped_ = true; }
 
+  void request_close() override { close_requested_ = true; }
+
   [[nodiscard]] bool was_stopped() const { return stopped_; }
+
+  [[nodiscard]] bool close_requested() const { return close_requested_; }
 
 private:
   std::vector<std::string> messages_;
@@ -110,6 +114,7 @@ private:
   bool fire_disconnect_{false};
   bool fire_heartbeat_{false};
   bool stopped_{false};
+  bool close_requested_{false};
 
   MessageHandler msg_handler_;
   ConnectHandler connect_handler_;

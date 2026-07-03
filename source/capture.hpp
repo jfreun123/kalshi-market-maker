@@ -30,6 +30,7 @@ public:
   void on_heartbeat(HeartbeatHandler handler) override;
   void run() override;
   void stop() override;
+  void request_close() override;
 
   [[nodiscard]] std::size_t captured_count() const {
     return captured_count_.load();
