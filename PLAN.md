@@ -193,7 +193,36 @@
 > crashes; entries move to Done when the fix merges. Fixes go out as separate
 > PRs for review.
 
-- [ ] *(audit running — findings will be appended here)*
+- [ ] **A1. Quoter spread floor truncates odd `min_spread_cents`
+  (`source/quoter.cpp:165`).** The floor is applied as `min_spread_cents / 2`
+  (integer division), so with the default `min_spread_cents = 3` and
+  `target_spread_cents = 2`: `base_half_spread = max({1, 2/2, 3/2}) = 1` →
+  total quoted spread **2c < the 3c floor**. The default floor of 3 adds zero
+  protection beyond the absolute half-spread min of 1. The only floor test uses
+  an even value (8), so the odd case is untested. Fix: round the half-spread
+  up (`(min_spread + 1) / 2`). Confidence: high.
+
+- [ ] **A2. Carried PnL double-counts on every fill
+  (`source/trading_session.cpp:75-91`) — corrupts `pnl_state.json`.**
+  `on_fill` computes `total = prior_pnl_[ticker] + session_pnl` where
+  `session_pnl = order_mgr_.realized_pnl(ticker)` is *cumulative* for the
+  session — then writes `total` back into `prior_pnl_[ticker]`, which is the
+  baseline for the next fill. Every fill re-adds the entire running total:
+  fill 1 realizes 50c → persisted 50; fill 2 realizes 30c more (cumulative 80)
+  → persisted `50 + 80 = 130` instead of 80. Persisted financial state grows
+  without bound. The single-fill test never exercises accumulation. Fix:
+  capture the prior baseline once at session start and never mutate it
+  (`total = immutable_prior + session_pnl`). Confidence: high.
+
+- [ ] **A3. `TheoGrid::lookup` crashes on a single-breakpoint axis
+  (`source/theo_grid.cpp:63-110`).** The ctor accepts a size-1 axis but the
+  clamp logic then either indexes `.at(1)` past the end or underflows
+  `size_t ttc_lo = ttc_hi - 1` → `std::out_of_range` on any lookup instead of
+  returning the axis's only value. Not reachable from `default_config` (5×5);
+  `TheoGrid` is currently test-only. Confidence: medium (deterministic crash,
+  low exposure).
+
+- [ ] *(audit running — more findings will be appended here)*
 
 ### In review (PR open)
 
