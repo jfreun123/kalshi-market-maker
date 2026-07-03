@@ -37,9 +37,9 @@
   BBO, or step the price further passive on each reject. Detail in *Demo Run
   Findings*.
 
-- [ ] **4. D2 — align scanner price band with the risk price gate.** The scanner
-  admits `[min_price, max_price]` but the quoter only trades `[10,90]`, so the
-  scanner's top picks are un-quotable longshots. Derive one band from the other.
+- [x] **4. D2 — align scanner price band with the risk price gate.** *Done —
+  merged in PR #11 (`30b3524`): `load_config` intersects the scanner band with
+  `quotable_price_band(risk, quoter)` so scan picks are always quotable.*
 
 - [x] **5. Demo-environment conformance smoke tests.** *Done — see Done section.*
   Short, unit-test-style
@@ -185,6 +185,98 @@
   shared vs. per-process risk/PnL ledger, cross-exchange netting, and how a
   supervisor starts/monitors/flattens each process.
 - [ ] **17. R7 — `docs/kalshi-messages.md` + rate-limiting review.**
+
+### Bug audit — 2026-07-03 (in progress)
+
+> Findings from a systematic correctness audit of the codebase. Each confirmed
+> bug is recorded here **as soon as it is found** so the list survives session
+> crashes; entries move to Done when the fix merges. Fixes go out as separate
+> PRs for review.
+
+- [ ] **A1. Quoter spread floor truncates odd `min_spread_cents`
+  (`source/quoter.cpp:165`).** The floor is applied as `min_spread_cents / 2`
+  (integer division), so with the default `min_spread_cents = 3` and
+  `target_spread_cents = 2`: `base_half_spread = max({1, 2/2, 3/2}) = 1` →
+  total quoted spread **2c < the 3c floor**. The default floor of 3 adds zero
+  protection beyond the absolute half-spread min of 1. The only floor test uses
+  an even value (8), so the odd case is untested. Fix: round the half-spread
+  up (`(min_spread + 1) / 2`). Confidence: high.
+
+- [ ] **A2. Carried PnL double-counts on every fill
+  (`source/trading_session.cpp:75-91`) — corrupts `pnl_state.json`.**
+  `on_fill` computes `total = prior_pnl_[ticker] + session_pnl` where
+  `session_pnl = order_mgr_.realized_pnl(ticker)` is *cumulative* for the
+  session — then writes `total` back into `prior_pnl_[ticker]`, which is the
+  baseline for the next fill. Every fill re-adds the entire running total:
+  fill 1 realizes 50c → persisted 50; fill 2 realizes 30c more (cumulative 80)
+  → persisted `50 + 80 = 130` instead of 80. Persisted financial state grows
+  without bound. The single-fill test never exercises accumulation. Fix:
+  capture the prior baseline once at session start and never mutate it
+  (`total = immutable_prior + session_pnl`). Confidence: high.
+
+- [ ] **A3. `TheoGrid::lookup` crashes on a single-breakpoint axis
+  (`source/theo_grid.cpp:63-110`).** The ctor accepts a size-1 axis but the
+  clamp logic then either indexes `.at(1)` past the end or underflows
+  `size_t ttc_lo = ttc_hi - 1` → `std::out_of_range` on any lookup instead of
+  returning the axis's only value. Not reachable from `default_config` (5×5);
+  `TheoGrid` is currently test-only. Confidence: medium (deterministic crash,
+  low exposure).
+
+- [ ] **A4. Scanner spread score hardcoded to the default window
+  (`source/ticker_scanner.cpp:20-33`).** `compute_score` centers the spread
+  term at 6.5c with half-range 3.5c — the midpoint/half-width of the *default*
+  `[3,10]` filter — ignoring configured `min/max_spread_cents`. With, e.g.,
+  `[1,20]`, a market with spread 15 scores 0 on spread and ranking is
+  miscalibrated; the code comment claims the curve peaks at the configured
+  window's midpoint, which is false. Fix: derive the midpoint/half-range from
+  the configured bounds. Confidence: medium (only bites non-default configs).
+
+- [ ] **A5. NO-side fills recorded at the YES price
+  (`source/websocket_client.cpp:319` `dispatch_fill`) — corrupts NO cost basis
+  and PnL.** `fill.price_cents` is always parsed from `yes_price_dollars`,
+  but `OrderManager::record_fill` treats it as side-native (realized spread
+  `= 100 - fill_price - lot_price`; NO lots marked at `100 - yes_mid`).
+  `rest_client.cpp` parse_order correctly reads `no_price_dollars` for NO;
+  the WS fill path does not. Example: buy 5 YES @52 + 5 NO @44 (complete set)
+  → NO fill carries yes_price 56 → realized spread `(100-56-52)*5 = -40c`
+  instead of `+20c`. Every NO fill mis-accounts. Fix: parse `no_price_dollars`
+  (or `100 - yes`) when `outcome_side == "no"`. Confidence: high.
+
+- [ ] **A6. Fill dedup key collides within the same millisecond
+  (`source/order_manager.cpp:64-67`).** `fill_key = order_id + "@" + ts_ms`;
+  an order sweeping two levels can emit two fills with the same order id and
+  same `ts_ms` but different price/count — the second is silently dropped as a
+  "duplicate": position and realized PnL under-count, and a fully-filled order
+  can linger in `open_orders_`. Fix: include the exchange trade/fill id in
+  `Fill` and key on that. Confidence: medium.
+
+- [ ] **A7. `place_order` ignores the response `status` field
+  (`source/rest_client.cpp:419-428`) — a killed order is reported as resting.**
+  Status is derived only from `fill_count`, so a `post_only` order the exchange
+  auto-cancels (returns 2xx with `status:"canceled"`, `fill_count:"0.00"`)
+  comes back `Open`; the Quoter records the phantom order id as its live quote
+  and never re-places that side. Fix: parse the response `status` and map
+  canceled → `OrderStatus::Canceled`. Confidence: medium.
+
+*Audit complete — 4 subsystem sweeps (orderbook/quoter/risk, portfolio/PnL,
+rest/order-manager/auth/rate-limit, session/paper/main). A2 was independently
+found by two agents. Areas traced and cleared: complement math, micro-price
+weighting, FIFO realized-spread and lot accounting, Quantity fixed-point
+round-trips, token-bucket math, RSA-PSS signing, engine_mtx locking,
+shutdown/flatten paths, steady-vs-system clock usage.*
+
+### In review (PR open)
+
+- [ ] **WS protocol hardening (PR #30, branch `fix/ws-protocol`).** Four wire
+  protocol bugs: (a) no `seq` gap detection — missed deltas silently corrupted
+  the local book; now tracked per `sid`, a gap discards the message and recycles
+  the connection via new `IWebSocket::request_close()` (async-safe from the
+  callback thread, unlike `stop()`) to force a fresh snapshot; (b) `parse_side`
+  silently defaulted unknown side strings to `No`, corrupting the book on
+  malformed deltas — now throws and the delta is dropped; (c) subscribe sent an
+  undocumented `use_yes_price` param — removed (if the server ever honored it,
+  the NO-side complement math would double-flip the scale); (d) `error` and
+  `subscribed` server messages were silently ignored — now logged/handled.
 
 ### Done (recent sessions, committed)
 
