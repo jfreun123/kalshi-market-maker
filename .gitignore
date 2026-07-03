@@ -11,6 +11,7 @@ prefix/
 
 # CMake user files
 .clangd
+.cache/
 CMakeLists.txt.user
 CMakeUserPresets.json
 compile_commands.json
