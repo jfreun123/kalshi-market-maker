@@ -95,14 +95,27 @@ game. Fixes ship one PR each, TDD, per CLAUDE.md.
     rule: only reprice when `|fv − quoted| · fill_prob` exceeds the queue
     value being abandoned; start with "never reprice on a 1-tick move if we're
     near the front."
-12b. [ ] **44. Amend orders instead of cancel+replace (M).** Kalshi has
-    [Amend Order V2](https://docs.kalshi.com/api-reference/orders/amend-order-v2)
-    — update price/size on a resting order in one call instead of
-    cancel+create (two calls, 3 rate-limit tokens, and a window with no quote
-    resting). Adopt in `refresh_bid/ask`'s reprice branch. **Verify semantics
-    first** (conformance test + docs): whether a price amend forfeits queue
-    priority (it usually does everywhere) and whether a size-down keeps it —
-    that determines how it composes with item 42's queue-value rule.
+12b. [ ] **44. Amend + Decrease instead of cancel+replace (M).** Two V2
+    endpoints replace the cancel+create pattern (two calls, 3 rate-limit
+    tokens, a quote-less window, and post-only-cross risk on re-entry):
+    - [Amend Order V2](https://docs.kalshi.com/api-reference/orders/amend-order-v2)
+      — change price/size in one call; adopt in the reprice branch.
+    - [Decrease Order V2](https://docs.kalshi.com/api-reference/orders/decrease-order-v2)
+      (`POST .../orders/{id}/decrease`, `reduce_by`/`reduce_to`) — shrink a
+      resting order in place. On price-time exchanges a size-*decrease* is
+      exactly the operation that preserves queue priority (it's why a
+      dedicated endpoint exists) — which unlocks **queue-preserving inventory
+      control**: when flow runs one-sided (run 3: −22 absorbed), decrease the
+      exposed side's remaining size instead of choosing between full exposure
+      and cancelling away the queue position. Also: trim outer layers (item
+      24) without repricing, and give the flow guard a size response, not
+      only a price response.
+    **Verify semantics first** via gated conformance tests (docs are silent on
+    priority): rest an order, amend price → expect priority lost; decrease
+    size → expect `remaining_count` correct and priority kept (observable via
+    a second session's order behind ours, or at minimum pin the API contract).
+    Composes with item 42's queue-value rule: decrease makes "keep the queue,
+    cut the risk" a real third option.
 13. [ ] **41. `spdlog::flush_every(3s)` (S, ops).** Info-level lines buffer up
     to ~4KB on quiet sessions (flush_on is warn+) — `tail -f` lags minutes
     behind. Found in run 2.
