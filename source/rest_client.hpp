@@ -22,6 +22,13 @@ public:
   Orderbook get_orderbook(std::string_view ticker);
   Order place_order(std::string_view ticker, Side side, int price_cents,
                     int quantity, OrderType type);
+  Order place_order(std::string_view ticker, Side side, int price_cents,
+                    Quantity count, OrderType type);
+
+  // Closes a net position (positive = long YES, negative = long NO) with an
+  // aggressive immediate-or-cancel taker order. No-op when already flat.
+  Order flatten(std::string_view ticker, Quantity net_position);
+
   bool cancel_order(std::string_view order_id);
   std::vector<Order> get_open_orders();
 

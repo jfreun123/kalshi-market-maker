@@ -71,10 +71,6 @@ auto format_dollars(int cents) -> std::string {
   return std::format("{:.4f}", cents / kCentsPerDollar);
 }
 
-auto format_count(int count) -> std::string {
-  return Quantity::from_contracts(count).to_fp_string();
-}
-
 // Parses a fixed-point dollar string to integer cents: "0.5200" -> 52
 auto parse_dollars_to_cents(const std::string &dollars) -> int {
   return static_cast<int>(std::round(std::stod(dollars) * kCentsPerDollar));
@@ -329,6 +325,14 @@ Orderbook RestClient::get_orderbook(std::string_view ticker) {
 // distinct
 Order RestClient::place_order(std::string_view ticker, Side side,
                               int price_cents, int quantity, OrderType type) {
+  return place_order(ticker, side, price_cents,
+                     Quantity::from_contracts(quantity), type);
+}
+
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters) - price and count
+// distinct
+Order RestClient::place_order(std::string_view ticker, Side side,
+                              int price_cents, Quantity count, OrderType type) {
   // V2 create-order endpoint: POST /portfolio/events/orders
   const std::string path = path_prefix_ + "/portfolio/events/orders";
   const std::string url = base_url_ + "/portfolio/events/orders";
@@ -348,7 +352,7 @@ Order RestClient::place_order(std::string_view ticker, Side side,
   body_json["ticker"] = ticker;
   body_json["side"] = v2_side;
   body_json["price"] = format_dollars(yes_price_cents);
-  body_json["count"] = format_count(quantity);
+  body_json["count"] = count.to_fp_string();
   body_json["time_in_force"] = v2_tif;
   body_json["self_trade_prevention_type"] = "taker_at_cross";
   if (v2_tif == "good_till_canceled") {
@@ -362,12 +366,11 @@ Order RestClient::place_order(std::string_view ticker, Side side,
 
   // V2 returns a minimal response; reconstruct the Order from input params.
   auto json_data = nlohmann::json::parse(resp.body);
-  const Quantity ordered = Quantity::from_contracts(quantity);
   const Quantity filled_qty =
       parse_fp_count(json_data.at("fill_count").get<std::string>());
 
   OrderStatus status = OrderStatus::Open;
-  if (filled_qty >= ordered) {
+  if (filled_qty >= count) {
     status = OrderStatus::Filled;
   } else if (filled_qty.is_positive()) {
     status = OrderStatus::PartiallyFilled;
@@ -383,12 +386,26 @@ Order RestClient::place_order(std::string_view ticker, Side side,
       .market_ticker = std::string(ticker),
       .side = side,
       .price_cents = price_cents,
-      .quantity = ordered,
+      .quantity = count,
       .filled_quantity = filled_qty,
       .status = status,
       .type = type,
       .created_at = created_at,
   };
+}
+
+Order RestClient::flatten(std::string_view ticker, Quantity net_position) {
+  if (net_position.is_zero()) {
+    return Order{};
+  }
+  // Long YES (net > 0) closes by selling YES (Side::No = "ask"); long NO closes
+  // by buying YES (Side::Yes = "bid"). Price the close at the max cent so the
+  // immediate-or-cancel order crosses and fills at the resting price.
+  const Side close_side = net_position.is_positive() ? Side::No : Side::Yes;
+  const Quantity count =
+      net_position.is_positive() ? net_position : -net_position;
+  return place_order(ticker, close_side, kMaxPriceCents, count,
+                     OrderType::Market);
 }
 
 bool RestClient::cancel_order(std::string_view order_id) {
