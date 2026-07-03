@@ -27,9 +27,14 @@ double prior_pnl_for(const TradingSession::PnlMap &prior_pnl,
 
 TradingSession::TradingSession(std::vector<std::string> tickers,
                                IOrderManager &order_mgr, RiskManager &risk_mgr,
-                               Quoter &quoter, FlowImbalanceGuard *flow_guard)
+                               Quoter &quoter, FlowImbalanceGuard *flow_guard,
+                               Clock clock,
+                               std::chrono::milliseconds error_cooldown)
     : tickers_{std::move(tickers)}, order_mgr_{order_mgr}, risk_mgr_{risk_mgr},
-      quoter_{quoter}, flow_guard_{flow_guard} {}
+      quoter_{quoter}, flow_guard_{flow_guard},
+      clock_{clock ? std::move(clock)
+                   : Clock{[] { return std::chrono::steady_clock::now(); }}},
+      error_cooldown_{error_cooldown} {}
 
 void TradingSession::on_snapshot(const Orderbook &snapshot) {
   ob_map_[snapshot.ticker].apply_snapshot(snapshot);
@@ -44,10 +49,18 @@ void TradingSession::on_delta(const std::string &ticker, Side side,
   get_logger()->debug("delta ticker={} side={} price={} qty={} mid={:.1f}",
                       ticker, side_name(side), price_cents, qty.to_fp_string(),
                       book.mid_price_cents());
+
+  const auto cooldown = cooldown_until_.find(ticker);
+  if (cooldown != cooldown_until_.end() && clock_() < cooldown->second) {
+    return;
+  }
+
   try {
     quoter_.update(ticker, book);
   } catch (const std::exception &ex) {
-    get_logger()->error("quoter error ticker={}: {}", ticker, ex.what());
+    cooldown_until_[ticker] = clock_() + error_cooldown_;
+    get_logger()->error("quoter error ticker={}: {} — cooling down {}ms",
+                        ticker, ex.what(), error_cooldown_.count());
   }
 }
 

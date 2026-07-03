@@ -7,6 +7,7 @@
 #include "risk_manager.hpp"
 #include "types.hpp"
 
+#include <chrono>
 #include <functional>
 #include <string>
 #include <unordered_map>
@@ -29,12 +30,22 @@ public:
   using OrderbookMap = std::unordered_map<std::string, LocalOrderbook>;
   // Invoked after a fill updates carried PnL, so the host can persist it.
   using PnlListener = std::function<void(const PnlMap &)>;
+  using Clock = std::function<std::chrono::steady_clock::time_point()>;
+
+  // After a place fails (e.g. post-only cross, or a 429), the offending ticker
+  // is skipped for this long instead of re-quoting the same crossing price on
+  // every subsequent delta — which otherwise spins into a reject/rate-limit
+  // hot loop on a fast book.
+  static constexpr std::chrono::milliseconds kDefaultErrorCooldown{500};
 
   // flow_guard is optional; when present, on_fill feeds it so the Quoter can
   // widen spreads under adverse one-sided flow. Must outlive the session.
-  TradingSession(std::vector<std::string> tickers, IOrderManager &order_mgr,
-                 RiskManager &risk_mgr, Quoter &quoter,
-                 FlowImbalanceGuard *flow_guard = nullptr);
+  // clock defaults to steady_clock::now; injected in tests to drive cooldowns.
+  TradingSession(
+      std::vector<std::string> tickers, IOrderManager &order_mgr,
+      RiskManager &risk_mgr, Quoter &quoter,
+      FlowImbalanceGuard *flow_guard = nullptr, Clock clock = {},
+      std::chrono::milliseconds error_cooldown = kDefaultErrorCooldown);
 
   // ---- WebSocket event reactions ----
 
@@ -91,6 +102,10 @@ private:
   RiskManager &risk_mgr_;
   Quoter &quoter_;
   FlowImbalanceGuard *flow_guard_{nullptr};
+  Clock clock_;
+  std::chrono::milliseconds error_cooldown_{kDefaultErrorCooldown};
+  std::unordered_map<std::string, std::chrono::steady_clock::time_point>
+      cooldown_until_;
   OrderbookMap ob_map_;
   PnlMap prior_pnl_;
   PnlListener pnl_listener_;

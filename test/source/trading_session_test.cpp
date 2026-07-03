@@ -46,6 +46,9 @@ const std::string kFillOrderId = "fill-001";
 const std::string kApiKey = "test-key-id";
 const std::string kBaseUrl = "https://trading-api.kalshi.com/trade-api/v2";
 constexpr int kHttpOk = 200;
+constexpr int kHttpBadRequest = 400;
+constexpr std::string_view kPostOnlyCrossBody =
+    R"({"error":{"code":"invalid_order","details":"post only cross"}})";
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::string kPemPrivateKey;
@@ -160,6 +163,40 @@ TEST_F(TradingSessionTest, SnapshotThenDeltaPlacesQuotes) {
   EXPECT_EQ(count_method(transport_, "POST"), 2);
 }
 
+TEST_F(TradingSessionTest, PlaceErrorCoolsDownTickerThenResumes) {
+  auto clock_now = std::make_shared<std::chrono::steady_clock::time_point>(
+      std::chrono::steady_clock::now());
+  constexpr auto kCooldown = std::chrono::milliseconds{500};
+  kalshi::TradingSession session{std::vector<std::string>{kTicker},
+                                 order_mgr_,
+                                 risk_mgr_,
+                                 quoter_,
+                                 nullptr,
+                                 [clock_now] { return *clock_now; },
+                                 kCooldown};
+
+  session.on_snapshot(make_orderbook(kTicker, kYesBid, kNoBid, kObQty));
+
+  transport_.enqueue({kHttpBadRequest, std::string{kPostOnlyCrossBody}});
+  session.on_delta(kTicker, kalshi::Side::Yes, kSubBboDeltaPrice,
+                   kSubBboDeltaQty);
+  const int posts_after_reject = count_method(transport_, "POST");
+  ASSERT_GE(posts_after_reject, 1);
+
+  session.on_delta(kTicker, kalshi::Side::Yes, kSubBboDeltaPrice,
+                   kSubBboDeltaQty);
+  EXPECT_EQ(count_method(transport_, "POST"), posts_after_reject)
+      << "ticker in cooldown — should not re-quote the same crossing price";
+
+  *clock_now += kCooldown + std::chrono::milliseconds{1};
+  transport_.enqueue({kHttpOk, order_json(kOrderId1, kDefaultQuoteSize)});
+  transport_.enqueue({kHttpOk, order_json(kOrderId2, kDefaultQuoteSize)});
+  session.on_delta(kTicker, kalshi::Side::Yes, kSubBboDeltaPrice,
+                   kSubBboDeltaQty);
+  EXPECT_GT(count_method(transport_, "POST"), posts_after_reject)
+      << "cooldown elapsed — quoting resumes";
+}
+
 TEST_F(TradingSessionTest, OrderbooksAccessorReflectsSnapshot) {
   session_.on_snapshot(make_orderbook(kTicker, kYesBid, kNoBid, kObQty));
 
@@ -239,7 +276,7 @@ TEST_F(TradingSessionTest, SeedOrderbookContainsOrderRejection) {
   // book). Seeding must not throw — one un-quotable market cannot abort
   // startup — and the book must still be recorded for the live feed.
   transport_.enqueue(
-      {400,
+      {kHttpBadRequest,
        R"({"error":{"code":"invalid_order","message":"post only cross"}})"});
 
   EXPECT_NO_THROW(session_.seed_orderbook(
