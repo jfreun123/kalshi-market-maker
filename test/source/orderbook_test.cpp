@@ -56,6 +56,43 @@ TEST(LocalOrderbookTest, EmptyBookMidPriceReturnsZero) {
   EXPECT_DOUBLE_EQ(orderbook.mid_price_cents(), 0.0);
 }
 
+TEST(LocalOrderbookTest, EmptyBookMicroPriceReturnsZero) {
+  kalshi::LocalOrderbook orderbook;
+  EXPECT_DOUBLE_EQ(orderbook.micro_price_cents(), 0.0);
+}
+
+TEST(LocalOrderbookTest, BalancedBookMicroPriceEqualsMid) {
+  kalshi::LocalOrderbook orderbook;
+  orderbook.apply_snapshot(make_orderbook()); // best bid/ask both size 200
+  EXPECT_DOUBLE_EQ(orderbook.micro_price_cents(), orderbook.mid_price_cents());
+}
+
+TEST(LocalOrderbookTest, HeavyBidLeansMicroPriceTowardAsk) {
+  kalshi::Orderbook book;
+  book.ticker = "KXBTCD";
+  book.yes = {{kYesBid, kQtyLarge}}; // best bid 52 x200
+  book.no = {{kNoBid, kQtySmall}};   // best ask 56 x100
+  kalshi::LocalOrderbook orderbook;
+  orderbook.apply_snapshot(book);
+
+  const double micro = orderbook.micro_price_cents();
+  EXPECT_GT(micro, orderbook.mid_price_cents());  // leans up toward the ask
+  EXPECT_LT(micro, static_cast<double>(kYesAsk)); // never past the ask
+}
+
+TEST(LocalOrderbookTest, HeavyAskLeansMicroPriceTowardBid) {
+  kalshi::Orderbook book;
+  book.ticker = "KXBTCD";
+  book.yes = {{kYesBid, kQtySmall}}; // best bid 52 x100
+  book.no = {{kNoBid, kQtyLarge}};   // best ask 56 x200
+  kalshi::LocalOrderbook orderbook;
+  orderbook.apply_snapshot(book);
+
+  const double micro = orderbook.micro_price_cents();
+  EXPECT_LT(micro, orderbook.mid_price_cents());  // leans down toward the bid
+  EXPECT_GT(micro, static_cast<double>(kYesBid)); // never past the bid
+}
+
 TEST(LocalOrderbookTest, EmptyBookSpreadReturnsZero) {
   kalshi::LocalOrderbook orderbook;
   EXPECT_EQ(orderbook.spread_cents(), 0);
