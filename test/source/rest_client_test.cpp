@@ -483,6 +483,24 @@ TEST_F(RestClientTest, GetOpenOrdersParsesOrdersList) {
             kalshi::Quantity::from_contracts(kTestFilledQty));
 }
 
+TEST_F(RestClientTest, ParsesFractionalSecondTimestamp) {
+  const std::string order_with_micros =
+      R"({"order_id":"order-abc","ticker":"KXBTCD","outcome_side":"yes",)"
+      R"("type":"limit","yes_price_dollars":"0.5200","no_price_dollars":"0.4800",)"
+      R"("initial_count_fp":"10.00","fill_count_fp":"0.00","status":"resting",)"
+      R"("created_time":"2026-07-03T00:00:11.556415Z"})";
+  auto transport = std::make_unique<FakeTransport>();
+  FakeTransport *const transport_raw = transport.get();
+  transport_raw->enqueue(
+      {kHttpOk, R"({"orders":[)" + order_with_micros + R"(],"cursor":""})"});
+  auto client = make_client(std::move(transport));
+
+  std::vector<kalshi::Order> orders;
+  ASSERT_NO_THROW(orders = client.get_open_orders());
+  ASSERT_EQ(orders.size(), kOneResult);
+  EXPECT_NE(orders[0].created_at, std::chrono::system_clock::time_point{});
+}
+
 TEST_F(RestClientTest, GetOpenOrdersThrowsOnHttpError) {
   auto transport = std::make_unique<FakeTransport>();
   FakeTransport *const transport_raw = transport.get();
