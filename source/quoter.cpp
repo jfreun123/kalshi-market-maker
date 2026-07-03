@@ -65,10 +65,10 @@ std::optional<int> passive_ask(int desired_ask, int market_bid_cents) {
 } // namespace
 
 void Quoter::refresh_bid(const std::string &ticker, int desired_bid) {
-  auto &live = live_quotes_[ticker];
-  if (live.bid_order_id.empty()) {
+  auto &own = own_quotes_[ticker];
+  if (own.bid_order_id.empty()) {
     // Self-cross guard: don't place bid if it would match our own resting ask.
-    if (!live.ask_order_id.empty() && desired_bid >= live.current_ask_cents) {
+    if (!own.ask_order_id.empty() && desired_bid >= own.quoted_ask_cents) {
       return;
     }
     if (!risk_mgr_.check_order(ticker, Side::Yes, desired_bid,
@@ -77,16 +77,16 @@ void Quoter::refresh_bid(const std::string &ticker, int desired_bid) {
     }
     Order order =
         order_mgr_.place(ticker, Side::Yes, desired_bid, config_.quote_size);
-    live.bid_order_id = order.id;
-    live.current_bid_cents = desired_bid;
-  } else if (std::abs(live.current_bid_cents - desired_bid) >
+    own.bid_order_id = order.id;
+    own.quoted_bid_cents = desired_bid;
+  } else if (std::abs(own.quoted_bid_cents - desired_bid) >
              config_.reprice_threshold_cents) {
-    if (!release_order(live.bid_order_id)) {
+    if (!release_order(own.bid_order_id)) {
       return;
     }
-    live.bid_order_id.clear();
+    own.bid_order_id.clear();
     // Self-cross guard: after cancelling, don't re-enter if new bid ≥ ask.
-    if (!live.ask_order_id.empty() && desired_bid >= live.current_ask_cents) {
+    if (!own.ask_order_id.empty() && desired_bid >= own.quoted_ask_cents) {
       return;
     }
     if (!risk_mgr_.check_order(ticker, Side::Yes, desired_bid,
@@ -95,17 +95,17 @@ void Quoter::refresh_bid(const std::string &ticker, int desired_bid) {
     }
     Order order =
         order_mgr_.place(ticker, Side::Yes, desired_bid, config_.quote_size);
-    live.bid_order_id = order.id;
-    live.current_bid_cents = desired_bid;
+    own.bid_order_id = order.id;
+    own.quoted_bid_cents = desired_bid;
   }
 }
 
 void Quoter::refresh_ask(const std::string &ticker, int desired_ask) {
   const int no_price = complement_price(desired_ask);
-  auto &live = live_quotes_[ticker];
-  if (live.ask_order_id.empty()) {
+  auto &own = own_quotes_[ticker];
+  if (own.ask_order_id.empty()) {
     // Self-cross guard: don't place ask if it would match our own resting bid.
-    if (!live.bid_order_id.empty() && desired_ask <= live.current_bid_cents) {
+    if (!own.bid_order_id.empty() && desired_ask <= own.quoted_bid_cents) {
       return;
     }
     if (!risk_mgr_.check_order(ticker, Side::No, no_price,
@@ -114,16 +114,16 @@ void Quoter::refresh_ask(const std::string &ticker, int desired_ask) {
     }
     Order order =
         order_mgr_.place(ticker, Side::No, no_price, config_.quote_size);
-    live.ask_order_id = order.id;
-    live.current_ask_cents = desired_ask;
-  } else if (std::abs(live.current_ask_cents - desired_ask) >
+    own.ask_order_id = order.id;
+    own.quoted_ask_cents = desired_ask;
+  } else if (std::abs(own.quoted_ask_cents - desired_ask) >
              config_.reprice_threshold_cents) {
-    if (!release_order(live.ask_order_id)) {
+    if (!release_order(own.ask_order_id)) {
       return;
     }
-    live.ask_order_id.clear();
+    own.ask_order_id.clear();
     // Self-cross guard: after cancelling, don't re-enter if new ask ≤ bid.
-    if (!live.bid_order_id.empty() && desired_ask <= live.current_bid_cents) {
+    if (!own.bid_order_id.empty() && desired_ask <= own.quoted_bid_cents) {
       return;
     }
     if (!risk_mgr_.check_order(ticker, Side::No, no_price,
@@ -132,8 +132,8 @@ void Quoter::refresh_ask(const std::string &ticker, int desired_ask) {
     }
     Order order =
         order_mgr_.place(ticker, Side::No, no_price, config_.quote_size);
-    live.ask_order_id = order.id;
-    live.current_ask_cents = desired_ask;
+    own.ask_order_id = order.id;
+    own.quoted_ask_cents = desired_ask;
   }
 }
 
@@ -205,29 +205,29 @@ void Quoter::update(std::string_view ticker, const LocalOrderbook &book) {
   }
 }
 
-void Quoter::reset_quotes() { live_quotes_.clear(); }
+void Quoter::reset_quotes() { own_quotes_.clear(); }
 
 LocalOrderbook
 Quoter::book_without_own_quotes(const std::string &ticker,
                                 const LocalOrderbook &book) const {
   LocalOrderbook visible = book;
-  const auto live_it = live_quotes_.find(ticker);
-  if (live_it == live_quotes_.end()) {
+  const auto own_it = own_quotes_.find(ticker);
+  if (own_it == own_quotes_.end()) {
     return visible;
   }
   const auto &open_orders = order_mgr_.open_orders();
-  const LiveQuote &live = live_it->second;
-  if (!live.bid_order_id.empty()) {
-    const auto order_it = open_orders.find(live.bid_order_id);
+  const OwnQuote &own = own_it->second;
+  if (!own.bid_order_id.empty()) {
+    const auto order_it = open_orders.find(own.bid_order_id);
     if (order_it != open_orders.end()) {
-      visible.apply_delta(Side::Yes, live.current_bid_cents,
+      visible.apply_delta(Side::Yes, own.quoted_bid_cents,
                           -order_it->second.remaining_quantity());
     }
   }
-  if (!live.ask_order_id.empty()) {
-    const auto order_it = open_orders.find(live.ask_order_id);
+  if (!own.ask_order_id.empty()) {
+    const auto order_it = open_orders.find(own.ask_order_id);
     if (order_it != open_orders.end()) {
-      visible.apply_delta(Side::No, complement_price(live.current_ask_cents),
+      visible.apply_delta(Side::No, complement_price(own.quoted_ask_cents),
                           -order_it->second.remaining_quantity());
     }
   }
@@ -236,15 +236,15 @@ Quoter::book_without_own_quotes(const std::string &ticker,
 
 // NOLINTNEXTLINE(bugprone-easily-swappable-parameters) - ticker vs order id
 void Quoter::forget_order(std::string_view ticker, std::string_view order_id) {
-  auto live_it = live_quotes_.find(std::string{ticker});
-  if (live_it == live_quotes_.end()) {
+  auto own_it = own_quotes_.find(std::string{ticker});
+  if (own_it == own_quotes_.end()) {
     return;
   }
-  if (live_it->second.bid_order_id == order_id) {
-    live_it->second.bid_order_id.clear();
+  if (own_it->second.bid_order_id == order_id) {
+    own_it->second.bid_order_id.clear();
   }
-  if (live_it->second.ask_order_id == order_id) {
-    live_it->second.ask_order_id.clear();
+  if (own_it->second.ask_order_id == order_id) {
+    own_it->second.ask_order_id.clear();
   }
 }
 

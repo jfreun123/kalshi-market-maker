@@ -62,7 +62,8 @@ public:
 
   // Forget all tracked resting quotes. Call this after the resting orders have
   // been cancelled out-of-band (risk halt, disconnect, shutdown): the quoter's
-  // live-order ids would otherwise be stale, so it would try to cancel dead ids
+  // tracked own-quote ids would otherwise be stale, so it would try to cancel
+  // dead ids
   // and never re-quote once the feed recovers.
   void reset_quotes();
 
@@ -72,11 +73,14 @@ public:
   void forget_order(std::string_view ticker, std::string_view order_id);
 
 private:
-  struct LiveQuote {
+  // Our own resting quote pair on one market: which orders are ours and the
+  // price we quoted them at (what the reprice threshold compares against).
+  // How much of them is still unfilled lives in IOrderManager::open_orders().
+  struct OwnQuote {
     std::string bid_order_id;
     std::string ask_order_id;
-    int current_bid_cents{0};
-    int current_ask_cents{
+    int quoted_bid_cents{0};
+    int quoted_ask_cents{
         0}; // stored as YES ask price (not the NO order price)
   };
 
@@ -97,7 +101,7 @@ private:
   IOrderManager &order_mgr_;
   RiskManager &risk_mgr_;
   const FlowImbalanceGuard *flow_guard_{nullptr};
-  std::unordered_map<std::string, LiveQuote> live_quotes_;
+  std::unordered_map<std::string, OwnQuote> own_quotes_;
 };
 
 } // namespace kalshi
