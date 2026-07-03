@@ -61,6 +61,7 @@ struct Order {
 // ---- Fill ----
 
 struct Fill {
+  std::string trade_id;
   std::string order_id;
   std::string market_ticker;
   Side side{Side::Yes};

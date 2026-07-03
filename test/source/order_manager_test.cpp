@@ -312,6 +312,45 @@ TEST_F(OrderManagerTest, DuplicateFillIsIdempotent) {
             kalshi::Quantity::from_contracts(kFillQty));
 }
 
+TEST_F(OrderManagerTest, SameMillisecondPartialFillsWithDistinctTradeIdsCount) {
+  // A taker sweeping our level produces several fills with the same order_id
+  // and often the same ts_ms; trade_id is the unique key and both must count.
+  auto rest_client = make_rest_client(std::make_unique<FakeTransport>());
+  kalshi::OrderManager mgr{rest_client};
+
+  auto first =
+      make_fill(kOrderId, kTicker, kalshi::Side::Yes, kYesFillPrice, kFillQty);
+  first.trade_id = "trade-a";
+  auto second =
+      make_fill(kOrderId, kTicker, kalshi::Side::Yes, kYesFillPrice, kFillQty);
+  second.trade_id = "trade-b";
+
+  mgr.record_fill(first);
+  mgr.record_fill(second);
+
+  constexpr std::int64_t kBothFills = 2LL * kFillQty;
+  EXPECT_EQ(mgr.net_position(kTicker),
+            kalshi::Quantity::from_contracts(kBothFills));
+}
+
+TEST_F(OrderManagerTest, DuplicateTradeIdIsDeduped) {
+  auto rest_client = make_rest_client(std::make_unique<FakeTransport>());
+  kalshi::OrderManager mgr{rest_client};
+
+  auto fill =
+      make_fill(kOrderId, kTicker, kalshi::Side::Yes, kYesFillPrice, kFillQty);
+  fill.trade_id = "trade-a";
+  constexpr auto kReplayDelay = std::chrono::milliseconds{5};
+  auto replay = fill;
+  replay.timestamp += kReplayDelay;
+
+  mgr.record_fill(fill);
+  mgr.record_fill(replay); // same trade replayed with a different ts
+
+  EXPECT_EQ(mgr.net_position(kTicker),
+            kalshi::Quantity::from_contracts(kFillQty));
+}
+
 TEST_F(OrderManagerTest, FilledCountUpdatedOnPartialFill) {
   auto transport = std::make_unique<FakeTransport>();
   transport->enqueue({kHttpOk, order_response_json(kOrderId, kOrderQty)});
