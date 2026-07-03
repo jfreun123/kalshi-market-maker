@@ -85,6 +85,23 @@ double LocalOrderbook::mid_price_cents() const {
          kTwoSides;
 }
 
+double LocalOrderbook::micro_price_cents() const {
+  auto bid = best_bid();
+  auto ask = best_ask();
+  if (!bid || !ask) {
+    return 0.0;
+  }
+  const double bid_qty = bid->quantity.contracts();
+  const double ask_qty = ask->quantity.contracts();
+  const double total_qty = bid_qty + ask_qty;
+  if (total_qty <= 0.0) {
+    return mid_price_cents();
+  }
+  return ((static_cast<double>(bid->price_cents) * ask_qty) +
+          (static_cast<double>(ask->price_cents) * bid_qty)) /
+         total_qty;
+}
+
 int LocalOrderbook::spread_cents() const {
   auto bid = best_bid();
   auto ask = best_ask();

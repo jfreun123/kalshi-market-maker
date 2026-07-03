@@ -24,6 +24,12 @@ public:
 
   [[nodiscard]] double mid_price_cents() const;
 
+  // Volume-adjusted mid (micro-price): each side's price weighted by the
+  // *opposite* side's size, so it leans toward the side under more pressure —
+  // a better fair-value anchor than the raw mid under book imbalance. Falls
+  // back to the mid when a side is empty or both sizes are zero.
+  [[nodiscard]] double micro_price_cents() const;
+
   [[nodiscard]] int spread_cents() const;
 
   [[nodiscard]] const Orderbook &state() const;

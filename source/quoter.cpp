@@ -146,8 +146,12 @@ void Quoter::update(std::string_view ticker, const LocalOrderbook &book) {
 
   const std::string ticker_str{ticker};
   const double mid = book.mid_price_cents();
-  const double fair_val =
-      fv_engine_.estimate(FairValueInput{mid, kDefaultTimeToCloseHours, 0, {}});
+  // Anchor fair value on the volume-adjusted micro-price, not the raw mid, so
+  // quotes lean toward the side the book is pressuring (less adverse
+  // selection).
+  const double micro = book.micro_price_cents();
+  const double fair_val = fv_engine_.estimate(
+      FairValueInput{micro, kDefaultTimeToCloseHours, 0, {}});
   ensure(std::isfinite(fair_val), "fair value is not finite");
 
   int target_spread = config_.target_spread_cents;
@@ -182,9 +186,9 @@ void Quoter::update(std::string_view ticker, const LocalOrderbook &book) {
   const std::optional<int> desired_ask = passive_ask(raw_ask, market_bid);
 
   get_logger()->debug(
-      "reprice ticker={} mid={:.1f} fv={:.2f} raw_bid={} raw_ask={} bid={} "
-      "ask={}",
-      ticker, mid, fair_val, raw_bid, raw_ask, desired_bid.value_or(-1),
+      "reprice ticker={} mid={:.1f} micro={:.2f} fv={:.2f} raw_bid={} "
+      "raw_ask={} bid={} ask={}",
+      ticker, mid, micro, fair_val, raw_bid, raw_ask, desired_bid.value_or(-1),
       desired_ask.value_or(-1));
 
   if (desired_bid.has_value()) {
