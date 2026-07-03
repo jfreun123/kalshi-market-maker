@@ -38,6 +38,7 @@ TradingSession::TradingSession(std::vector<std::string> tickers,
 
 void TradingSession::on_snapshot(const Orderbook &snapshot) {
   ob_map_[snapshot.ticker].apply_snapshot(snapshot);
+  last_book_update_[snapshot.ticker] = clock_();
   get_logger()->info("snapshot ticker={} yes_levels={} no_levels={}",
                      snapshot.ticker, snapshot.yes.size(), snapshot.no.size());
 }
@@ -46,6 +47,7 @@ void TradingSession::on_delta(const std::string &ticker, Side side,
                               int price_cents, Quantity qty) {
   auto &book = ob_map_[ticker];
   book.apply_delta(side, price_cents, qty);
+  last_book_update_[ticker] = clock_();
   get_logger()->debug("delta ticker={} side={} price={} qty={} mid={:.1f}",
                       ticker, side_name(side), price_cents, qty.to_fp_string(),
                       book.mid_price_cents());
@@ -125,6 +127,16 @@ void TradingSession::record_flatten(const Order &order) {
   if (pnl_listener_) {
     pnl_listener_(carried_totals());
   }
+}
+
+std::optional<std::chrono::seconds>
+TradingSession::book_age(const std::string &ticker) const {
+  const auto last_update = last_book_update_.find(ticker);
+  if (last_update == last_book_update_.end()) {
+    return std::nullopt;
+  }
+  return std::chrono::duration_cast<std::chrono::seconds>(
+      clock_() - last_update->second);
 }
 
 TradingSession::PnlMap TradingSession::carried_totals() const {
@@ -259,12 +271,14 @@ void TradingSession::log_status() const {
     const double session_pnl = order_mgr_.realized_pnl(ticker);
     const double fees = order_mgr_.fees_paid(ticker);
     const double prior = prior_pnl_for(prior_pnl_, ticker);
+    const auto age = book_age(ticker);
     log->info("status ticker={} net_pos={} session_pnl_dollars={:.2f} "
               "fees_dollars={:.2f} total_pnl_dollars={:.2f} halted={} "
-              "constraints={}",
+              "constraints={} book_age_s={}",
               ticker, pos.to_fp_string(), session_pnl / kCentsPerDollar,
               fees / kCentsPerDollar, (prior + session_pnl) / kCentsPerDollar,
-              risk_mgr_.is_halted(), risk_mgr_.active_constraints());
+              risk_mgr_.is_halted(), risk_mgr_.active_constraints(),
+              age.has_value() ? std::to_string(age->count()) : "none");
 
     // E_win decomposition: locked spread capture vs. the directional bet.
     const auto exposure = order_mgr_.exposure_decomposition(ticker);
