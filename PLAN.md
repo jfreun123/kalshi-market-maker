@@ -164,6 +164,19 @@
   divergence**. Capture as a trimmed, Kalshi-specific `docs/PRE_LIVE_CHECKLIST.md`
   (from the ~100-question list in *Research Findings*). Gate real capital on it.
 
+- [ ] **37. Deploy in a cloud region near Kalshi's matching engine
+  (operational).** The demo runs measured a ~300ms REST round-trip from the
+  local machine — the direct cause of the residual `post only cross` window
+  (item 3): quotes are clamped against a BBO that is stale by a full RTT.
+  Kalshi's infrastructure is AWS-hosted (US East); a small VM in the same
+  region cuts the RTT to single-digit milliseconds, shrinking the stale-BBO
+  window ~30-100x for a few dollars a month — likely cheaper and more effective
+  than any software mitigation, and a prerequisite for judging whether FIX
+  (item 11) is worth it. Steps: (a) measure RTT to the API from candidate
+  regions (us-east-1/2 first) vs. home; (b) run a demo session from the best
+  region and compare cross/reject rates and markout against a local run;
+  (c) fold the chosen host into Phase 32 (service supervision, logs, alerts).
+
 ### Strategy roadmap — papers re-read (2026-07-03)
 
 > All four papers in [docs/papers](docs/papers/README.md) were re-read against
