@@ -37,9 +37,9 @@
   BBO, or step the price further passive on each reject. Detail in *Demo Run
   Findings*.
 
-- [ ] **4. D2 — align scanner price band with the risk price gate.** The scanner
-  admits `[min_price, max_price]` but the quoter only trades `[10,90]`, so the
-  scanner's top picks are un-quotable longshots. Derive one band from the other.
+- [x] **4. D2 — align scanner price band with the risk price gate.** *Done —
+  merged in PR #11 (`30b3524`): `load_config` intersects the scanner band with
+  `quotable_price_band(risk, quoter)` so scan picks are always quotable.*
 
 - [x] **5. Demo-environment conformance smoke tests.** *Done — see Done section.*
   Short, unit-test-style
@@ -185,6 +185,28 @@
   shared vs. per-process risk/PnL ledger, cross-exchange netting, and how a
   supervisor starts/monitors/flattens each process.
 - [ ] **17. R7 — `docs/kalshi-messages.md` + rate-limiting review.**
+
+### Bug audit — 2026-07-03 (in progress)
+
+> Findings from a systematic correctness audit of the codebase. Each confirmed
+> bug is recorded here **as soon as it is found** so the list survives session
+> crashes; entries move to Done when the fix merges. Fixes go out as separate
+> PRs for review.
+
+- [ ] *(audit running — findings will be appended here)*
+
+### In review (PR open)
+
+- [ ] **WS protocol hardening (PR #30, branch `fix/ws-protocol`).** Four wire
+  protocol bugs: (a) no `seq` gap detection — missed deltas silently corrupted
+  the local book; now tracked per `sid`, a gap discards the message and recycles
+  the connection via new `IWebSocket::request_close()` (async-safe from the
+  callback thread, unlike `stop()`) to force a fresh snapshot; (b) `parse_side`
+  silently defaulted unknown side strings to `No`, corrupting the book on
+  malformed deltas — now throws and the delta is dropped; (c) subscribe sent an
+  undocumented `use_yes_price` param — removed (if the server ever honored it,
+  the NO-side complement math would double-flip the scale); (d) `error` and
+  `subscribed` server messages were silently ignored — now logged/handled.
 
 ### Done (recent sessions, committed)
 
