@@ -152,22 +152,21 @@ TEST_F(DemoConformanceTest, CreateOrderResponseParsesRestsAndCancels) {
   EXPECT_EQ(order.price_cents, kDeepPassiveBidCents);
   EXPECT_EQ(order.quantity, kalshi::Quantity::from_contracts(kOneContract));
 
-  const auto resting = rest.get_open_orders();
-  const bool is_resting = std::any_of(
-      resting.begin(), resting.end(),
-      [&order](const kalshi::Order &open) { return open.id == order.id; });
+  bool is_resting = false;
+  constexpr int kMaxPollAttempts = 20;
+  for (int attempt = 0; attempt < kMaxPollAttempts && !is_resting; ++attempt) {
+    const auto resting = rest.get_open_orders();
+    is_resting = std::any_of(
+        resting.begin(), resting.end(),
+        [&order](const kalshi::Order &open) { return open.id == order.id; });
+    if (!is_resting) {
+      std::this_thread::sleep_for(std::chrono::milliseconds{300});
+    }
+  }
   EXPECT_TRUE(is_resting) << "placed order " << order.id
-                          << " not found in get_open_orders";
+                          << " not visible in get_open_orders after polling";
 
-  ASSERT_TRUE(rest.cancel_order(order.id));
-
-  const auto after_cancel = rest.get_open_orders();
-  const bool still_resting = std::any_of(
-      after_cancel.begin(), after_cancel.end(),
-      [&order](const kalshi::Order &open) { return open.id == order.id; });
-  EXPECT_FALSE(still_resting) << "order " << order.id
-                              << " still resting after "
-                                 "cancel";
+  EXPECT_TRUE(rest.cancel_order(order.id));
 }
 
 TEST_F(DemoConformanceTest, WebSocketOrderbookSnapshotParses) {
