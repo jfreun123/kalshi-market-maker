@@ -176,6 +176,7 @@ bool PaperTransport::simulate_fill(const std::string &order_id,
                            : OrderStatus::PartiallyFilled;
 
   Fill fill;
+  fill.trade_id = "paper-trade-" + std::to_string(next_id_++);
   fill.order_id = order_id;
   fill.market_ticker = order_iter->market_ticker;
   fill.side = order_iter->side;

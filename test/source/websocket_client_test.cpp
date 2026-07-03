@@ -117,9 +117,11 @@ std::string delta_message(const std::string &ticker, const std::string &side,
 std::string fill_message(const std::string &order_id, const std::string &ticker,
                          const std::string &side, int price, int count,
                          bool is_taker = false,
-                         const std::string &fee_cost = "") {
+                         const std::string &fee_cost = "",
+                         const std::string &trade_id = "trade-1") {
   nlohmann::json msg;
   msg["type"] = "fill";
+  msg["msg"]["trade_id"] = trade_id;
   msg["msg"]["order_id"] = order_id;
   msg["msg"]["market_ticker"] = ticker;
   msg["msg"]["outcome_side"] = side;
@@ -415,6 +417,7 @@ TEST_F(WebSocketClientTest, FillFieldsParsedCorrectly) {
   client.on_fill([&](const kalshi::Fill &fill) { received = fill; });
   client.run();
 
+  EXPECT_EQ(received.trade_id, "trade-1");
   EXPECT_EQ(received.order_id, "order-abc");
   EXPECT_EQ(received.market_ticker, kTestTicker);
   EXPECT_EQ(received.side, kalshi::Side::Yes);
@@ -422,6 +425,26 @@ TEST_F(WebSocketClientTest, FillFieldsParsedCorrectly) {
   EXPECT_EQ(received.quantity, kalshi::Quantity::from_contracts(kFillCount));
   EXPECT_FALSE(received.is_taker); // default fill_message is maker (passive)
   EXPECT_DOUBLE_EQ(received.fee_cents, 0.0); // absent fee_cost defaults to zero
+}
+
+TEST_F(WebSocketClientTest, NoSideFillPriceIsComplementOfYesPrice) {
+  // The wire carries yes_price_dollars (always the YES-leg price); the internal
+  // Fill convention prices a fill in its own side's dimension, so a NO fill at
+  // yes-price 56c must be recorded at the NO cost 100 - 56 = 44c.
+  auto fake_ws = std::make_unique<kalshi::FakeWebSocket>();
+  kalshi::FakeWebSocket *ws_raw = fake_ws.get();
+  constexpr int kYesLegPrice = 56;
+  ws_raw->enqueue_message(
+      fill_message("order-abc", kTestTicker, "no", kYesLegPrice, kFillCount));
+
+  auto client = make_client(std::move(fake_ws));
+
+  kalshi::Fill received;
+  client.on_fill([&](const kalshi::Fill &fill) { received = fill; });
+  client.run();
+
+  EXPECT_EQ(received.side, kalshi::Side::No);
+  EXPECT_EQ(received.price_cents, kalshi::complement_price(kYesLegPrice));
 }
 
 TEST_F(WebSocketClientTest, FillFeeCostParsedFromDollarsToCents) {

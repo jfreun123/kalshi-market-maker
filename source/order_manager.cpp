@@ -62,6 +62,9 @@ void OrderManager::cancel_all(std::string_view ticker) {
 }
 
 std::string OrderManager::fill_key(const Fill &fill) {
+  if (!fill.trade_id.empty()) {
+    return fill.trade_id;
+  }
   return fill.order_id + "@" +
          std::to_string(fill.timestamp.time_since_epoch().count());
 }
