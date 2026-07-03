@@ -10,6 +10,7 @@
 #include <format>
 #include <stdexcept>
 #include <string>
+#include <thread>
 
 namespace kalshi {
 
@@ -201,11 +202,19 @@ Order parse_order(const nlohmann::json &order_json) {
 
 // --- RestClient implementation ---
 
+namespace {
+constexpr double kBasicWriteTokensPerSecond = 100.0;
+constexpr double kBasicWriteCapacity = 100.0;
+constexpr double kPlaceOrderCost = 10.0;
+constexpr double kCancelOrderCost = 2.0;
+} // namespace
+
 RestClient::RestClient(Auth auth, std::unique_ptr<IHttpTransport> transport,
                        std::string base_url)
     : auth_{std::move(auth)}, transport_{std::move(transport)},
       base_url_{std::move(base_url)},
-      path_prefix_{extract_path_prefix(base_url_)} {}
+      path_prefix_{extract_path_prefix(base_url_)},
+      write_limiter_{kBasicWriteTokensPerSecond, kBasicWriteCapacity} {}
 
 std::vector<Market> RestClient::get_markets(std::string_view event_ticker) {
   // Max page size accepted by the Kalshi /markets endpoint. Larger pages mean
@@ -347,6 +356,7 @@ Order RestClient::place_order(std::string_view ticker, Side side,
     body_json["cancel_order_on_pause"] = true;
   }
 
+  std::this_thread::sleep_for(write_limiter_.acquire(kPlaceOrderCost));
   auto resp = transport_->post(url, headers, body_json.dump());
   check_response(resp);
 
@@ -387,6 +397,7 @@ bool RestClient::cancel_order(std::string_view order_id) {
   std::string url = base_url_ + "/portfolio/events/orders/" + order_id_str;
 
   auto headers = auth_.sign("DELETE", path);
+  std::this_thread::sleep_for(write_limiter_.acquire(kCancelOrderCost));
   auto resp = transport_->delete_(url, headers);
 
   constexpr int kHttpSuccessMin = 200;
