@@ -2,6 +2,7 @@
 
 #include "auth.hpp"
 #include "http_transport.hpp"
+#include "rate_limiter.hpp"
 #include "types.hpp"
 
 #include <memory>
@@ -34,6 +35,7 @@ private:
   std::string base_url_;
   std::string
       path_prefix_; // URL path component of base_url (e.g. /trade-api/v2)
+  RateLimiter write_limiter_;
 };
 
 } // namespace kalshi
