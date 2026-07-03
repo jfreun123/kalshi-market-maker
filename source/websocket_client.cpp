@@ -341,6 +341,7 @@ void dispatch_fill(const WebSocketClient::FillCallback &callback,
   try {
     Fill fill;
     fill.order_id = msg_body.at("order_id").get<std::string>();
+    fill.trade_id = msg_body.value("trade_id", std::string{});
     fill.market_ticker = msg_body.at("market_ticker").get<std::string>();
     fill.side = parse_side(msg_body.at("outcome_side").get<std::string>());
     const int yes_leg_price =

@@ -312,6 +312,40 @@ TEST_F(OrderManagerTest, DuplicateFillIsIdempotent) {
             kalshi::Quantity::from_contracts(kFillQty));
 }
 
+TEST_F(OrderManagerTest, SameMillisecondFillsWithDistinctTradeIdsBothCount) {
+  auto rest_client = make_rest_client(std::make_unique<FakeTransport>());
+  kalshi::OrderManager mgr{rest_client};
+
+  auto first_fill =
+      make_fill(kOrderId, kTicker, kalshi::Side::Yes, kYesFillPrice, kFillQty);
+  first_fill.trade_id = "trade-001";
+  auto second_fill =
+      make_fill(kOrderId, kTicker, kalshi::Side::Yes, kYesFillPrice, kFillQty);
+  second_fill.trade_id = "trade-002";
+
+  mgr.record_fill(first_fill);
+  mgr.record_fill(second_fill);
+
+  EXPECT_EQ(mgr.net_position(kTicker),
+            kalshi::Quantity::from_contracts(2 * kFillQty))
+      << "two distinct trades in the same millisecond must both count";
+}
+
+TEST_F(OrderManagerTest, DuplicateTradeIdIsIdempotent) {
+  auto rest_client = make_rest_client(std::make_unique<FakeTransport>());
+  kalshi::OrderManager mgr{rest_client};
+
+  auto fill =
+      make_fill(kOrderId, kTicker, kalshi::Side::Yes, kYesFillPrice, kFillQty);
+  fill.trade_id = "trade-001";
+
+  mgr.record_fill(fill);
+  mgr.record_fill(fill);
+
+  EXPECT_EQ(mgr.net_position(kTicker),
+            kalshi::Quantity::from_contracts(kFillQty));
+}
+
 TEST_F(OrderManagerTest, FilledCountUpdatedOnPartialFill) {
   auto transport = std::make_unique<FakeTransport>();
   transport->enqueue({kHttpOk, order_response_json(kOrderId, kOrderQty)});

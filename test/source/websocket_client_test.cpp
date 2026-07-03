@@ -481,6 +481,37 @@ TEST_F(WebSocketClientTest, YesSideFillPriceStaysYesLeg) {
   EXPECT_EQ(received.price_cents, kFillPrice);
 }
 
+TEST_F(WebSocketClientTest, FillTradeIdParsedWhenPresent) {
+  auto msg = nlohmann::json::parse(
+      fill_message("order-abc", kTestTicker, "yes", kFillPrice, kFillCount));
+  msg["msg"]["trade_id"] = "trade-xyz";
+  auto fake_ws = std::make_unique<kalshi::FakeWebSocket>();
+  kalshi::FakeWebSocket *ws_raw = fake_ws.get();
+  ws_raw->enqueue_message(msg.dump());
+
+  auto client = make_client(std::move(fake_ws));
+  kalshi::Fill received;
+  client.on_fill([&](const kalshi::Fill &fill) { received = fill; });
+  client.run();
+
+  EXPECT_EQ(received.trade_id, "trade-xyz");
+}
+
+TEST_F(WebSocketClientTest, FillWithoutTradeIdParsesWithEmptyTradeId) {
+  auto fake_ws = std::make_unique<kalshi::FakeWebSocket>();
+  kalshi::FakeWebSocket *ws_raw = fake_ws.get();
+  ws_raw->enqueue_message(
+      fill_message("order-abc", kTestTicker, "yes", kFillPrice, kFillCount));
+
+  auto client = make_client(std::move(fake_ws));
+  kalshi::Fill received;
+  received.trade_id = "sentinel";
+  client.on_fill([&](const kalshi::Fill &fill) { received = fill; });
+  client.run();
+
+  EXPECT_EQ(received.trade_id, "");
+}
+
 TEST_F(WebSocketClientTest, ContiguousSeqDispatchesAllDeltas) {
   auto fake_ws = std::make_unique<kalshi::FakeWebSocket>();
   kalshi::FakeWebSocket *ws_raw = fake_ws.get();
