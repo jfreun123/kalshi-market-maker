@@ -27,6 +27,8 @@ const auto kTestNow =
 
 constexpr double kHighVolume = 200000.0;
 constexpr int kScanTopN = 20;
+constexpr int kWideMinSpread = 1;
+constexpr int kWideMaxSpread = 20;
 constexpr int kScanTopTwo = 2;
 constexpr double kCustomMinVolumeUsd = 150000.0;
 
@@ -55,6 +57,11 @@ constexpr std::string_view kMarketCrypto =
 constexpr std::string_view kMarketCryptoEqualVol =
     R"({"ticker":"KXBTCH-P","title":"BTC event?","category":"Crypto",)"
     R"("status":"active","yes_bid_dollars":"0.4800","yes_ask_dollars":"0.5200",)"
+    R"("volume_24h_fp":"200000.00","close_time":"2026-06-26T00:00:00Z"})";
+
+constexpr std::string_view kMarketWideBand =
+    R"({"ticker":"KXWIDEBAND-W","title":"Wide band market?","category":"Financials",)"
+    R"("status":"active","yes_bid_dollars":"0.4200","yes_ask_dollars":"0.5700",)"
     R"("volume_24h_fp":"200000.00","close_time":"2026-06-26T00:00:00Z"})";
 
 // Filtered: price too low (mid=7.5c — deep longshot)
@@ -204,6 +211,23 @@ TEST_F(TickerScannerTest, ScanReturnsGoodCandidates) {
   auto results = scanner.scan(kScanTopN, kTestNow);
 
   EXPECT_EQ(results.size(), 3U);
+}
+
+TEST_F(TickerScannerTest, SpreadScorePeaksAtConfiguredBandMidpoint) {
+  auto [client, transport] = make_client_with_transport();
+  transport->enqueue(
+      {kHttpOk, make_markets_response({kMarketGoodA, kMarketWideBand})});
+
+  kalshi::ScannerConfig config;
+  config.min_spread_cents = kWideMinSpread;
+  config.max_spread_cents = kWideMaxSpread;
+  kalshi::TickerScanner scanner{client, config};
+  auto results = scanner.scan(kScanTopN, kTestNow);
+
+  ASSERT_EQ(results.size(), 2U);
+  EXPECT_EQ(results.front().ticker, "KXWIDEBAND-W")
+      << "spread 15 sits nearer the [1,20] band midpoint (10.5) than spread 4 "
+         "and must outscore it at equal volume";
 }
 
 TEST_F(TickerScannerTest, IncentivizedMarketOutranksEquivalentPeer) {
