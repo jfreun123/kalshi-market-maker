@@ -35,3 +35,4 @@ logs/
 
 # Scan output artifact
 scan_results.json
+docs/papers/*.pdf
