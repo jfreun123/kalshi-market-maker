@@ -1,0 +1,13 @@
+{
+  "api_key": "c39656c8-ca5f-44e9-b38e-3a0f24608e1a",
+  "private_key_path": "/Users/jacobfreund/kalshi-market-maker/api-keys/Mac-demo.txt",
+  "base_url": "https://demo-api.kalshi.co/trade-api/v2",
+  "ws_url": "wss://demo-api.kalshi.co/trade-api/ws/v2",
+  "log_dir": "logs",
+  "target_tickers": [
+    "KXCPI-26SEP-T0.3",
+    "KXCPI-26SEP-T0.1",
+    "KXCPI-26SEP-T0.4",
+    "KXCPI-26AUG-T0.3"
+  ]
+}
