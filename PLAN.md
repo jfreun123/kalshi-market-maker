@@ -27,16 +27,22 @@
   local state), and make the exit/halt flatten path reliable across SIGINT/kill.
   High priority before any live trading.
 
-- [ ] **3. D1 — non-crossing quote clamp.** Clamp quotes to stay strictly
-  passive vs. the observed BBO (≥1c behind) so latency on fast books can't turn
-  a quote into a `post only cross`. The *systematic* crossing was the orderbook
-  sort bug (now fixed); this is the residual. Detail in *Demo Run Findings*.
+- [ ] **3. D1 — non-crossing quote clamp (residual).** Clamp quotes to stay
+  strictly passive vs. the observed BBO (≥1c behind) so latency on fast books
+  can't turn a quote into a `post only cross`. The *systematic* crossing was the
+  orderbook sort bug (fixed); the reject/429 *hot loop* is fixed (per-ticker
+  cooldown — see Done). The **residual** is that we still clamp against the
+  *lagging local* book, so a fast book still produces occasional crosses
+  (post-cooldown: ~45 vs 433 in a 90s demo). Deeper fix: clamp against a fresher
+  BBO, or step the price further passive on each reject. Detail in *Demo Run
+  Findings*.
 
 - [ ] **4. D2 — align scanner price band with the risk price gate.** The scanner
   admits `[min_price, max_price]` but the quoter only trades `[10,90]`, so the
   scanner's top picks are un-quotable longshots. Derive one band from the other.
 
-- [ ] **5. Demo-environment conformance smoke tests.** Short, unit-test-style
+- [x] **5. Demo-environment conformance smoke tests.** *Done — see Done section.*
+  Short, unit-test-style
   tests that hit the **real Kalshi demo environment** — one per request/response
   — asserting we can *send* each request and *parse* each response into our
   types without throwing, with key fields populated. **Why this matters:** pure
@@ -95,15 +101,11 @@
   need separate builds; some flags are GCC-only vs Clang-only) — evaluate each,
   keep the suite green under the chosen set, wire them into CI.
 
-- [~] **8. D3 — staleness flapping on quiet markets.** Thin markets send no WS
-  traffic for >30s and trip `kStaleBook` repeatedly → flatten/re-quote churn.
-  Count heartbeats toward freshness, or lengthen the threshold for low-activity
-  markets (don't loosen blindly — it weakens staleness protection on active
-  markets). *Fix in progress on `feat/verbose-logging`: `IWebSocket` now surfaces
-  ping/pong via `on_heartbeat`, `IxWebSocket` enables a 10s auto-ping, and
-  liveness frames refresh `last_message_time` — so a quiet-but-alive feed no
-  longer trips the halt. Not yet live-validated (blocked on the demo WS 401; see
-  Rate Limiting).*
+- [x] **8. D3 — staleness flapping on quiet markets.** *Done — WS ping/pong
+  liveness (see Done section). `IWebSocket` surfaces ping/pong via `on_heartbeat`,
+  `IxWebSocket` enables a 10s auto-ping, and liveness frames refresh
+  `last_message_time` — so a quiet-but-alive feed no longer trips the halt.
+  Live-validated: 0 false halts over ~2 min on quiet markets.*
 
 - [ ] **9. Queue-position awareness (strategy).** Orders join a price-time FIFO
   queue; at a deep level a small quote sits at the back (observed queue position
@@ -112,7 +114,16 @@
   pulling when the queue ahead is too deep. Lower priority; noted so it isn't
   lost.
 
-- [ ] **18. Rebate-aware market selection (strategy).** Kalshi's **Liquidity
+- [ ] **20. WS reconnect backoff (operational).** The reconnect loop retries a
+  failed handshake every 5s **forever** (`max_reconnects=-1`, fixed delay). A
+  persistent `401` (demo connection cap) turned into indefinite 5s reconnect-spam
+  that *worsens* the server-side guard it's fighting. Add exponential backoff
+  (cap ~60s) and treat repeated **auth** failures distinctly from transient
+  disconnects. Surfaced repeatedly during this session's demo runs — highest-value
+  remaining operational fix. See *Rate Limiting*.
+
+- [x] **18. Rebate-aware market selection (strategy).** *Done — `get_incentive_programs`
+  joined into scanner ranking (see Done section).* Kalshi's **Liquidity
   Incentive Program** pays for top-of-book resting size whether or not it fills
   (score = size × price-proximity, over random 1s snapshots; per-market pools
   ~$10–1,000/day). The scanner is currently blind to this — it ranks on
@@ -164,6 +175,46 @@
 
 ### Done (recent sessions, committed)
 
+- [x] **Zero-inventory invariant — flatten positions (item, this session).** The
+  bot cancelled resting *orders* on exit but left *positions* (fills accumulate
+  real inventory) — a live demo run ended with ~$11 of residual positions. Added
+  `RestClient::flatten(ticker, net_position)` (aggressive IOC taker on the
+  opposite side, fractional `Quantity` count so it closes to the exact 0.01), a
+  `--flatten` CLI mode to clean up leftover inventory, and **flatten-on-shutdown**
+  (live mode) so a normal exit ends flat. Verified live: closed 3 residual demo
+  positions exactly, re-run reported flat. Complements *inventory skew* (which
+  keeps us near-flat while running) with a hard flat at exit.
+- [x] **Reject/rate-limit hot loop → per-ticker cooldown (D1-adjacent, this
+  session).** On a fast book a quote clamped against the *lagging* local BBO can
+  cross the exchange's current BBO → `post only cross` reject; the place threw
+  before the quote state updated, so the next delta re-fired the same crossing
+  price ~5×/s. Live: **433 rejects + 13 × 429 in ~90s** on one ticker. Fix:
+  `TradingSession` records a per-ticker cooldown (500ms) on any place error and
+  skips re-quoting that ticker until it elapses. Verified live: rejects **−90%**
+  (433→45), 429s **−92%** (13→1). Residual crossing remains — see item 3.
+- [x] **Client-side write rate limiter (this session).** New `RateLimiter` token
+  bucket sized to the Basic tier (100 write-tokens/s, capacity 100); `RestClient`
+  throttles `place_order` (10) / `cancel_order` (2) by sleeping the returned wait.
+  Starts full, so normal quoting never waits — a defense-in-depth backstop for the
+  429s. Fills the *Rate Limiting* gap below.
+- [x] **WS ping/pong liveness → staleness fix (D3, item 8, this session).** The
+  30s stale-book guard false-halted on quiet markets because only app messages
+  refreshed `last_message_time`. `IWebSocket` now surfaces ping/pong via
+  `on_heartbeat`; `IxWebSocket` enables a 10s auto-ping and counts ping/pong as
+  liveness. Distinguishes "market idle" (keep quoting) from "feed dead" (halt).
+  Verified live: **0 false halts** over ~2 min on quiet markets.
+- [x] **Rebate-aware scanner (item 18, this session).** `RestClient::get_incentive_programs()`
+  (public `GET /incentive_programs`) joined into the scanner ranking; an active
+  Liquidity Incentive pool adds a log-normalized bonus (`incentive_weight`, 0.50)
+  on top of volume+spread. Verified live against demo pools. See *Kalshi incentive
+  programs* under *Research Findings*.
+- [x] **`--verbose` flag (this session).** Extracted `CliArgs`/`parse_args` into a
+  testable `cli.{hpp,cpp}` unit; `--verbose` sets the logger to `debug` so quote/
+  skew/reprice detail (debug-level) is visible.
+- [x] **Demo-environment conformance smoke tests (item 5).** Live-demo, gated
+  tests for REST (`get_markets`/orderbook/positions/open-orders/create+cancel
+  lifecycle/`get_incentive_programs`) and WS (snapshot, delta-applies-and-stays-
+  valid, NO-side). Caught the microsecond-timestamp bug on the first real run.
 - [x] **Orderbook delta apply (P0).** `delta_fp` is a signed *increment*, not the
   absolute size; `apply_delta` treated it as absolute, so a `-1.47` shrink set
   the level negative and a `-0.16` shrink erased it. Now `quantity += delta` with
@@ -840,8 +891,9 @@ Kalshi Basic tier: **200 read tokens/s**, **100 write tokens/s**. Each REST requ
 **When scaling beyond Basic:** target the Advanced tier (300/300) or use the `POST /portfolio/orders/batches` endpoint for bulk placement when Phase 21 (async dispatch) is implemented.
 
 **Live findings (2026-07-02 demo runs):**
-- **No client-side rate limiter exists yet.** The scanner fires ~70 paginated `GET /markets` calls back-to-back unthrottled (still only ~1.75 req/s, well under the 200/s read budget), and the reprice-cooldown-on-429 noted above is not implemented.
-- **WS reconnect has no backoff.** On a failed handshake the client retries every 5s **forever** (`max_reconnects=-1`). Observed a *persistent* WS `401 Unauthorized` (likely a demo concurrent-connection cap, **not** rate limiting) turn into indefinite 5s reconnect-spam that can only worsen a server-side connection guard. Add exponential backoff (cap ~60s) and treat repeated auth failures distinctly from transient disconnects.
+- **✅ Client-side write limiter — now built** (`RateLimiter`, see Done). `RestClient` throttles `place_order`/`cancel_order` against a Basic-tier token bucket (100/s, capacity 100). Starts full, so normal quoting never waits; backstops burst 429s. The scanner's ~70 paginated `GET /markets` at ~1.75 req/s stays far under the 200/s read budget and is left unthrottled.
+- **✅ Reject/429 cooldown — now built** (per-ticker 500ms on a place error, see Done). This is the reprice-cooldown-on-429 noted above, generalized to any place error (post-only-cross included). Root-cause fix for the burst that produced the 429s.
+- **❗ WS reconnect still has no backoff.** On a failed handshake the client retries every 5s **forever** (`max_reconnects=-1`). Observed a *persistent* WS `401 Unauthorized` (likely a demo concurrent-connection cap, **not** rate limiting) turn into indefinite 5s reconnect-spam that can only worsen a server-side connection guard. **TODO:** add exponential backoff (cap ~60s) and treat repeated auth failures distinctly from transient disconnects. Highest-value remaining operational fix.
 - **`429` ≠ `401`.** Throttling returns `429` (token bucket, no cooldown — retry ~immediately once the bucket covers the cost). `401` is auth/connection rejection. Do not conflate them when handling errors.
 
 ---
@@ -975,36 +1027,26 @@ the shared kill-switch into the sharded quoters once Phases 21–22 land.
 
 ## Research Findings
 
-### Bürgi, Deng, Whelan 2026 — Key Numbers
+> **Paper library:** the reference papers (Bürgi et al., Bawa, Berg & Proebsting,
+> LessWrong) and full study notes now live in
+> **[docs/papers/README.md](docs/papers/README.md)**. This section keeps only the
+> build-actionable summaries.
 
-| Metric | Value |
-|---|---|
-| Avg return all contracts | −20% pre-fee |
-| Maker avg return | −9.64% |
-| Taker avg return | −31.46% |
-| Maker return on ≥50c | **+2.6%** (stat. sig.) |
-| Maker return on <10c | ~−35% |
-| Taker fee formula | γP(1−P), γ=0.07 pre-Apr 2025 |
-| Belief bias β | 0.09 (range 0.06–0.12) |
-| Maker match rate θ | 0.60 |
-| Belief dispersion σ | 0.107 |
-| Std dev Maker returns ≥50c | 33% |
+### Bürgi, Deng, Whelan 2026 — Makers & Takers (Kalshi)
 
-**Debiasing formula:** `π* = (P − 0.045) / 0.91`
+Full data + notes: [docs/papers/README.md](docs/papers/README.md) §1. Rules driving the build:
+- Quote **≥15c** only — Maker losses below 10c are statistically significant negative.
+- Prefer Financials / Economics / Crypto (larger volume, smaller bias) over sports/culture longshots.
+- `post_only=true` keeps every order a Maker — Makers structurally out-return Takers (avg −9.6% vs −31.5%; ≥50c makers **+2.6%**).
+- β=0.09 belief debias (`ViewBasedModel`, Phase 28); θ=0.60 equilibrium spread ≈ 3–5c → `min_spread_cents` floor.
 
-| Market P | Debiased π* |
-|---|---|
-| 5c | 0.5% |
-| 20c | 17% |
-| 50c | 50% |
-| 80c | 83% |
-| 95c | 99.5% |
+### Bawa 2025 — Prediction Market Alpha (execution)
 
-**Design rules from paper:**
-- Quote ≥15c only — Maker losses below 10c are statistically significant negative
-- Prefer Financials, Economics, Crypto categories (larger volume, lower ψ bias coefficients)
-- `post_only=true` already correctly positions every order as Maker
-- Equilibrium spread at θ=0.60 is 3–5c at mid-range → `min_spread_cents=3` floor
+Full notes: [docs/papers/README.md](docs/papers/README.md) §2. Actionable for our flow/pricing:
+- **Micro-price (VAMP)** `= (P_bid·Q_ask + P_ask·Q_bid)/(Q_bid+Q_ask)` — better fair-value anchor than the raw mid (candidate upgrade to `FairValueEngine`).
+- **Order-book imbalance** `IR = Bid_vol/(Bid_vol+Ask_vol)`; **IR>0.65** predicts a near-term up-move (~58%) — empirical backing for `FlowImbalanceGuard`; consider using it as a directional signal, not just a spread-widener.
+- **Fractional Kelly** `f* = (P_true−P_market)/(1−P_market)`, sized at 25–50% — the sizing rule for when `quote_size` becomes edge-scaled.
+- Terminal-risk taper `∝ √(T_remaining)`; cross-outcome arb when `Σ P_i < 1` (future strategy).
 
 ### Palumbo 2026 — Key Finding
 
