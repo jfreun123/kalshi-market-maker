@@ -299,6 +299,66 @@ TEST_F(QuoterTest, QuoteReplacedWhenExceedingRepriceThreshold) {
   EXPECT_EQ(transport.recorded_requests().size(), 6U);
 }
 
+TEST_F(QuoterTest, RepriceIgnoresOwnRestingQuotesEchoedInBook) {
+  // Thin book (both sides 1 lot): mid = micro = 35 → bid=33, ask=37 (NO 63).
+  // The exchange then echoes our resting 10-lot bid at 33 as the new best bid
+  // while the filled ask side reverts. Priced off the raw echo, micro jumps to
+  // (33*1 + 40*10)/11 ≈ 39.4 and the quoter cancels its own bid — the
+  // self-referential churn oscillator (finding D4). Priced off the book minus
+  // our own orders, fair value stays 35 and the resting bid is left alone.
+  constexpr int kThinYesBid = 30;
+  constexpr int kThinNoBid = 60;
+  constexpr int kOwnBidPrice = 33;
+  const kalshi::Quantity kThinQty = kalshi::Quantity::from_contracts(1);
+  const kalshi::Quantity kOwnQty =
+      kalshi::Quantity::from_contracts(kalshi::QuoterConfig::kDefaultQuoteSize);
+
+  auto transport_ptr = std::make_unique<FakeTransport>();
+  FakeTransport &transport = *transport_ptr;
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId1, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId2, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId3, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId4, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  transport.enqueue({kHttpOk, "{}"});
+  kalshi::RestClient rest{kalshi::Auth{kApiKey, kPemPrivateKey},
+                          std::move(transport_ptr), kBaseUrl};
+  kalshi::OrderManager order_mgr{rest};
+  kalshi::RiskManager risk_mgr{kalshi::RiskLimits{}};
+  kalshi::Quoter quoter{kalshi::QuoterConfig{}, order_mgr, risk_mgr};
+
+  kalshi::Orderbook thin;
+  thin.ticker = kTicker;
+  thin.yes = {{kThinYesBid, kThinQty}};
+  thin.no = {{kThinNoBid, kThinQty}};
+  kalshi::LocalOrderbook book;
+  book.apply_snapshot(thin);
+  quoter.update(kTicker, book);
+  ASSERT_EQ(transport.recorded_requests().size(), 2U);
+
+  record_position_fill(order_mgr, kOrderId2, kalshi::Side::No,
+                       kalshi::QuoterConfig::kDefaultQuoteSize);
+  quoter.forget_order(kTicker, kOrderId2);
+
+  kalshi::Orderbook echo;
+  echo.ticker = kTicker;
+  echo.yes = {{kThinYesBid, kThinQty}, {kOwnBidPrice, kOwnQty}};
+  echo.no = {{kThinNoBid, kThinQty}};
+  kalshi::LocalOrderbook echo_book;
+  echo_book.apply_snapshot(echo);
+  quoter.update(kTicker, echo_book);
+
+  EXPECT_EQ(transport.recorded_requests().size(), 3U)
+      << "only the filled ask may be re-placed; the echoed bid must rest";
+}
+
 TEST_F(QuoterTest, ResetQuotesForgetsLiveStateSoNextUpdatePlacesFresh) {
   // After an out-of-band flatten (risk halt / disconnect cancels the resting
   // orders), the quoter must be told to forget them. Otherwise it believes its
