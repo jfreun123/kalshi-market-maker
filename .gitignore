@@ -21,10 +21,13 @@ docs/Doxyfile.configured
 
 # Local config and secrets — never commit
 config.json
+config-demo.json
 # Generated trade configs copy secrets from the base config — never commit
 *.trade.json
 pnl_state.json
 *.pem
+# API keys, private keys, and local demo configs — never commit
+/api-keys/
 
 # Runtime logs
 logs/
