@@ -222,7 +222,48 @@
   `TheoGrid` is currently test-only. Confidence: medium (deterministic crash,
   low exposure).
 
-- [ ] *(audit running — more findings will be appended here)*
+- [ ] **A4. Scanner spread score hardcoded to the default window
+  (`source/ticker_scanner.cpp:20-33`).** `compute_score` centers the spread
+  term at 6.5c with half-range 3.5c — the midpoint/half-width of the *default*
+  `[3,10]` filter — ignoring configured `min/max_spread_cents`. With, e.g.,
+  `[1,20]`, a market with spread 15 scores 0 on spread and ranking is
+  miscalibrated; the code comment claims the curve peaks at the configured
+  window's midpoint, which is false. Fix: derive the midpoint/half-range from
+  the configured bounds. Confidence: medium (only bites non-default configs).
+
+- [ ] **A5. NO-side fills recorded at the YES price
+  (`source/websocket_client.cpp:319` `dispatch_fill`) — corrupts NO cost basis
+  and PnL.** `fill.price_cents` is always parsed from `yes_price_dollars`,
+  but `OrderManager::record_fill` treats it as side-native (realized spread
+  `= 100 - fill_price - lot_price`; NO lots marked at `100 - yes_mid`).
+  `rest_client.cpp` parse_order correctly reads `no_price_dollars` for NO;
+  the WS fill path does not. Example: buy 5 YES @52 + 5 NO @44 (complete set)
+  → NO fill carries yes_price 56 → realized spread `(100-56-52)*5 = -40c`
+  instead of `+20c`. Every NO fill mis-accounts. Fix: parse `no_price_dollars`
+  (or `100 - yes`) when `outcome_side == "no"`. Confidence: high.
+
+- [ ] **A6. Fill dedup key collides within the same millisecond
+  (`source/order_manager.cpp:64-67`).** `fill_key = order_id + "@" + ts_ms`;
+  an order sweeping two levels can emit two fills with the same order id and
+  same `ts_ms` but different price/count — the second is silently dropped as a
+  "duplicate": position and realized PnL under-count, and a fully-filled order
+  can linger in `open_orders_`. Fix: include the exchange trade/fill id in
+  `Fill` and key on that. Confidence: medium.
+
+- [ ] **A7. `place_order` ignores the response `status` field
+  (`source/rest_client.cpp:419-428`) — a killed order is reported as resting.**
+  Status is derived only from `fill_count`, so a `post_only` order the exchange
+  auto-cancels (returns 2xx with `status:"canceled"`, `fill_count:"0.00"`)
+  comes back `Open`; the Quoter records the phantom order id as its live quote
+  and never re-places that side. Fix: parse the response `status` and map
+  canceled → `OrderStatus::Canceled`. Confidence: medium.
+
+*Audit complete — 4 subsystem sweeps (orderbook/quoter/risk, portfolio/PnL,
+rest/order-manager/auth/rate-limit, session/paper/main). A2 was independently
+found by two agents. Areas traced and cleared: complement math, micro-price
+weighting, FIFO realized-spread and lot accounting, Quantity fixed-point
+round-trips, token-bucket math, RSA-PSS signing, engine_mtx locking,
+shutdown/flatten paths, steady-vs-system clock usage.*
 
 ### In review (PR open)
 
