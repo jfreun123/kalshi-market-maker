@@ -265,6 +265,39 @@ static int run_reconcile_mode(kalshi::RestClient &rest,
   return in_sync ? 0 : 1;
 }
 
+// Closes every open position with an aggressive IOC taker order so we end flat.
+// Best-effort: logs and continues past a single-ticker failure. Returns the
+// number of positions it attempted to close.
+static int flatten_all_positions(kalshi::RestClient &rest,
+                                 std::shared_ptr<spdlog::logger> &log) {
+  int closed = 0;
+  for (const auto &position : rest.get_positions()) {
+    if (position.position.is_zero()) {
+      continue;
+    }
+    try {
+      const auto order = rest.flatten(position.ticker, position.position);
+      log->info("flatten ticker={} net={} filled={} order_id={}",
+                position.ticker, position.position.to_fp_string(),
+                order.filled_quantity.to_fp_string(), order.id);
+      ++closed;
+    } catch (const std::exception &ex) {
+      log->error("flatten ticker={} failed: {}", position.ticker, ex.what());
+    }
+  }
+  return closed;
+}
+
+// Standalone --flatten: close all open positions and exit. Cleans up inventory
+// left by a prior run (cancel-on-exit stops orders, not positions).
+static int run_flatten_mode(kalshi::RestClient &rest,
+                            std::shared_ptr<spdlog::logger> &log) {
+  log->info("flatten mode — closing all open positions");
+  const int closed = flatten_all_positions(rest, log);
+  log->info("flatten mode — closed {} position(s)", closed);
+  return 0;
+}
+
 // ---- Capture mode ----
 
 // Records a live exchange session for later replay: raw inbound WS frames are
@@ -377,6 +410,7 @@ struct CliArgs {
   bool scan_mode{false};
   bool reconcile_mode{false};
   bool capture_mode{false};
+  bool flatten_mode{false};
   std::filesystem::path capture_dir{"capture"};
   std::filesystem::path config_path{"config.json"};
 };
@@ -391,6 +425,8 @@ static CliArgs parse_args(std::span<char *> args) {
       result.scan_mode = true;
     } else if (arg == "--reconcile") {
       result.reconcile_mode = true;
+    } else if (arg == "--flatten") {
+      result.flatten_mode = true;
     } else if (arg == "--capture") {
       result.capture_mode = true;
       // Optional directory argument follows --capture.
@@ -443,6 +479,10 @@ int main(int argc, char *argv[]) {
 
     if (cli.reconcile_mode) {
       return run_reconcile_mode(rest, app_config.target_tickers, log);
+    }
+
+    if (cli.flatten_mode) {
+      return run_flatten_mode(rest, log);
     }
 
     if (cli.capture_mode) {
@@ -551,16 +591,28 @@ int main(int argc, char *argv[]) {
     // cancel every resting quote. cancel_all_quotes is best-effort and never
     // throws, so it is safe to run from a destructor; it runs after join()
     // (single-threaded by then) so no lock is needed.
-    ScopeGuard shutdown_guard{[&ws_client, &ws_thread, &session, &log]() {
-      log->info("shutting down — stopping feed, cancelling all quotes");
-      ws_client.stop();
-      if (ws_thread.joinable()) {
-        ws_thread.join();
-      }
-      session.cancel_all_quotes();
-      kalshi::set_panic_handler(nullptr);
-      log->info("shutdown complete");
-    }};
+    ScopeGuard shutdown_guard{
+        [&ws_client, &ws_thread, &session, &rest, &cli, &log]() {
+          log->info("shutting down — stopping feed, cancelling all quotes");
+          ws_client.stop();
+          if (ws_thread.joinable()) {
+            ws_thread.join();
+          }
+          session.cancel_all_quotes();
+          if (!cli.paper_mode) {
+            try {
+              const int closed = flatten_all_positions(rest, log);
+              if (closed > 0) {
+                log->info("shutdown — flattened {} position(s) to end flat",
+                          closed);
+              }
+            } catch (const std::exception &ex) {
+              log->error("shutdown flatten failed: {}", ex.what());
+            }
+          }
+          kalshi::set_panic_handler(nullptr);
+          log->info("shutdown complete");
+        }};
 
     constexpr auto kPollInterval = std::chrono::milliseconds{100};
     constexpr int kStalenessCheckInterval = 300; // 300 × 100ms = 30s

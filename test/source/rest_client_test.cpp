@@ -378,6 +378,46 @@ TEST_F(RestClientTest, PlaceOrderNoSideUsesAskWithComplementPrice) {
   EXPECT_NE(body.find(R"("price":"0.5200")"), std::string::npos);
 }
 
+TEST_F(RestClientTest, FlattenLongYesSellsYesWithFractionalIocOrder) {
+  auto transport = std::make_unique<FakeTransport>();
+  FakeTransport *const transport_raw = transport.get();
+  transport_raw->enqueue({kHttpOk, std::string(kPlaceOrderResponse)});
+  auto client = make_client(std::move(transport));
+
+  client.flatten(kTestTicker, kalshi::Quantity::from_fp_string("4.36"));
+
+  const auto &body = transport_raw->last_request().body;
+  EXPECT_NE(body.find(R"("side":"ask")"), std::string::npos);
+  EXPECT_NE(body.find(R"("count":"4.36")"), std::string::npos);
+  EXPECT_NE(body.find(R"("time_in_force":"immediate_or_cancel")"),
+            std::string::npos);
+}
+
+TEST_F(RestClientTest, FlattenLongNoBuysYes) {
+  auto transport = std::make_unique<FakeTransport>();
+  FakeTransport *const transport_raw = transport.get();
+  transport_raw->enqueue({kHttpOk, std::string(kPlaceOrderResponse)});
+  auto client = make_client(std::move(transport));
+
+  client.flatten(kTestTicker, -kalshi::Quantity::from_fp_string("22.41"));
+
+  const auto &body = transport_raw->last_request().body;
+  EXPECT_NE(body.find(R"("side":"bid")"), std::string::npos);
+  EXPECT_NE(body.find(R"("count":"22.41")"), std::string::npos);
+  EXPECT_NE(body.find(R"("time_in_force":"immediate_or_cancel")"),
+            std::string::npos);
+}
+
+TEST_F(RestClientTest, FlattenFlatPositionPlacesNoOrder) {
+  auto transport = std::make_unique<FakeTransport>();
+  FakeTransport *const transport_raw = transport.get();
+  auto client = make_client(std::move(transport));
+
+  client.flatten(kTestTicker, kalshi::Quantity{});
+
+  EXPECT_EQ(transport_raw->recorded_requests().size(), 0U);
+}
+
 TEST_F(RestClientTest, PlaceOrderParsesResponseIntoOrder) {
   auto transport = std::make_unique<FakeTransport>();
   FakeTransport *const transport_raw = transport.get();
