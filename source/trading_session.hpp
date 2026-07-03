@@ -88,6 +88,12 @@ public:
   [[nodiscard]] PortfolioSnapshot portfolio_snapshot() const;
   [[nodiscard]] const PnlMap &prior_pnl() const { return prior_pnl_; }
 
+  // Prior-session PnL plus the current session's cumulative realized PnL per
+  // tracked ticker — the value persisted to disk. prior_pnl_ itself is never
+  // mutated during a session; folding the running total back into it would
+  // double-count every earlier fill on the next one.
+  [[nodiscard]] PnlMap carried_totals() const;
+
   // Seed realized PnL carried over from a prior session (loaded from disk).
   void set_prior_pnl(PnlMap prior_pnl) { prior_pnl_ = std::move(prior_pnl); }
   void set_pnl_listener(PnlListener listener) {

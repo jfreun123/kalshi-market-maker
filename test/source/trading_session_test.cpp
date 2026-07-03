@@ -233,9 +233,13 @@ TEST_F(TradingSessionTest, CancelPreexistingOrdersNoOpWhenNoneResting) {
 }
 
 TEST_F(TradingSessionTest, FillUpdatesPositionAndNotifiesPnlListener) {
+  kalshi::TradingSession::PnlMap persisted;
   bool notified = false;
   session_.set_pnl_listener(
-      [&notified](const kalshi::TradingSession::PnlMap &) { notified = true; });
+      [&notified, &persisted](const kalshi::TradingSession::PnlMap &totals) {
+        notified = true;
+        persisted = totals;
+      });
 
   session_.on_fill(make_fill(kFillOrderId, kTicker, kalshi::Side::Yes,
                              kHighYesPrice, kOneLot));
@@ -243,7 +247,40 @@ TEST_F(TradingSessionTest, FillUpdatesPositionAndNotifiesPnlListener) {
   EXPECT_EQ(order_mgr_.net_position(kTicker),
             kalshi::Quantity::from_contracts(kOneLot));
   EXPECT_TRUE(notified);
-  EXPECT_TRUE(session_.prior_pnl().contains(kTicker));
+  EXPECT_TRUE(session_.prior_pnl().empty()); // prior stays prior-only
+  EXPECT_TRUE(persisted.empty()); // an opening fill realizes nothing yet
+}
+
+TEST_F(TradingSessionTest, CarriedPnlDoesNotDoubleCountAcrossFills) {
+  // Two YES@52 + NO@44 round trips realize +4c/contract each. With one lot per
+  // fill the cumulative session PnL after round trip N is 4c x N; the persisted
+  // total must be prior + cumulative, NOT a running sum of running sums.
+  constexpr double kPriorCents = 100.0;
+  constexpr double kPairPnlCents = 4.0;
+  constexpr int kYesPrice = 52;
+  constexpr int kNoPrice = 44;
+  session_.set_prior_pnl({{kTicker, kPriorCents}});
+
+  kalshi::TradingSession::PnlMap persisted;
+  session_.set_pnl_listener(
+      [&persisted](const kalshi::TradingSession::PnlMap &totals) {
+        persisted = totals;
+      });
+
+  session_.on_fill(
+      make_fill("rt1-yes", kTicker, kalshi::Side::Yes, kYesPrice, kOneLot));
+  session_.on_fill(
+      make_fill("rt1-no", kTicker, kalshi::Side::No, kNoPrice, kOneLot));
+  ASSERT_TRUE(persisted.contains(kTicker));
+  EXPECT_DOUBLE_EQ(persisted.at(kTicker), kPriorCents + kPairPnlCents);
+
+  session_.on_fill(
+      make_fill("rt2-yes", kTicker, kalshi::Side::Yes, kYesPrice, kOneLot));
+  session_.on_fill(
+      make_fill("rt2-no", kTicker, kalshi::Side::No, kNoPrice, kOneLot));
+  EXPECT_DOUBLE_EQ(persisted.at(kTicker), kPriorCents + (2.0 * kPairPnlCents));
+
+  EXPECT_DOUBLE_EQ(session_.prior_pnl().at(kTicker), kPriorCents);
 }
 
 TEST_F(TradingSessionTightExposureTest, RunPortfolioRiskHaltsOnOverExposure) {
