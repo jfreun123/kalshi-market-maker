@@ -263,12 +263,12 @@ TEST_F(TradingSessionTest, PersistedPnlIsPriorPlusSessionNotCompounded) {
         persisted = pnl;
       });
 
-  session_.on_fill(
-      make_fill("fill-y1", kTicker, kalshi::Side::Yes, kYesFillPrice, kFillLots));
+  session_.on_fill(make_fill("fill-y1", kTicker, kalshi::Side::Yes,
+                             kYesFillPrice, kFillLots));
   session_.on_fill(
       make_fill("fill-n1", kTicker, kalshi::Side::No, kNoFillPrice, kFillLots));
-  session_.on_fill(
-      make_fill("fill-y2", kTicker, kalshi::Side::Yes, kYesFillPrice, kFillLots));
+  session_.on_fill(make_fill("fill-y2", kTicker, kalshi::Side::Yes,
+                             kYesFillPrice, kFillLots));
   session_.on_fill(
       make_fill("fill-n2", kTicker, kalshi::Side::No, kNoFillPrice, kFillLots));
 
