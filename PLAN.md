@@ -228,11 +228,28 @@
   Flip the Phase 30 γ·P·(1−P) widening default to on; apply ceil-to-cent at
   actual clip size in the fee model (also used for IOC-flatten cost).
 
-- [ ] **24. Ladder quote size across 2–3 price levels (S/M).** LessWrong post's
-  marginal-pricing insight: one fat quote at a single level undercharges large
-  takers — the exact counterparty to avoid. Split `quote_size` across 2–3
-  levels stepped away from fair value so sweeps pay progressively more; also a
-  first step toward queue-position awareness (item 9).
+- [ ] **24. Layered quoting — ladder size across 2–3 price levels (S/M).**
+  Two independent reasons to hold resting orders at multiple levels instead of
+  one fat quote:
+  - **Queue priming (the big one):** Kalshi matching is price-time FIFO — queue
+    position at a level is earned by resting there *before* the market arrives.
+    A single-level quoter only joins a new best level *after* the move, at the
+    back of the queue (item 9 measured ~115k contracts ahead at one deep
+    level). Layers resting 1–3c behind the inside are already at or near the
+    front when the market steps to them, converting market moves into
+    good-queue fills instead of chasing.
+  - **Sweep pricing (LessWrong marginal-pricing insight):** one fat level
+    undercharges large takers — the counterparty most likely to be informed.
+    Stepped layers make a sweep pay progressively worse prices.
+  Also earns Liquidity Incentive score at each layer (depth credit decays with
+  distance but is nonzero), and spreads the churn/cancel load: inner layers
+  reprice, outer layers mostly rest. **Depends on item 38** (own-quote
+  subtraction — layers must actually rest to accrue queue position; they also
+  add more of our own size to the book for the pricing view to subtract).
+  Naming note: this is genuine intent-to-fill liquidity (laddering); avoid the
+  term "layering" externally — regulators use it for the manipulative
+  place-and-cancel variant, which the reprice threshold and rest-time rules
+  must keep us far away from.
 
 **Inventory & sizing:**
 
