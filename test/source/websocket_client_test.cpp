@@ -449,6 +449,38 @@ TEST_F(WebSocketClientTest, FillFeeCostParsedFromDollarsToCents) {
   EXPECT_NEAR(received.fee_cents, kExpectedFeeCents, 1e-9);
 }
 
+TEST_F(WebSocketClientTest, NoSideFillPriceIsNoLegNotYesLeg) {
+  constexpr int kYesLegPrice = 56;
+  constexpr int kExpectedNoLegPrice = 44;
+  auto fake_ws = std::make_unique<kalshi::FakeWebSocket>();
+  kalshi::FakeWebSocket *ws_raw = fake_ws.get();
+  ws_raw->enqueue_message(
+      fill_message("order-no", kTestTicker, "no", kYesLegPrice, kFillCount));
+
+  auto client = make_client(std::move(fake_ws));
+  kalshi::Fill received;
+  client.on_fill([&](const kalshi::Fill &fill) { received = fill; });
+  client.run();
+
+  EXPECT_EQ(received.side, kalshi::Side::No);
+  EXPECT_EQ(received.price_cents, kExpectedNoLegPrice);
+}
+
+TEST_F(WebSocketClientTest, YesSideFillPriceStaysYesLeg) {
+  auto fake_ws = std::make_unique<kalshi::FakeWebSocket>();
+  kalshi::FakeWebSocket *ws_raw = fake_ws.get();
+  ws_raw->enqueue_message(
+      fill_message("order-yes", kTestTicker, "yes", kFillPrice, kFillCount));
+
+  auto client = make_client(std::move(fake_ws));
+  kalshi::Fill received;
+  client.on_fill([&](const kalshi::Fill &fill) { received = fill; });
+  client.run();
+
+  EXPECT_EQ(received.side, kalshi::Side::Yes);
+  EXPECT_EQ(received.price_cents, kFillPrice);
+}
+
 TEST_F(WebSocketClientTest, ContiguousSeqDispatchesAllDeltas) {
   auto fake_ws = std::make_unique<kalshi::FakeWebSocket>();
   kalshi::FakeWebSocket *ws_raw = fake_ws.get();

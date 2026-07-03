@@ -343,8 +343,10 @@ void dispatch_fill(const WebSocketClient::FillCallback &callback,
     fill.order_id = msg_body.at("order_id").get<std::string>();
     fill.market_ticker = msg_body.at("market_ticker").get<std::string>();
     fill.side = parse_side(msg_body.at("outcome_side").get<std::string>());
-    fill.price_cents =
+    const int yes_leg_price =
         dollars_to_cents(msg_body.at("yes_price_dollars").get<std::string>());
+    fill.price_cents =
+        fill.side == Side::No ? complement_price(yes_leg_price) : yes_leg_price;
     fill.quantity = parse_fp_count(msg_body.at("count_fp").get<std::string>());
     fill.fee_cents = std::stod(msg_body.value("fee_cost", std::string{"0"})) *
                      kCentsPerDollar;
