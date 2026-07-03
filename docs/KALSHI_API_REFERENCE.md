@@ -170,6 +170,7 @@ All paths relative to `/trade-api/v2`. Default cost 10 tokens unless noted.
 - `GET /markets/{ticker}/candlesticks` and batch variant — periods 1m / 1h / 1d.
 - `GET /events`, `GET /events/{ticker}`, event candlesticks/metadata; multivariate events via `GET /events/multivariate`.
 - `GET /series`, `GET /series/{ticker}`.
+- `GET /incentive_programs` — active/upcoming liquidity & volume reward pools per market (`status`, `type` filters). Join key for rebate-aware scanning — full spec in §13.
 
 ### Orders — V2 (preferred; legacy `/portfolio/orders` deprecated no earlier than May 6, 2026)
 - `POST /portfolio/events/orders` — **Create Order (V2)**. See §6.
@@ -382,9 +383,39 @@ Kalshi also offers FIX for order entry: sessions/logon with API-key auth, order 
 - Implication: passive quoting is nearly costless at entry on most markets; the fee model output feeds the trade-fee + rounding-fee + rebate mechanics in §10.
 
 ### Programs (escalating formality)
-1. **Liquidity Incentive Program** — opt-in, open to most regular U.S. members (excludes Kalshi affiliates/employees, members with existing MM agreements, IB/FCM customers). Kalshi snapshots books every second during trading hours; resting orders are scored by size and proximity to best prices against a per-market target size (100–20,000 contracts) and discount factor; participants earn a pro-rata share of a per-market reward pool. Eligible markets/schedules are marked per market; incentives are also queryable via the incentives API endpoints.
+1. **Liquidity Incentive Program** — opt-in, open to most regular U.S. members (excludes Kalshi affiliates/employees, members with existing MM agreements, IB/FCM customers). Kalshi snapshots books every second during trading hours; resting orders are scored by size and proximity to best prices against a per-market target size (100–20,000 contracts) and discount factor; participants earn a pro-rata share of a per-market reward pool. Eligible markets/schedules are marked per market and queryable via `GET /incentive_programs` (public; spec below).
 2. **Rate-limit tiers** — Basic (default) → Advanced (application) → Premier/Paragon/Prime (relationship-based; Premier+ allows supplying your own API public key). See §3.
 3. **Designated Market Maker program** — formal status under Rulebook Chapter 4. Selective: review of financial resources, trading experience, business reputation; requires defined quoting/volume obligations. Benefits can include fee discounts/rebates/revenue share, adjusted position limits, enhanced throughput, and risk tools such as cancel-on-disconnect order protection. Members with MM agreements become ineligible for the open Liquidity Incentive Program.
+
+### Incentives API — `GET /incentive_programs`
+
+**Public, no auth.** Lists incentive programs; the join key that makes quoting **rebate-aware** (bias toward markets with a live pool). Path relative to `/trade-api/v2`.
+
+Query params:
+- `status` — `all` (default) \| `active` \| `upcoming` \| `closed` \| `paid_out`. Use `active` for currently-earning markets.
+- `type` — `all` (default) \| `liquidity` \| `volume`. Use `liquidity` for the resting-order rewards relevant to MM.
+- `incentive_description` — exact-match string filter.
+- `limit` — 1–10000 (default 100); `cursor` — pagination cursor (response returns `next_cursor`).
+
+Response: `{ incentive_programs: [IncentiveProgram…], next_cursor }`. Each `IncentiveProgram`:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `id` | string | program id |
+| `market_id` / `market_ticker` | string | market this pool applies to — **join key to `GET /markets`** |
+| `incentive_type` | `liquidity` \| `volume` | program type |
+| `incentive_description` | string | plain-text description |
+| `start_date` / `end_date` | datetime | active window |
+| `period_reward` | int64 | reward pool for the period, in **centi-cents** (÷10,000 → dollars) |
+| `paid_out` | bool | whether the period has been paid |
+| `discount_factor_bps` | int32, nullable | proximity-decay factor (bps) — how fast score falls off away from the BBO |
+| `target_size_fp` | fixed-point string, nullable | per-market target size the resting size is scored against (e.g. `"10000.00"`) |
+
+**Scoring recap (§13):** `score = size × proximity_multiplier`, summed over random 1-second snapshots; `reward = (your score ÷ all scores) × period_reward`. Full credit at the BBO; `discount_factor_bps` sets the decay with distance; `target_size_fp` is the size the pool is calibrated to.
+
+**Integration (PLAN item 18):** at scan time, `GET /incentive_programs?status=active&type=liquidity`, index by `market_ticker`, and left-join onto scanner candidates. Prefer markets with an active `liquidity` pool where our top-of-book resting size is a meaningful fraction of `target_size_fp` — these can be net-positive even at ~0 spread edge. Feed `period_reward` × expected pool-share into the fee-aware PnL model as expected reward income. Endpoint is public, so the scanner can fetch it unauthenticated alongside `GET /markets`.
+
+**Verified live 2026-07-02** (unauthenticated `curl`, schema matches above): prod returned active pools on `KXRONI-27APR2-*` (`period_reward=650000` centi-cents = **$65**, `target_size_fp="1000.00"`, `discount_factor_bps=5000`); **demo also has active pools** on `KXNEXTTEAMNBA-26LJAM-*` (`period_reward=500000` = **$50**, target 1000, `discount_factor_bps=1`) — so rebate-aware scanning/quoting can be exercised end-to-end in the demo environment.
 
 ## 14. Market Maker Implementation Checklist
 
@@ -396,4 +427,4 @@ Kalshi also offers FIX for order entry: sessions/logon with API-key auth, order 
 6. **Numerics**: integer fixed-point internally (counts ×100, prices ×10,000); respect per-market `price_level_structure` ticks; handle fractional fills even if you only send whole contracts.
 7. **Calendar**: pull `exchange/schedule`; flatten or rely on `cancel_order_on_pause` before Thursday 3–5 AM ET; subscribe `market_lifecycle_v2` and treat `deactivated`/`activated` (orders wiped on reactivation) and `close_date_updated` as first-class quote-pulling triggers.
 8. **Backoff**: on 429, exponential backoff (no Retry-After header); on WS disconnect, reconnect, resubscribe, resnapshot.
-9. **Economics**: opt into the Liquidity Incentive Program; bias quoting toward incentivized markets (query the incentives API for active reward periods, target sizes, discount factors) and toward series without maker fees. Score-per-snapshot rewards favor persistent size near the BBO over fleeting quotes.
+9. **Economics**: opt into the Liquidity Incentive Program; bias quoting toward incentivized markets (`GET /incentive_programs?status=active&type=liquidity` for active reward periods, target sizes, discount factors) and toward series without maker fees. Score-per-snapshot rewards favor persistent size near the BBO over fleeting quotes.
