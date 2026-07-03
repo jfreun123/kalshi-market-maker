@@ -95,11 +95,15 @@
   need separate builds; some flags are GCC-only vs Clang-only) — evaluate each,
   keep the suite green under the chosen set, wire them into CI.
 
-- [ ] **8. D3 — staleness flapping on quiet markets.** Thin markets send no WS
+- [~] **8. D3 — staleness flapping on quiet markets.** Thin markets send no WS
   traffic for >30s and trip `kStaleBook` repeatedly → flatten/re-quote churn.
   Count heartbeats toward freshness, or lengthen the threshold for low-activity
   markets (don't loosen blindly — it weakens staleness protection on active
-  markets).
+  markets). *Fix in progress on `feat/verbose-logging`: `IWebSocket` now surfaces
+  ping/pong via `on_heartbeat`, `IxWebSocket` enables a 10s auto-ping, and
+  liveness frames refresh `last_message_time` — so a quiet-but-alive feed no
+  longer trips the halt. Not yet live-validated (blocked on the demo WS 401; see
+  Rate Limiting).*
 
 - [ ] **9. Queue-position awareness (strategy).** Orders join a price-time FIFO
   queue; at a deep level a small quote sits at the back (observed queue position
@@ -107,6 +111,26 @@
   i.e. when the market runs *through* us. Consider level choice / quote sizing /
   pulling when the queue ahead is too deep. Lower priority; noted so it isn't
   lost.
+
+- [ ] **18. Rebate-aware market selection (strategy).** Kalshi's **Liquidity
+  Incentive Program** pays for top-of-book resting size whether or not it fills
+  (score = size × price-proximity, over random 1s snapshots; per-market pools
+  ~$10–1,000/day). The scanner is currently blind to this — it ranks on
+  spread/volume/days only. Add active-incentive status as a first-class ranking
+  input so we prefer markets where our natural quoting shape *also* earns pool
+  share (net-positive even at ~0 spread edge), and extend the Phase 30 fee model
+  to credit expected reward income into paper/live PnL. Detail in *Kalshi
+  incentive / rebate programs* under *Research Findings*. This is plausibly the
+  single biggest lever on profitability for a small operator.
+
+- [ ] **19. Falsifiable edge hypothesis + pre-live checklist (strategy/process).**
+  Per the practitioner thread, infrastructure ≠ edge. Before more code toward
+  live: (a) state the edge in **one falsifiable sentence** (where the profit
+  comes from, who pays it, why competitors haven't removed it); (b) pre-declare
+  PASS/FAIL/KILL thresholds; (c) ensure markout isn't doubling as both fill
+  trigger and eval metric; (d) plan measurement of **live-vs-paper fill
+  divergence**. Capture as a trimmed, Kalshi-specific `docs/PRE_LIVE_CHECKLIST.md`
+  (from the ~100-question list in *Research Findings*). Gate real capital on it.
 
 ### P3 — Structural refactors (PR #1 review — detail in *Code Review Follow-ups*)
 
@@ -815,6 +839,11 @@ Kalshi Basic tier: **200 read tokens/s**, **100 write tokens/s**. Each REST requ
 
 **When scaling beyond Basic:** target the Advanced tier (300/300) or use the `POST /portfolio/orders/batches` endpoint for bulk placement when Phase 21 (async dispatch) is implemented.
 
+**Live findings (2026-07-02 demo runs):**
+- **No client-side rate limiter exists yet.** The scanner fires ~70 paginated `GET /markets` calls back-to-back unthrottled (still only ~1.75 req/s, well under the 200/s read budget), and the reprice-cooldown-on-429 noted above is not implemented.
+- **WS reconnect has no backoff.** On a failed handshake the client retries every 5s **forever** (`max_reconnects=-1`). Observed a *persistent* WS `401 Unauthorized` (likely a demo concurrent-connection cap, **not** rate limiting) turn into indefinite 5s reconnect-spam that can only worsen a server-side connection guard. Add exponential backoff (cap ~60s) and treat repeated auth failures distinctly from transient disconnects.
+- **`429` ≠ `401`.** Throttling returns `429` (token bucket, no cooldown — retry ~immediately once the bucket covers the cost). `401` is auth/connection rejection. Do not conflate them when handling errors.
+
 ---
 
 ## Deferred — Scaling (revisit after consistent profit on ≤5 tickers)
@@ -980,6 +1009,42 @@ the shared kill-switch into the sharded quoters once Phases 21–22 land.
 ### Palumbo 2026 — Key Finding
 
 LPs accumulate net directional exposure (`E_win`) that dominates terminal P&L. This is underwriting, not spread capture. Flow imbalance (winner-to-loser volume ratio) is the single largest predictor (coeff −3.13 for assets, +2.63 for liabilities). Fill rate alone is insufficient — need side-weighted volume imbalance tracking (Phase 26).
+
+### Practitioner insights — r/PredictionsMarkets MM thread (2026)
+
+Community Q&A from working prediction-market makers (Kalshi/Polymarket), cross-checked against our architecture. Consistent with Bürgi et al. above.
+
+- **Adverse selection is the core risk, not spread width.** Naive two-sided passive quoting "picks up coins in front of a steamroller" — you get filled on the side you *didn't* want, by sharps/insiders/fast-news traders. Passive MM without a view loses. `adverse_selection.cpp` + `flow_imbalance.cpp` (Phase 26) exist for exactly this; the open question is whether our fair value is *sharper than the median counterparty*, not whether the plumbing works.
+- **Rebates/liquidity rewards are often the real profit source**, not spread capture — "bots make much more from farming maker rebates than from market making." Reframes strategy — see *Kalshi incentive programs* below.
+- **Passive vs. originating fork.** Passive liquidity = lots of capital, up on everything, thin margins, heavy automation. *Originating* (quoting early from your own view) = high margin, selective, not more capital — the sane solo starting point. Matches "quote ≥15c with an edge," not "quote everything."
+- **You cannot simulate maker fills accurately** — the thread's strongest technical consensus. Queue priority, quote hysteresis, true latency, and how *other* MMs react to your quotes don't exist in a backtest. This is exactly the limitation of our paper mode (simulated fills). Prescription: run a live prototype with tight risk limits making $10–50/day and iterate up — "you will not build a $500/day bot in a simulation."
+- **Capital:** ~$50 for the final live-plumbing test; no institutional capital needed to *research*. Solo can run ~$50k; ~$1m wants partners + specialized roles (tech/trading/quant).
+- **Edge magnitude:** MMs profit at <1% edge amid unavoidable adverse selection — rebates make the thin margin work. A sharp early view lets you quote wider and still get filled.
+- **Diversify beyond the efficient markets** (crypto up/down) — sports/esports carry more pricing inefficiency because fewer sharp models are present.
+
+**Validation-rigor checklist (itsyourdecide, ~100 questions).** A serious pre-live gate spanning economics, market mechanics, data hygiene, falsifiable hypothesis, execution model, statistics, inventory/risk, live-system robustness, and staged capital deployment. Items we **already satisfy**: disconnect/stale-book handling, remove-quotes-on-uncertainty, SIGTERM/kill flatten, verified kill-switch (cancel-orphans-on-startup), reconciliation, dry-run/paper mode. Items we **don't yet satisfy**: edge as one falsifiable sentence; pre-declared PASS/FAIL/KILL; markout not doubling as both fill-trigger and eval metric; measured live-vs-paper fill divergence. → item 19 below.
+
+**Takeaway:** our infrastructure matches what experienced operators consider table stakes; the unsolved, higher-leverage gap is *strategy* (a falsifiable edge that survives adverse selection + fees) and *paper-to-live fill fidelity* — neither provable in simulation.
+
+### Kalshi incentive / rebate programs (2026)
+
+Kalshi *does* pay makers — several stacking programs, and the flagship one is open to small/independent traders (not only designated MMs). This materially changes market selection and the edge math.
+
+**Liquidity Incentive Program** — the key one for us:
+- Pays for **resting orders that improve depth, whether or not they fill.**
+- `reward = (your score ÷ all participants' score) × reward pool` — proportional and competitive.
+- `score = order_size × price-proximity multiplier`, summed over **random 1-second snapshots** during the active period. Best bid/ask = full 1.0× credit; credit decays with distance (a "discount factor").
+- Per-market pools ~**$10–$1,000/day**, periods up to 31 days, **$1 min payout**, target size 100–20,000 contracts before orders score.
+- Eligibility: most regular US members (excludes employees, contracted MMs, IBs, international). **Independent traders qualify.**
+
+**Other programs:** Market Maker Program (designated — up to **1% rebate, capped $7,000/week**, reduced fees + adjusted position limits, requires committed two-sided quoting); Volume Incentive Program (volume cashback); Combo / Liquidity Provider programs; Sportsbook Hedging Rebate (effective ~Feb 2026). On most markets makers also get a small maker rebate that roughly zeroes passive-post fees (confirm exact schedule against our Phase 30 fee model).
+
+**Implications for us:**
+- The scanner should treat **active Liquidity Incentive periods as a first-class ranking input** — a market with a live pool plus our top-of-book resting size can be net-positive even at ~0 spread edge. Today's scanner ranks on spread/volume/days only and is blind to incentives. → item 18 below.
+- Our quoting shape (tight, top-of-book, sized, resting) *already* scores — but the objective shifts: on incentivized markets, **time-at-top-of-book with size** matters as much as spread capture, and pulling quotes (the stale-book halt) directly forfeits score. Reinforces item 8.
+- Extend the fee-aware PnL model (Phase 30 / `feat/fee-aware-pnl`) to **credit expected rebate/reward income** so paper/live PnL reflects the real economics.
+
+Sources: [Liquidity Incentive Program](https://help.kalshi.com/en/articles/13823851-liquidity-incentive-program), [Kalshi Incentives](https://kalshi.com/incentives), [Become a Market Maker](https://help.kalshi.com/en/articles/13823819-how-to-become-a-market-maker-on-kalshi), [Rate Limits & Tiers](https://docs.kalshi.com/getting_started/rate_limits).
 
 ---
 
