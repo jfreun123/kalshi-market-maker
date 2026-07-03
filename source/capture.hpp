@@ -27,6 +27,7 @@ public:
   void on_message(MessageHandler handler) override;
   void on_connect(ConnectHandler handler) override;
   void on_disconnect(DisconnectHandler handler) override;
+  void on_heartbeat(HeartbeatHandler handler) override;
   void run() override;
   void stop() override;
 
