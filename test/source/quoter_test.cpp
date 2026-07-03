@@ -242,6 +242,78 @@ TEST_F(QuoterTest, NoOrdersPlacedWhenRiskHalted) {
   EXPECT_TRUE(transport.recorded_requests().empty());
 }
 
+TEST_F(QuoterTest, BidRoundsDownAtFractionalFairValue) {
+  // yes 51@4 / no 45@6 -> best ask 55 (size 6): micro = (51*6 + 55*4)/10 =
+  // 52.6. Raw bid = 50.6: rounding to nearest would quote 51, giving away
+  // 0.4c of the configured half-spread. The maker's bid must round DOWN.
+  constexpr int kBidLevelPrice = 51;
+  constexpr int kNoLevelPrice = 45;
+  const kalshi::Quantity kBidSize = kalshi::Quantity::from_contracts(4);
+  const kalshi::Quantity kAskSize = kalshi::Quantity::from_contracts(6);
+
+  auto transport_ptr = std::make_unique<FakeTransport>();
+  FakeTransport &transport = *transport_ptr;
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId1, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId2, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  kalshi::RestClient rest{kalshi::Auth{kApiKey, kPemPrivateKey},
+                          std::move(transport_ptr), kBaseUrl};
+  kalshi::OrderManager order_mgr{rest};
+  kalshi::RiskManager risk_mgr{kalshi::RiskLimits{}};
+  kalshi::Quoter quoter{kalshi::QuoterConfig{}, order_mgr, risk_mgr};
+
+  kalshi::Orderbook snap;
+  snap.ticker = kTicker;
+  snap.yes = {{kBidLevelPrice, kBidSize}};
+  snap.no = {{kNoLevelPrice, kAskSize}};
+  kalshi::LocalOrderbook book;
+  book.apply_snapshot(snap);
+  quoter.update(kTicker, book);
+
+  const std::string &bid_body = transport.recorded_requests().at(0).body;
+  EXPECT_NE(bid_body.find(R"("price":"0.5000")"), std::string::npos)
+      << "bid at fv 52.6 must floor to 50, not round to 51: " << bid_body;
+}
+
+TEST_F(QuoterTest, AskRoundsUpAtFractionalFairValue) {
+  // yes 51@7 / no 46@8 -> best ask 54 (size 8): micro = (51*8 + 54*7)/15 =
+  // 52.4. Raw ask = 54.4: rounding to nearest would quote 54, giving away
+  // 0.4c. The maker's ask must round UP (NO order at 45 -> YES 55).
+  constexpr int kBidLevelPrice = 51;
+  constexpr int kNoLevelPrice = 46;
+  const kalshi::Quantity kBidSize = kalshi::Quantity::from_contracts(7);
+  const kalshi::Quantity kAskSize = kalshi::Quantity::from_contracts(8);
+
+  auto transport_ptr = std::make_unique<FakeTransport>();
+  FakeTransport &transport = *transport_ptr;
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId1, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId2, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  kalshi::RestClient rest{kalshi::Auth{kApiKey, kPemPrivateKey},
+                          std::move(transport_ptr), kBaseUrl};
+  kalshi::OrderManager order_mgr{rest};
+  kalshi::RiskManager risk_mgr{kalshi::RiskLimits{}};
+  kalshi::Quoter quoter{kalshi::QuoterConfig{}, order_mgr, risk_mgr};
+
+  kalshi::Orderbook snap;
+  snap.ticker = kTicker;
+  snap.yes = {{kBidLevelPrice, kBidSize}};
+  snap.no = {{kNoLevelPrice, kAskSize}};
+  kalshi::LocalOrderbook book;
+  book.apply_snapshot(snap);
+  quoter.update(kTicker, book);
+
+  const std::string &ask_body = transport.recorded_requests().at(1).body;
+  EXPECT_NE(ask_body.find(R"("price":"0.5500")"), std::string::npos)
+      << "ask at fv 52.4 must ceil to 55, not round to 54: " << ask_body;
+}
+
 TEST_F(QuoterTest, QuoteNotReplacedWithinRepriceThreshold) {
   // First update (mid=52): bid=50, ask=54.
   // Second update (mid=53): desired bid=51, ask=55; diff=1 = threshold → no

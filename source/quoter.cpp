@@ -34,9 +34,9 @@ Quoter::Quoter(QuoterConfig config, FairValueEngine fv_engine,
 
 std::pair<int, int> Quoter::compute_quotes(double fv_cents, int half_spread,
                                            double inventory_skew_cents) {
-  const auto bid_val = static_cast<int>(std::round(
+  const auto bid_val = static_cast<int>(std::floor(
       fv_cents - static_cast<double>(half_spread) - inventory_skew_cents));
-  const auto ask_val = static_cast<int>(std::round(
+  const auto ask_val = static_cast<int>(std::ceil(
       fv_cents + static_cast<double>(half_spread) - inventory_skew_cents));
   return {std::clamp(bid_val, kBidMinCents, kBidMaxCents),
           std::clamp(ask_val, kAskMinCents, kAskMaxCents)};
