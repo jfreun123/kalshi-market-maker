@@ -161,9 +161,10 @@ void Quoter::update(std::string_view ticker, const LocalOrderbook &book) {
         "flow imbalanced ticker={} ratio={:.2f} — widening spread to {}c",
         ticker, flow_guard_->imbalance_ratio(ticker_str), target_spread);
   }
-  // Apply the spread floor: never quote tighter than min_spread_cents.
+  // Apply the spread floor: never quote tighter than min_spread_cents. The
+  // floor's half-spread rounds up so an odd floor still holds.
   const int base_half_spread = std::max(
-      {kHalfSpreadMin, target_spread / 2, config_.min_spread_cents / 2});
+      {kHalfSpreadMin, target_spread / 2, (config_.min_spread_cents + 1) / 2});
   // Maker fee: widen so the net-of-fee edge is preserved. Kalshi's per-contract
   // fee is γ·P·(1−P); estimate P from the fair value.
   int fee_cents = 0;
