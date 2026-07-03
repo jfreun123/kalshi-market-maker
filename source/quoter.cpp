@@ -150,6 +150,12 @@ void Quoter::update(std::string_view ticker, const LocalOrderbook &book) {
   if (!best_bid.has_value() || !best_ask.has_value()) {
     return;
   }
+  if (best_bid->price_cents >= best_ask->price_cents) {
+    get_logger()->warn(
+        "crossed visible book ticker={} bid={} ask={} — keeping resting quotes",
+        ticker, best_bid->price_cents, best_ask->price_cents);
+    return;
+  }
 
   const double mid = visible.mid_price_cents();
   // Anchor fair value on the volume-adjusted micro-price, not the raw mid, so
