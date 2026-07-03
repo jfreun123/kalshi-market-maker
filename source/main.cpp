@@ -1,5 +1,6 @@
 #include "auth.hpp"
 #include "capture.hpp"
+#include "cli.hpp"
 #include "config.hpp"
 #include "ensure.hpp"
 #include "fair_value.hpp"
@@ -50,7 +51,7 @@ extern "C" void handle_signal(int /*sig*/) { g_shutdown.store(true); }
 
 // ---- Logger setup ----
 
-static void setup_logger(const std::filesystem::path &log_dir) {
+static void setup_logger(const std::filesystem::path &log_dir, bool verbose) {
   std::filesystem::create_directories(log_dir);
   const auto log_path = log_dir / "app.log";
 
@@ -63,7 +64,7 @@ static void setup_logger(const std::filesystem::path &log_dir) {
 
   auto logger = std::make_shared<spdlog::logger>(
       "kalshi", spdlog::sinks_init_list{console_sink, file_sink});
-  logger->set_level(spdlog::level::info);
+  logger->set_level(verbose ? spdlog::level::debug : spdlog::level::info);
   logger->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%l] %v");
   logger->flush_on(spdlog::level::warn);
 
@@ -404,52 +405,15 @@ static PnlMap load_pnl(const std::filesystem::path &path) {
   return result;
 }
 
-// ---- Arg parsing ----
-
-struct CliArgs {
-  bool paper_mode{false};
-  bool scan_mode{false};
-  bool reconcile_mode{false};
-  bool capture_mode{false};
-  bool flatten_mode{false};
-  std::filesystem::path capture_dir{"capture"};
-  std::filesystem::path config_path{"config.json"};
-};
-
-static CliArgs parse_args(std::span<char *> args) {
-  CliArgs result;
-  for (std::size_t idx = 1U; idx < args.size(); ++idx) {
-    const std::string_view arg{args[idx]};
-    if (arg == "--paper") {
-      result.paper_mode = true;
-    } else if (arg == "--scan") {
-      result.scan_mode = true;
-    } else if (arg == "--reconcile") {
-      result.reconcile_mode = true;
-    } else if (arg == "--flatten") {
-      result.flatten_mode = true;
-    } else if (arg == "--capture") {
-      result.capture_mode = true;
-      // Optional directory argument follows --capture.
-      if (idx + 1U < args.size() && args[idx + 1U][0] != '-') {
-        result.capture_dir = std::filesystem::path{args[++idx]};
-      }
-    } else {
-      result.config_path = std::filesystem::path{args[idx]};
-    }
-  }
-  return result;
-}
-
 // ---- Entry point ----
 
 int main(int argc, char *argv[]) {
   try {
-    const auto cli =
-        parse_args(std::span<char *>(argv, static_cast<std::size_t>(argc)));
+    const auto cli = kalshi::parse_args(
+        std::span<char *>(argv, static_cast<std::size_t>(argc)));
     const kalshi::AppConfig app_config = kalshi::load_config(cli.config_path);
 
-    setup_logger(std::filesystem::path{app_config.log_dir});
+    setup_logger(std::filesystem::path{app_config.log_dir}, cli.verbose);
     auto log = kalshi::get_logger();
 
     log->info("startup mode={} tickers={} base_url={}",

@@ -15,6 +15,7 @@ function(kalshi_add_test target source)
 endfunction()
 
 kalshi_add_test(types_test source/types_test.cpp)
+kalshi_add_test(cli_test source/cli_test.cpp)
 kalshi_add_test(quantity_test source/quantity_test.cpp)
 kalshi_add_test(ensure_test source/ensure_test.cpp)
 kalshi_add_test(auth_test source/auth_test.cpp)
