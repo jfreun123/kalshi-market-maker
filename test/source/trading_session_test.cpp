@@ -233,17 +233,66 @@ TEST_F(TradingSessionTest, CancelPreexistingOrdersNoOpWhenNoneResting) {
 }
 
 TEST_F(TradingSessionTest, FillUpdatesPositionAndNotifiesPnlListener) {
-  bool notified = false;
+  kalshi::TradingSession::PnlMap persisted;
   session_.set_pnl_listener(
-      [&notified](const kalshi::TradingSession::PnlMap &) { notified = true; });
+      [&persisted](const kalshi::TradingSession::PnlMap &pnl) {
+        persisted = pnl;
+      });
 
   session_.on_fill(make_fill(kFillOrderId, kTicker, kalshi::Side::Yes,
                              kHighYesPrice, kOneLot));
 
   EXPECT_EQ(order_mgr_.net_position(kTicker),
             kalshi::Quantity::from_contracts(kOneLot));
-  EXPECT_TRUE(notified);
-  EXPECT_TRUE(session_.prior_pnl().contains(kTicker));
+  EXPECT_TRUE(persisted.contains(kTicker));
+}
+
+TEST_F(TradingSessionTest, PersistedPnlIsPriorPlusSessionNotCompounded) {
+  constexpr double kPriorPnlCents = 100.0;
+  constexpr int kYesFillPrice = 52;
+  constexpr int kNoFillPrice = 44;
+  constexpr int kFillLots = 5;
+  constexpr double kSpreadPerSetCents = 100.0 - kYesFillPrice - kNoFillPrice;
+  constexpr double kExpectedFinalPnlCents =
+      kPriorPnlCents + (2 * kSpreadPerSetCents * kFillLots);
+
+  session_.set_prior_pnl({{kTicker, kPriorPnlCents}});
+  kalshi::TradingSession::PnlMap persisted;
+  session_.set_pnl_listener(
+      [&persisted](const kalshi::TradingSession::PnlMap &pnl) {
+        persisted = pnl;
+      });
+
+  session_.on_fill(
+      make_fill("fill-y1", kTicker, kalshi::Side::Yes, kYesFillPrice, kFillLots));
+  session_.on_fill(
+      make_fill("fill-n1", kTicker, kalshi::Side::No, kNoFillPrice, kFillLots));
+  session_.on_fill(
+      make_fill("fill-y2", kTicker, kalshi::Side::Yes, kYesFillPrice, kFillLots));
+  session_.on_fill(
+      make_fill("fill-n2", kTicker, kalshi::Side::No, kNoFillPrice, kFillLots));
+
+  ASSERT_TRUE(persisted.contains(kTicker));
+  EXPECT_DOUBLE_EQ(persisted.at(kTicker), kExpectedFinalPnlCents);
+  EXPECT_DOUBLE_EQ(session_.prior_pnl().at(kTicker), kPriorPnlCents)
+      << "the carried baseline must stay immutable during the session";
+}
+
+TEST_F(TradingSessionTest, PersistedPnlKeepsUntrackedTickersFromPriorState) {
+  const std::string kRetiredTicker = "KXRETIRED";
+  constexpr double kRetiredPnlCents = 250.0;
+  session_.set_prior_pnl({{kRetiredTicker, kRetiredPnlCents}});
+  kalshi::TradingSession::PnlMap persisted;
+  session_.set_pnl_listener(
+      [&persisted](const kalshi::TradingSession::PnlMap &pnl) {
+        persisted = pnl;
+      });
+
+  session_.on_fill(make_fill(kFillOrderId, kTicker, kalshi::Side::Yes,
+                             kHighYesPrice, kOneLot));
+
+  ASSERT_TRUE(persisted.contains(kRetiredTicker));
+  EXPECT_DOUBLE_EQ(persisted.at(kRetiredTicker), kRetiredPnlCents);
 }
 
 TEST_F(TradingSessionTightExposureTest, RunPortfolioRiskHaltsOnOverExposure) {

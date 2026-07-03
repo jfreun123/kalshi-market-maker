@@ -88,10 +88,18 @@ void TradingSession::on_fill(const Fill &fill) {
                            risk_mgr_.active_constraints());
   }
 
-  prior_pnl_[fill.market_ticker] = total_pnl;
   if (pnl_listener_) {
-    pnl_listener_(prior_pnl_);
+    pnl_listener_(carried_pnl());
   }
+}
+
+TradingSession::PnlMap TradingSession::carried_pnl() const {
+  PnlMap totals = prior_pnl_;
+  for (const auto &ticker : tickers_) {
+    totals[ticker] =
+        prior_pnl_for(prior_pnl_, ticker) + order_mgr_.realized_pnl(ticker);
+  }
+  return totals;
 }
 
 void TradingSession::on_disconnect() {

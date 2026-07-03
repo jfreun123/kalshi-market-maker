@@ -87,6 +87,7 @@ public:
   [[nodiscard]] const OrderbookMap &orderbooks() const { return ob_map_; }
   [[nodiscard]] PortfolioSnapshot portfolio_snapshot() const;
   [[nodiscard]] const PnlMap &prior_pnl() const { return prior_pnl_; }
+  [[nodiscard]] PnlMap carried_pnl() const;
 
   // Seed realized PnL carried over from a prior session (loaded from disk).
   void set_prior_pnl(PnlMap prior_pnl) { prior_pnl_ = std::move(prior_pnl); }
