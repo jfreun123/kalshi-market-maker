@@ -138,18 +138,23 @@ void Quoter::refresh_ask(const std::string &ticker, int desired_ask) {
 }
 
 void Quoter::update(std::string_view ticker, const LocalOrderbook &book) {
-  const std::optional<Level> best_bid = book.best_bid();
-  const std::optional<Level> best_ask = book.best_ask();
+  const std::string ticker_str{ticker};
+  // Price off the book minus our own resting quotes: the exchange book echoes
+  // them back, and on a thin book our own size dominates the micro-price —
+  // feeding it back produces a self-referential cancel/replace oscillation
+  // (demo finding D4).
+  const LocalOrderbook visible = book_without_own_quotes(ticker_str, book);
+  const std::optional<Level> best_bid = visible.best_bid();
+  const std::optional<Level> best_ask = visible.best_ask();
   if (!best_bid.has_value() || !best_ask.has_value()) {
     return;
   }
 
-  const std::string ticker_str{ticker};
-  const double mid = book.mid_price_cents();
+  const double mid = visible.mid_price_cents();
   // Anchor fair value on the volume-adjusted micro-price, not the raw mid, so
   // quotes lean toward the side the book is pressuring (less adverse
   // selection).
-  const double micro = book.micro_price_cents();
+  const double micro = visible.micro_price_cents();
   const double fair_val = fv_engine_.estimate(
       FairValueInput{micro, kDefaultTimeToCloseHours, 0, {}});
   ensure(std::isfinite(fair_val), "fair value is not finite");
@@ -201,6 +206,33 @@ void Quoter::update(std::string_view ticker, const LocalOrderbook &book) {
 }
 
 void Quoter::reset_quotes() { live_quotes_.clear(); }
+
+LocalOrderbook
+Quoter::book_without_own_quotes(const std::string &ticker,
+                                const LocalOrderbook &book) const {
+  LocalOrderbook visible = book;
+  const auto live_it = live_quotes_.find(ticker);
+  if (live_it == live_quotes_.end()) {
+    return visible;
+  }
+  const auto &open_orders = order_mgr_.open_orders();
+  const LiveQuote &live = live_it->second;
+  if (!live.bid_order_id.empty()) {
+    const auto order_it = open_orders.find(live.bid_order_id);
+    if (order_it != open_orders.end()) {
+      visible.apply_delta(Side::Yes, live.current_bid_cents,
+                          -order_it->second.remaining_quantity());
+    }
+  }
+  if (!live.ask_order_id.empty()) {
+    const auto order_it = open_orders.find(live.ask_order_id);
+    if (order_it != open_orders.end()) {
+      visible.apply_delta(Side::No, complement_price(live.current_ask_cents),
+                          -order_it->second.remaining_quantity());
+    }
+  }
+  return visible;
+}
 
 // NOLINTNEXTLINE(bugprone-easily-swappable-parameters) - ticker vs order id
 void Quoter::forget_order(std::string_view ticker, std::string_view order_id) {

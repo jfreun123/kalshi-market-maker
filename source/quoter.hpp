@@ -88,6 +88,9 @@ private:
   void refresh_bid(const std::string &ticker, int desired_bid);
   void refresh_ask(const std::string &ticker, int desired_ask);
   [[nodiscard]] bool release_order(const std::string &order_id);
+  [[nodiscard]] LocalOrderbook
+  book_without_own_quotes(const std::string &ticker,
+                          const LocalOrderbook &book) const;
 
   QuoterConfig config_;
   FairValueEngine fv_engine_;
