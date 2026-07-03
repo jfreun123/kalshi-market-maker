@@ -122,6 +122,19 @@
   disconnects. Surfaced repeatedly during this session's demo runs — highest-value
   remaining operational fix. See *Rate Limiting*.
 
+- [~] **21. VAMP micro-price fair-value anchor — deepen (strategy).** *L1
+  (top-of-book) shipped:* `LocalOrderbook::micro_price_cents()` weights each
+  side's price by the opposite side's size, and the `Quoter` anchors fair value
+  on it instead of the raw mid (leans toward book pressure → less adverse
+  selection). Grounded in Bawa 2025 (VAMP) + Bürgi et al. (see
+  [docs/papers](docs/papers/README.md)). **Deeper (TODO):** (a) **EMA smoothing**
+  — raw VAMP is noisy tick-to-tick, so quotes can chase 1-lot flickers; smooth
+  before quoting. (b) **L2/L3 depth weighting** — extend beyond top-of-book;
+  deeper imbalance carries informed-trader positioning. (c) **A/B in replay** —
+  compare micro vs. mid on realized fills / markout to confirm the adverse-
+  selection reduction. (d) consider exposing the OBI/`IR>0.65` signal
+  (`FlowImbalanceGuard`) as a directional input, not only a spread-widener.
+
 - [x] **18. Rebate-aware market selection (strategy).** *Done — `get_incentive_programs`
   joined into scanner ranking (see Done section).* Kalshi's **Liquidity
   Incentive Program** pays for top-of-book resting size whether or not it fills
@@ -1043,7 +1056,7 @@ Full data + notes: [docs/papers/README.md](docs/papers/README.md) §1. Rules dri
 ### Bawa 2025 — Prediction Market Alpha (execution)
 
 Full notes: [docs/papers/README.md](docs/papers/README.md) §2. Actionable for our flow/pricing:
-- **Micro-price (VAMP)** `= (P_bid·Q_ask + P_ask·Q_bid)/(Q_bid+Q_ask)` — better fair-value anchor than the raw mid (candidate upgrade to `FairValueEngine`).
+- **Micro-price (VAMP)** `= (P_bid·Q_ask + P_ask·Q_bid)/(Q_bid+Q_ask)` — better fair-value anchor than the raw mid. **L1 shipped** (`micro_price_cents`, quoter anchor); deepen per item 21.
 - **Order-book imbalance** `IR = Bid_vol/(Bid_vol+Ask_vol)`; **IR>0.65** predicts a near-term up-move (~58%) — empirical backing for `FlowImbalanceGuard`; consider using it as a directional signal, not just a spread-widener.
 - **Fractional Kelly** `f* = (P_true−P_market)/(1−P_market)`, sized at 25–50% — the sizing rule for when `quote_size` becomes edge-scaled.
 - Terminal-risk taper `∝ √(T_remaining)`; cross-outcome arb when `Σ P_i < 1` (future strategy).
