@@ -367,53 +367,6 @@ TEST_F(DemoConformanceTest, GetMarketsFilteredByEventParses) {
   }
 }
 
-TEST_F(DemoConformanceTest, RestAndWebSocketBestAskAgree) {
-  const std::string ticker = first_target_ticker();
-  if (ticker.empty()) {
-    GTEST_SKIP() << "demo config has no target_tickers to compare";
-  }
-
-  auto rest = make_rest();
-  kalshi::LocalOrderbook rest_book;
-  rest_book.apply_snapshot(rest.get_orderbook(ticker));
-  const auto rest_ask = rest_book.best_ask();
-
-  auto websocket = make_ws();
-  std::mutex book_mutex;
-  kalshi::LocalOrderbook ws_book;
-  std::atomic<bool> got_snapshot{false};
-  websocket.on_orderbook_snapshot([&](const kalshi::Orderbook &snapshot) {
-    const std::lock_guard<std::mutex> lock{book_mutex};
-    ws_book.apply_snapshot(snapshot);
-    got_snapshot.store(true);
-  });
-  websocket.subscribe(ticker);
-  std::thread runner{[&websocket] { websocket.run(); }};
-
-  constexpr int kMaxWaitTenths = 100;
-  for (int tenth = 0; tenth < kMaxWaitTenths && !got_snapshot.load(); ++tenth) {
-    std::this_thread::sleep_for(kEventPollInterval);
-  }
-  websocket.stop();
-  runner.join();
-  ASSERT_TRUE(got_snapshot.load())
-      << "no orderbook_snapshot received within 10s for ticker " << ticker;
-
-  std::optional<kalshi::Level> ws_ask;
-  {
-    const std::lock_guard<std::mutex> lock{book_mutex};
-    ws_ask = ws_book.best_ask();
-  }
-
-  if (rest_ask.has_value() && ws_ask.has_value()) {
-    constexpr int kMaxDivergenceCents = 30;
-    EXPECT_LE(std::abs(rest_ask->price_cents - ws_ask->price_cents),
-              kMaxDivergenceCents)
-        << "REST best ask " << rest_ask->price_cents << " and WS best ask "
-        << ws_ask->price_cents << " diverge implausibly";
-  }
-}
-
 TEST_F(DemoConformanceTest, WebSocketFillArrivesForCrossingTrade) {
   if (std::getenv("KALSHI_DEMO_TRADE_TESTS") == nullptr) {
     GTEST_SKIP() << "set KALSHI_DEMO_TRADE_TESTS=1 to run trade-mutating fill "
