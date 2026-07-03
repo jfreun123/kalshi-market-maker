@@ -81,7 +81,7 @@ void Quoter::refresh_bid(const std::string &ticker, int desired_bid) {
     live.current_bid_cents = desired_bid;
   } else if (std::abs(live.current_bid_cents - desired_bid) >
              config_.reprice_threshold_cents) {
-    if (!order_released(live.bid_order_id)) {
+    if (!release_order(live.bid_order_id)) {
       return;
     }
     live.bid_order_id.clear();
@@ -118,7 +118,7 @@ void Quoter::refresh_ask(const std::string &ticker, int desired_ask) {
     live.current_ask_cents = desired_ask;
   } else if (std::abs(live.current_ask_cents - desired_ask) >
              config_.reprice_threshold_cents) {
-    if (!order_released(live.ask_order_id)) {
+    if (!release_order(live.ask_order_id)) {
       return;
     }
     live.ask_order_id.clear();
@@ -215,7 +215,7 @@ void Quoter::forget_order(std::string_view ticker, std::string_view order_id) {
   }
 }
 
-bool Quoter::order_released(const std::string &order_id) {
+bool Quoter::release_order(const std::string &order_id) {
   if (order_mgr_.cancel(order_id)) {
     return true;
   }

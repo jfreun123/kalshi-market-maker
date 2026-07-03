@@ -87,7 +87,7 @@ private:
 
   void refresh_bid(const std::string &ticker, int desired_bid);
   void refresh_ask(const std::string &ticker, int desired_ask);
-  [[nodiscard]] bool order_released(const std::string &order_id);
+  [[nodiscard]] bool release_order(const std::string &order_id);
 
   QuoterConfig config_;
   FairValueEngine fv_engine_;
