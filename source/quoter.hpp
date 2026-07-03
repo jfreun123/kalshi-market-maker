@@ -89,12 +89,11 @@ private:
   static std::pair<int, int> compute_quotes(double fv_cents, int half_spread,
                                             double inventory_skew_cents);
 
-  void refresh_bid(const std::string &ticker, int desired_bid);
-  void refresh_ask(const std::string &ticker, int desired_ask);
+  void refresh_bid(const std::string &ticker, OwnQuote &own, int desired_bid);
+  void refresh_ask(const std::string &ticker, OwnQuote &own, int desired_ask);
   [[nodiscard]] bool release_order(const std::string &order_id);
-  [[nodiscard]] LocalOrderbook
-  book_without_own_quotes(const std::string &ticker,
-                          const LocalOrderbook &book) const;
+  [[nodiscard]] const LocalOrderbook &
+  book_without_own_quotes(const OwnQuote &own, const LocalOrderbook &book);
 
   QuoterConfig config_;
   FairValueEngine fv_engine_;
@@ -102,6 +101,7 @@ private:
   RiskManager &risk_mgr_;
   const FlowImbalanceGuard *flow_guard_{nullptr};
   std::unordered_map<std::string, OwnQuote> own_quotes_;
+  LocalOrderbook scratch_book_;
 };
 
 } // namespace kalshi

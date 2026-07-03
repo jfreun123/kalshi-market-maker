@@ -64,8 +64,8 @@ std::optional<int> passive_ask(int desired_ask, int market_bid_cents) {
 
 } // namespace
 
-void Quoter::refresh_bid(const std::string &ticker, int desired_bid) {
-  auto &own = own_quotes_[ticker];
+void Quoter::refresh_bid(const std::string &ticker, OwnQuote &own,
+                         int desired_bid) {
   if (own.bid_order_id.empty()) {
     // Self-cross guard: don't place bid if it would match our own resting ask.
     if (!own.ask_order_id.empty() && desired_bid >= own.quoted_ask_cents) {
@@ -100,9 +100,9 @@ void Quoter::refresh_bid(const std::string &ticker, int desired_bid) {
   }
 }
 
-void Quoter::refresh_ask(const std::string &ticker, int desired_ask) {
+void Quoter::refresh_ask(const std::string &ticker, OwnQuote &own,
+                         int desired_ask) {
   const int no_price = complement_price(desired_ask);
-  auto &own = own_quotes_[ticker];
   if (own.ask_order_id.empty()) {
     // Self-cross guard: don't place ask if it would match our own resting bid.
     if (!own.bid_order_id.empty() && desired_ask <= own.quoted_bid_cents) {
@@ -139,11 +139,12 @@ void Quoter::refresh_ask(const std::string &ticker, int desired_ask) {
 
 void Quoter::update(std::string_view ticker, const LocalOrderbook &book) {
   const std::string ticker_str{ticker};
+  OwnQuote &own = own_quotes_[ticker_str];
   // Price off the book minus our own resting quotes: the exchange book echoes
   // them back, and on a thin book our own size dominates the micro-price —
   // feeding it back produces a self-referential cancel/replace oscillation
   // (demo finding D4).
-  const LocalOrderbook visible = book_without_own_quotes(ticker_str, book);
+  const LocalOrderbook &visible = book_without_own_quotes(own, book);
   const std::optional<Level> best_bid = visible.best_bid();
   const std::optional<Level> best_ask = visible.best_ask();
   if (!best_bid.has_value() || !best_ask.has_value()) {
@@ -198,40 +199,39 @@ void Quoter::update(std::string_view ticker, const LocalOrderbook &book) {
       desired_ask.value_or(-1));
 
   if (desired_bid.has_value()) {
-    refresh_bid(ticker_str, *desired_bid);
+    refresh_bid(ticker_str, own, *desired_bid);
   }
   if (desired_ask.has_value()) {
-    refresh_ask(ticker_str, *desired_ask);
+    refresh_ask(ticker_str, own, *desired_ask);
   }
 }
 
 void Quoter::reset_quotes() { own_quotes_.clear(); }
 
-LocalOrderbook
-Quoter::book_without_own_quotes(const std::string &ticker,
-                                const LocalOrderbook &book) const {
-  LocalOrderbook visible = book;
-  const auto own_it = own_quotes_.find(ticker);
-  if (own_it == own_quotes_.end()) {
-    return visible;
+const LocalOrderbook &
+Quoter::book_without_own_quotes(const OwnQuote &own,
+                                const LocalOrderbook &book) {
+  if (own.bid_order_id.empty() && own.ask_order_id.empty()) {
+    return book;
   }
+  scratch_book_ = book;
   const auto &open_orders = order_mgr_.open_orders();
-  const OwnQuote &own = own_it->second;
   if (!own.bid_order_id.empty()) {
     const auto order_it = open_orders.find(own.bid_order_id);
     if (order_it != open_orders.end()) {
-      visible.apply_delta(Side::Yes, own.quoted_bid_cents,
-                          -order_it->second.remaining_quantity());
+      scratch_book_.apply_delta(Side::Yes, own.quoted_bid_cents,
+                                -order_it->second.remaining_quantity());
     }
   }
   if (!own.ask_order_id.empty()) {
     const auto order_it = open_orders.find(own.ask_order_id);
     if (order_it != open_orders.end()) {
-      visible.apply_delta(Side::No, complement_price(own.quoted_ask_cents),
-                          -order_it->second.remaining_quantity());
+      scratch_book_.apply_delta(Side::No,
+                                complement_price(own.quoted_ask_cents),
+                                -order_it->second.remaining_quantity());
     }
   }
-  return visible;
+  return scratch_book_;
 }
 
 // NOLINTNEXTLINE(bugprone-easily-swappable-parameters) - ticker vs order id
