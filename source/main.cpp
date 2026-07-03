@@ -21,7 +21,7 @@
 #include "websocket_client.hpp"
 
 #include <nlohmann/json.hpp>
-#include <spdlog/sinks/rotating_file_sink.h>
+#include <spdlog/sinks/daily_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
 
@@ -55,11 +55,14 @@ static void setup_logger(const std::filesystem::path &log_dir, bool verbose) {
   std::filesystem::create_directories(log_dir);
   const auto log_path = log_dir / "app.log";
 
-  constexpr std::size_t kMaxLogBytes = 20UL * 1024UL * 1024UL;
-  constexpr std::size_t kMaxLogFiles = 14U;
+  constexpr int kRotationHour = 0;
+  constexpr int kRotationMinute = 0;
+  constexpr bool kTruncate = false;
+  constexpr std::uint16_t kMaxLogFiles = 14U;
 
-  auto file_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
-      log_path.string(), kMaxLogBytes, kMaxLogFiles);
+  auto file_sink = std::make_shared<spdlog::sinks::daily_file_sink_mt>(
+      log_path.string(), kRotationHour, kRotationMinute, kTruncate,
+      kMaxLogFiles);
   auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
 
   auto logger = std::make_shared<spdlog::logger>(
