@@ -13,7 +13,36 @@
   `source/ensure.{hpp,cpp}` with `set_panic_handler`; `main` registers
   flatten-before-crash (`cancel_all_quotes`). Design in *Safety* section below.*
 
+### P0 — Correctness & safety (do these first)
+
+- [ ] **38. Self-referential micro-price → quote churn oscillator (D4,
+  2026-07-03 demo run).** The quoter prices off a book that includes **our own
+  resting orders**; on thin books our size moves `micro_price_cents()` past
+  `reprice_threshold_cents=1`, producing a deterministic place/cancel loop
+  (measured: 1,146 places + 1,146 cancels vs 22 fills in 10 min; 98% of orders
+  lived <1s; placements perfectly bimodal, 2c apart). Fix: subtract our own
+  resting orders from the book before computing micro/mid/imbalance, add a
+  minimum quote rest time (or two-tick hysteresis). Full evidence in *Demo Run
+  Findings (2026-07-03)* below. **Do this before any further live sessions —
+  it burns the write budget, queue position, and incentive score.**
+
 ### P1 — Market-making quality
+
+- [ ] **39. Flow defenses never engage under one-sided flow (D5, 2026-07-03
+  demo run).** 11 maker fills per ticker, all one side, prices never moved:
+  `FlowImbalanceGuard` never widened and 0.05c/contract skew is invisible at
+  ~12 contracts. Verify the guard sees WS maker fills; raise/replace the skew
+  (LMSR log-odds, item 25); consider the directional lean (item 32). Evidence
+  in *Demo Run Findings (2026-07-03)*.
+
+- [ ] **40. Shutdown-flatten PnL lost (D7, 2026-07-03 demo run).** The closing
+  IOC from `flatten_all_positions` is never recorded as a `Fill`, so the
+  session's realized result never reaches `OrderManager` or `pnl_state.json`.
+  Build a `Fill` from the flatten response (`fill_count`,
+  `average_fill_price`) → `record_fill` → persist the carry before exit; prune
+  settled tickers from `pnl_state.json`. Evidence in *Demo Run Findings
+  (2026-07-03)*.
+
 
 - [x] **2. Cancel orphaned orders on startup (and guarantee cancel-on-exit).**
   *Done — merged PR #9: startup fetches resting orders for target tickers and
@@ -644,7 +673,7 @@ on quiet books (item 8), zero 429s/rejects (write limiter + clamp). New
 findings, prioritized:
 
 - [ ] **D4 — Self-referential micro-price → place/cancel oscillator (P0,
-  ~item 38).** 1,146 places and 1,146 cancels in ~10 min vs 22 fills; 98% of
+  item 38).** 1,146 places and 1,146 cancels in ~10 min vs 22 fills; 98% of
   orders lived <1s (p50 0.5s). Placement prices are perfectly bimodal on both
   active tickers — the quote flips between exactly two states 2c apart
   (yes@14/no@82 ↔ yes@12/no@84: 213/212 each; yes@26-28/no@68-70: 73/72) —
@@ -661,7 +690,7 @@ findings, prioritized:
   write-limit budget (~1.8 places/s avg), destroys queue position (item 9),
   and forfeits Liquidity Incentive score (time-at-top-of-book).
 
-- [ ] **D5 — One-sided flow absorbed with static quotes (P1, ~item 39).**
+- [ ] **D5 — One-sided flow absorbed with static quotes (P1, item 39).**
   11 maker fills per active ticker, **all NO side**, at unchanged prices
   (70c, 84c), accumulating net −10.93 and −12.02 with zero realized PnL —
   textbook adverse-selection underwriting (Palumbo's E_win). Neither defense
@@ -673,7 +702,7 @@ findings, prioritized:
   reservation price.
 
 - [ ] **D7 — Shutdown flatten PnL never recorded or persisted (P1,
-  ~item 40).** `flatten_all_positions` places the closing IOC via
+  item 40).** `flatten_all_positions` places the closing IOC via
   `rest.flatten()` but never records the execution as a `Fill` in
   `OrderManager`, and the PnL listener only fires on WS fills — so the
   realized PnL of closing −10.93/−12.02 (the session's actual economic
