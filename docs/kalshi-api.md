@@ -31,15 +31,11 @@ Algorithm: RSA-PSS, SHA-256, MGF1 with SHA-256, salt length = digest length.
 
 Keys are generated at kalshi.com → Settings → API Keys. The private key is downloaded once — Kalshi does not retain it. See `source/auth.hpp` for the C++ implementation.
 
-> **⚠️ Known gaps (UAT, 2026-06-29).** A live `--capture` run authenticated
-> nothing: every signed call returned `401 INVALID_PARAMETER`. Two things to
-> settle before this is trusted:
-> 1. **Credential:** `config-demo.json` `api_key` is a placeholder, not a real
->    access key ID — fill it in first. (This is the current blocker.)
-> 2. **Salt length:** the spec above says *digest length* (32), but
->    `source/auth.cpp` currently signs with `RSA_PSS_SALTLEN_MAX`. Verify against
->    a real key once #1 is fixed; switch to `RSA_PSS_SALTLEN_DIGEST` if the 401
->    persists.
+> **Verified live (demo, 2026-07-03).** The demo conformance suite
+> (`test/integration/demo_conformance_test.cpp`, built with
+> `-DKALSHI_DEMO_TESTS=ON`) authenticates and passes 10/10 against the demo
+> environment. `source/auth.cpp` signs with `RSA_PSS_SALTLEN_DIGEST` (salt
+> length = digest length), matching the spec above.
 
 ## Price and Count Representation (current API)
 
@@ -95,9 +91,9 @@ GET /markets/{ticker}/orderbook      # REST orderbook snapshot
 ### Orders
 
 ```
-POST   /portfolio/events/orders      # place order (V2)
+POST   /portfolio/events/orders             # place order (V2)
 GET    /portfolio/orders?status=resting
-DELETE /portfolio/orders/{order_id}  # cancel
+DELETE /portfolio/events/orders/{order_id}  # cancel (V2)
 ```
 
 **Create order request body (V2):**
@@ -257,25 +253,31 @@ After `close_time`, all order operations return `MARKET_INACTIVE`.
 
 ## Rate Limits
 
-Token bucket — separate Read and Write buckets, 10 tokens per request (default).
+Token bucket — separate Read and Write buckets, 10 tokens per request
+(default; some ops are cheaper, e.g. order cancels cost 2).
 
-| Tier | Read tok/s | Write tok/s | Earn threshold (30d vol share) |
+| Tier | Read tok/s | Write tok/s | How obtained |
 |---|---|---|---|
-| Basic | 200 | 100 | — |
-| Advanced | 300 | 300 | — |
-| Expert | 600 | 600 | 0.15% |
-| Premier | 1,000 | 1,000 | 0.25% |
-| Paragon | 2,000 | 2,000 | 0.50% |
+| Basic | 200 | 100 | default |
+| Advanced | 300 | 300 | application |
+| Expert | 600 | 600 | relationship-based |
+| Premier | 1,000 | 1,000 | relationship-based |
+| Paragon | 2,000 | 2,000 | relationship-based |
+| Prime | 4,000 | 4,000 | relationship-based |
+| Prestige | 6,000 | 8,000 | relationship-based |
 
-Basic = 10 orders/second sustained. Batch orders cost 10×N tokens (no discount).
+Basic = 10 orders/second sustained. Batch orders cost tokens per item (no
+discount): 25 creates = 250 tokens, 25 cancels = 50 tokens.
 429 response on exhaustion; no penalty, bucket refills continuously.
 
 ## Fees
 
-Kalshi charges fees on fills. No settlement fee for binary YES/NO markets.
-The `fee_cost` field on fill events gives the per-fill fee in dollars.
+Fees are charged on taker fills: ≈ `roundup(0.07 × C × P × (1−P))`. Maker
+(resting) fills are fee-free on most markets; a minority of flagged series
+carry a maker fee ≈ ¼ of the taker rate. No settlement fee for binary YES/NO
+markets. The `fee_cost` field on fill events gives the per-fill fee in dollars.
 
-Fee reduces net PnL; factor it into minimum required spread:
+On maker-fee series, factor the fee into the minimum required spread:
 ```
 min_spread_for_breakeven ≥ 2 × fee_per_contract
 ```

@@ -31,3 +31,8 @@ Reasons:
   callbacks must be thread-safe (protected by mutex or atomic).
 - The `FakeWebSocket` test double is synchronous (no threading), so replay
   tests are deterministic and fast.
+- Superseding reason 2: IXWebSocket's built-in auto-reconnect is disabled in
+  `WebSocketClient` because it would replay stale auth headers on reconnect.
+  Reconnects are driven by the client's own exponential backoff (base delay
+  doubling per consecutive failure, capped at `kMaxReconnectDelay` = 60s,
+  reset on a successful connect).

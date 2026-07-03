@@ -82,7 +82,17 @@ cp config.example.json config.json
     "target_spread_cents": 4,
     "skew_per_contract_cents": 0.05,
     "reprice_threshold_cents": 1,
-    "quote_size": 10
+    "quote_size": 10,
+    "imbalance_spread_cents": 2,
+    "min_spread_cents": 3,
+    "use_view_based_pricing": false,
+    "view_debias_beta": 0.09,
+    "maker_fee_rate": 0.0
+  },
+  "flow": {
+    "window_seconds": 300,
+    "imbalance_ratio_threshold": 2.0,
+    "min_flow_volume": 20
   },
   "risk": {
     "max_position_per_market": 100,
@@ -90,7 +100,10 @@ cp config.example.json config.json
     "max_order_size": 25,
     "daily_loss_limit": -500.0,
     "max_total_exposure_dollars": 10000.0,
-    "max_total_loss_dollars": -1000.0
+    "max_total_loss_dollars": -1000.0,
+    "min_quote_price_cents": 10,
+    "max_quote_price_cents": 90,
+    "max_drawdown_dollars": 500.0
   }
 }
 ```
@@ -252,7 +265,7 @@ The pre-commit hook runs clang-format and clang-tidy automatically on every `git
 kalshi-market-maker/
 ├── source/                  # Library + main entry point
 │   ├── types.hpp            # Order, Fill, Market, Orderbook structs
-│   ├── auth.hpp/cpp         # RSA-SHA256 signing
+│   ├── auth.hpp/cpp         # RSA-PSS-SHA256 signing
 │   ├── rest_client.hpp/cpp  # HTTP REST API client
 │   ├── websocket_client.hpp/cpp  # WS orderbook + fill feed
 │   ├── order_manager.hpp/cpp     # Order lifecycle + PnL tracking

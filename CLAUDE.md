@@ -46,7 +46,7 @@ Only suppress a clang-tidy warning (`// NOLINT(check-name)`) when you have a spe
 
 These are covered by `.gitignore`. If you are ever unsure whether a file contains a secret, do not add it to a commit. If a secret is accidentally committed, treat it as compromised immediately and rotate it.
 
-Secrets live outside the repo at `/home/jfreun1/kalshi-demo-private-key.pem` (demo) and are referenced by path in `config.json` (gitignored).
+Secrets live outside the repo in `/Users/jacobfreund/kalshi-demo-key/` (demo private key + source configs) and are referenced by absolute path from the gitignored `config-demo.json` / `config.json`.
 
 ## Commits
 
