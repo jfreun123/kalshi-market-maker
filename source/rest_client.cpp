@@ -50,7 +50,7 @@ auto parse_iso8601(const std::string &time_str)
     -> std::chrono::system_clock::time_point {
   struct std::tm time_struct{};
   // NOLINTNEXTLINE(modernize-use-nullptr) — strptime returns char*
-  if (strptime(time_str.c_str(), "%Y-%m-%dT%H:%M:%SZ", &time_struct) ==
+  if (strptime(time_str.c_str(), "%Y-%m-%dT%H:%M:%S", &time_struct) ==
       nullptr) {
     throw std::runtime_error("Failed to parse timestamp: " + time_str);
   }
