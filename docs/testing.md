@@ -4,6 +4,8 @@
 
 ```
 Manual / Live Testing        ← prod/demo account; `--capture` records a real session
+Demo Conformance Tests       ← live demo API smoke tests (networked,
+                               KALSHI_DEMO_TESTS, default OFF)
 Replay Integration Tests     ← captured/synthetic session → full TradingSession stack
                                (hermetic, KALSHI_INTEGRATION_TESTS, default ON)
 Contract / Snapshot Tests    ← recorded real API responses in test/fixtures/
@@ -34,7 +36,7 @@ Record real API responses into `test/fixtures/`, then assert our parsers handle 
 
 ## Integration Tests (full-stack replay)
 
-`test/integration/replay_session_test.cpp` replays a captured/synthetic session through the **real production wiring** — `WebSocketClient` parser → `TradingSession` → Quoter / OrderManager (over `PaperTransport`) / RiskManager / Portfolio — and asserts end-to-end invariants (valid BBO, fills applied, quotes placed, risk not spuriously halted, portfolio computable). It is **hermetic** (checked-in fixtures, no network) and **gated** behind `KALSHI_INTEGRATION_TESTS` (default **ON**); a future networked test would get its own off-by-default option.
+`test/integration/replay_session_test.cpp` replays a captured/synthetic session through the **real production wiring** — `WebSocketClient` parser → `TradingSession` → Quoter / OrderManager (over `PaperTransport`) / RiskManager / Portfolio — and asserts end-to-end invariants (valid BBO, fills applied, quotes placed, risk not spuriously halted, portfolio computable). It is **hermetic** (checked-in fixtures, no network) and **gated** behind `KALSHI_INTEGRATION_TESTS` (default **ON**). The networked demo conformance tests (`test/integration/demo_conformance_test.cpp`) have their own off-by-default option, `KALSHI_DEMO_TESTS`; they skip cleanly when no demo config is available (set `KALSHI_DEMO_CONFIG` to point at one).
 
 ```bash
 cmake --preset=dev && cmake --build --preset=dev

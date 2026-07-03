@@ -68,15 +68,19 @@ bash scripts/install-hooks.sh
 bash .git/hooks/pre-commit
 ```
 
-## Environment variables
+## Configuration & environment variables
 
-Copy `.env.example` (once created) and fill in your credentials:
+Runtime credentials and endpoints are read from a JSON config file, not from
+environment variables:
 
 ```bash
-KALSHI_API_KEY=<your-api-key>
-KALSHI_PRIVATE_KEY_PATH=<path-to-rsa-private-key.pem>
-KALSHI_BASE_URL=https://trading-api.kalshi.com/trade-api/v2   # prod
-# KALSHI_BASE_URL=https://demo-api.kalshi.co/trade-api/v2     # demo
+cp config.example.json config.json   # fill in api_key + private_key_path
 ```
 
-These are read at runtime; never commit them.
+The only environment variable the project reads is `KALSHI_DEMO_CONFIG`, used
+by the demo conformance tests (built with `-DKALSHI_DEMO_TESTS=ON`) to locate a
+demo-environment config file; it defaults to `config-demo.json` in the repo
+root.
+
+Config files containing real credentials (`config.json`, `config-demo.json`,
+generated `*.trade.json`) are gitignored; never commit them.

@@ -9,13 +9,15 @@
 
 ### P0 — Correctness & safety (do these first)
 
-- [ ] **1. `ensure()` fail-fast invariant primitive.** Flatten all orders, then
-  crash, on a broken invariant. Safety-critical and explicitly requested. Full
-  design in *Safety: `ensure()` Fail-Fast Invariant Checks* below.
+- [x] **1. `ensure()` fail-fast invariant primitive.** *Done — merged PR #8:
+  `source/ensure.{hpp,cpp}` with `set_panic_handler`; `main` registers
+  flatten-before-crash (`cancel_all_quotes`). Design in *Safety* section below.*
 
 ### P1 — Market-making quality
 
-- [ ] **2. Cancel orphaned orders on startup (and guarantee cancel-on-exit).**
+- [x] **2. Cancel orphaned orders on startup (and guarantee cancel-on-exit).**
+  *Done — merged PR #9: startup fetches resting orders for target tickers and
+  cancels them (`cancel_preexisting_orders`) so every session begins flat.*
   The bot only knows about orders it placed in the *current* process and never
   cancels pre-existing resting orders at startup. Across restarts, orders pile
   up on the exchange that the running bot is unaware of — observed live on
@@ -65,7 +67,10 @@
 
 ### P2 — Operational robustness & strategy
 
-- [ ] **6. Run the full test suite under sanitizers (and wire it into CI).** The
+- [~] **6. Run the full test suite under sanitizers (and wire it into CI).**
+  *Partial: the `asan` preset runs as a required CI job on every PR (green as of
+  2026-07-03). Remaining: add UBSan to the preset, add a TSan CI job (the
+  2-thread engine is the risk), consider clang-tidy-over-tree in CI.* The
   `asan` and `tsan` CMake presets already exist (`-fsanitize=address` /
   `-fsanitize=thread`, each carrying the full `-Wall -Wextra -Wpedantic
   -Wconversion -Wsign-conversion -Wshadow` set). Add a CI job — and a documented
@@ -114,7 +119,10 @@
   pulling when the queue ahead is too deep. Lower priority; noted so it isn't
   lost.
 
-- [ ] **20. WS reconnect backoff (operational).** The reconnect loop retries a
+- [x] **20. WS reconnect backoff (operational).** *Done — merged PR #32:
+  delay doubles per consecutive failure (5s → 60s cap, overflow-safe), resets on
+  a successful connect; `next_reconnect_delay()` exposed for observability.*
+  Original finding: the reconnect loop retried a
   failed handshake every 5s **forever** (`max_reconnects=-1`, fixed delay). A
   persistent `401` (demo connection cap) turned into indefinite 5s reconnect-spam
   that *worsens* the server-side guard it's fighting. Add exponential backoff
@@ -156,6 +164,137 @@
   divergence**. Capture as a trimmed, Kalshi-specific `docs/PRE_LIVE_CHECKLIST.md`
   (from the ~100-question list in *Research Findings*). Gate real capital on it.
 
+- [ ] **37. Deploy in a cloud region near Kalshi's matching engine
+  (operational).** The demo runs measured a ~300ms REST round-trip from the
+  local machine — the direct cause of the residual `post only cross` window
+  (item 3): quotes are clamped against a BBO that is stale by a full RTT.
+  Kalshi's infrastructure is AWS-hosted (US East); a small VM in the same
+  region cuts the RTT to single-digit milliseconds, shrinking the stale-BBO
+  window ~30-100x for a few dollars a month — likely cheaper and more effective
+  than any software mitigation, and a prerequisite for judging whether FIX
+  (item 11) is worth it. Steps: (a) measure RTT to the API from candidate
+  regions (us-east-1/2 first) vs. home; (b) run a demo session from the best
+  region and compare cross/reject rates and markout against a local run;
+  (c) fold the chosen host into Phase 32 (service supervision, logs, alerts).
+
+### Strategy roadmap — papers re-read (2026-07-03)
+
+> All four papers in [docs/papers](docs/papers/README.md) were re-read against
+> the PDFs; the notes there were corrected (several earlier claims were wrong —
+> see the ⚠ marks) and these items extracted. Complexity: S/M/L. Suggested
+> first wave: 22, 23, 27, 30 — all S, and 22/23 are near-free money.
+
+**Quoting mechanics (cheap, do first):**
+
+- [ ] **22. Round quotes in the maker's favor (S).** `compute_quotes` uses
+  `std::round` on both sides, so the bid can round up and the ask down by up to
+  0.5c past the intended half-spread — a systematic per-fill giveaway, the CLOB
+  analogue of Berg & Proebsting's cash-pump warning (pp.53–54: every rounding
+  must favor the maker). Fix: `floor` the bid, `ceil` the ask. Two lines.
+
+- [ ] **23. Maker-fee widening ON by default + ceil-per-order fee model (S).**
+  Bürgi p.6: maker fees began April 2025, so the paper's entire +2.6% maker
+  edge is a *no-maker-fee* number; fees are rounded **up to the next cent per
+  order** (effective 1.77% at 50c×100 lots, worse for small clips — p.6/p.17).
+  Flip the Phase 30 γ·P·(1−P) widening default to on; apply ceil-to-cent at
+  actual clip size in the fee model (also used for IOC-flatten cost).
+
+- [ ] **24. Ladder quote size across 2–3 price levels (S/M).** LessWrong post's
+  marginal-pricing insight: one fat quote at a single level undercharges large
+  takers — the exact counterparty to avoid. Split `quote_size` across 2–3
+  levels stepped away from fair value so sweeps pay progressively more; also a
+  first step toward queue-position awareness (item 9).
+
+**Inventory & sizing:**
+
+- [ ] **25. LMSR log-odds inventory skew (S).** Replace linear
+  `net_position × skew_per_contract_cents` with the log-odds shift
+  `fv' = c / (1 + (c/fv − 1)·e^{q_net/b_inv})` (Berg & Proebsting p.49): skew is
+  constant per contract in log-odds, self-attenuates in cents near 1c/99c, and
+  can never push a quote out of range. Derive `b_inv` from the risk budget —
+  "hitting `max_position` moves the reservation price to P_upper" (pp.51,
+  55–56) — one interpretable knob replacing the hand-tuned cents constant, with
+  an explicit worst-case inventory markdown `b_inv·c·log(c/P)` logged against
+  the risk limits.
+
+- [ ] **26. √-time terminal size taper (S).** Binary gamma ∝ 1/√T_remaining
+  (Bawa pp.10–11): scale `quote_size` and the exposure cap by
+  `√(T_remaining/T_ref)` clamped to [floor, 1] — a continuous ramp ($10k@30d →
+  $4.8k@7d → $1.8k@1d), riding TheoGrid's existing time axis. Complements the
+  halts with a taper instead of a cliff.
+
+- [ ] **27. Closing-day longshot guard (S).** Distinct from 26 (price-gate, not
+  size): Bürgi Fig. 4/Fig. 8 — the closing day is a different regime ("Yogi
+  Berra effect": maker losses on ≤10c contracts approach taker losses). When
+  time-to-close < ~24h, tighten the price gate (e.g. [10,90] → [25,85]) or
+  suppress/heavily shade only the longshot-side bid.
+
+- [ ] **28. Quarter-Kelly quote sizing (M).** Bawa pp.4–5:
+  `f* = (P_fair − P_quote)/(1 − P_quote)` per side off the VAMP-anchored fair
+  value; `size = clamp(0.25·f*·bankroll/price, min_lot, max_size)` (floor keeps
+  queue presence at zero edge). Honest caveat now recorded in the notes: the
+  33%/11%/<3% table is a bankroll-halving race under illustrative
+  distributions, not ruin probability — and Bürgi's SD-33%-vs-mean-2.6% is the
+  Sharpe context. Gate on item 31's measurements.
+
+**Pricing & signals:**
+
+- [ ] **29. Asymmetric quoting — longshot-side edge floor (M).** Bürgi Fig. 6 /
+  Table 10: maker returns are negative on everything below ~50c (not just
+  <10c), and winning maker flow is long the favorite (56.5% of 90–99c buys vs
+  43.5% of 1–10c). Add a price-dependent extra edge requirement (shade or
+  down-size) on whichever quote would buy the cheap side; quote normally on the
+  favorite side. The [10,90] gate alone leaves us symmetric across 10–49c where
+  makers demonstrably bleed.
+
+- [ ] **30. Category-conditional, time-decayed debias β (S/M).** Bürgi Table 8:
+  ψ Crypto 0.058*** (largest — our old notes had this inverted), Economics
+  0.034, Financials 0.032, Politics/Entertainment ~0.02 and insignificant;
+  Table 9: 2025 bias roughly half the sample average. Replace the single
+  opt-in β=0.09 with a per-category table (scanner already knows category),
+  scaled toward the 2025 estimate; disable outside the paper's sample envelope
+  (≥24h duration, spread ≤20c — p.9).
+
+- [ ] **31. Brier calibration logger (S — measurement backbone).** Bawa p.9/11:
+  persist `(ticker, t, P_fair, P_market, config flags)` at each quote decision;
+  join settlement outcomes; compute Brier per signal variant offline. Turns
+  β, the flow lean, and Kelly sizing into measured parameters instead of
+  literature constants — and is the harness item 21's VAMP A/B needs anyway.
+  Pairs with item 19 (falsifiable edge).
+
+- [ ] **32. Directional flow lean (M).** Bawa p.8: IR > 0.65 predicts an
+  up-move within 15–30 min (~58%). Extend `FlowImbalanceGuard` to emit a signed
+  signal; Quoter applies a bounded fair-value offset (±1c) or asymmetric size,
+  decaying over the 15–30 min horizon. (Caveat from the notes: the headline
+  OBI R² is an equities result; validate on our own markout via item 31 before
+  trusting the thresholds.)
+
+- [ ] **33. Cancel-on-theo-jump quote fade (M).** Bürgi p.27: the maker edge
+  *is* repricing — "willing to cancel those orders if new evidence emerges."
+  If VAMP/theo moves > k cents against a resting order, cancel out-of-cycle
+  instead of waiting for the next requote tick. Complements
+  `FlowImbalanceGuard` (which only shapes *future* quotes) and directly attacks
+  adverse-selection fills.
+
+**Portfolio & safety:**
+
+- [ ] **34. Sum-to-one monitor + fair-value renormalization (M).** Bawa
+  pp.5–7: group mutually-exclusive outcomes by event; renormalize fair values
+  by `P_i/ΣP` before quoting; log/alert when `Σ best_ask < 100c − fees − 0.5c`
+  (executable buy-all arb, 0.54% net in the worked example). Defer multi-leg
+  execution — partial fills destroy the arb.
+
+- [ ] **35. Position-accountability guard (S).** Kalshi limit: 25,000 contracts
+  per strike per member (Bawa p.7, CFTC filing Nov 2024). Add a hard per-market
+  cap to the risk module well below it. Trivial regulatory insurance.
+
+- [ ] **36. Scanner: volume-weight cap + eligibility envelope (S).** Bürgi
+  Tables 6–7: pricing bias survives every volume quintile — volume buys fill
+  probability, not price quality (and Bawa p.12: wash trading can be 20–60% of
+  volume in some periods). Cap the scanner's 0.7 log-volume rank contribution
+  beyond a threshold, and gate the β debias on the paper's sample envelope
+  (market open ≥24h etc., per item 30).
+
 ### P3 — Structural refactors (PR #1 review — detail in *Code Review Follow-ups*)
 
 - [ ] **10. R3 — `Cents` strong type for prices.** The `Quantity` half is done
@@ -186,14 +325,14 @@
   supervisor starts/monitors/flattens each process.
 - [ ] **17. R7 — `docs/kalshi-messages.md` + rate-limiting review.**
 
-### Bug audit — 2026-07-03 (in progress)
+### Bug audit — 2026-07-03 (complete — all fixes merged same day)
 
-> Findings from a systematic correctness audit of the codebase. Each confirmed
-> bug is recorded here **as soon as it is found** so the list survives session
-> crashes; entries move to Done when the fix merges. Fixes go out as separate
-> PRs for review.
+> Findings from a systematic correctness audit of the codebase. All seven
+> findings below are resolved: A1 (PR #35), A2 (PR #28; duplicate #33 closed),
+> A3 (PR #39), A4 (PR #38), A5+A6 (PR #27; duplicates #34/#37 closed),
+> A7 narrowed & fixed (PR #36). Full suite green (400 tests) post-merge.
 
-- [ ] **A1. Quoter spread floor truncates odd `min_spread_cents`
+- [x] **A1. Quoter spread floor truncates odd `min_spread_cents`
   (`source/quoter.cpp:165`).** The floor is applied as `min_spread_cents / 2`
   (integer division), so with the default `min_spread_cents = 3` and
   `target_spread_cents = 2`: `base_half_spread = max({1, 2/2, 3/2}) = 1` →
@@ -202,7 +341,7 @@
   an even value (8), so the odd case is untested. Fix: round the half-spread
   up (`(min_spread + 1) / 2`). Confidence: high.
 
-- [ ] **A2. Carried PnL double-counts on every fill
+- [x] **A2. Carried PnL double-counts on every fill
   (`source/trading_session.cpp:75-91`) — corrupts `pnl_state.json`.**
   `on_fill` computes `total = prior_pnl_[ticker] + session_pnl` where
   `session_pnl = order_mgr_.realized_pnl(ticker)` is *cumulative* for the
@@ -214,7 +353,7 @@
   capture the prior baseline once at session start and never mutate it
   (`total = immutable_prior + session_pnl`). Confidence: high.
 
-- [ ] **A3. `TheoGrid::lookup` crashes on a single-breakpoint axis
+- [x] **A3. `TheoGrid::lookup` crashes on a single-breakpoint axis
   (`source/theo_grid.cpp:63-110`).** The ctor accepts a size-1 axis but the
   clamp logic then either indexes `.at(1)` past the end or underflows
   `size_t ttc_lo = ttc_hi - 1` → `std::out_of_range` on any lookup instead of
@@ -222,7 +361,7 @@
   `TheoGrid` is currently test-only. Confidence: medium (deterministic crash,
   low exposure).
 
-- [ ] **A4. Scanner spread score hardcoded to the default window
+- [x] **A4. Scanner spread score hardcoded to the default window
   (`source/ticker_scanner.cpp:20-33`).** `compute_score` centers the spread
   term at 6.5c with half-range 3.5c — the midpoint/half-width of the *default*
   `[3,10]` filter — ignoring configured `min/max_spread_cents`. With, e.g.,
@@ -231,7 +370,7 @@
   window's midpoint, which is false. Fix: derive the midpoint/half-range from
   the configured bounds. Confidence: medium (only bites non-default configs).
 
-- [ ] **A5. NO-side fills recorded at the YES price
+- [x] **A5. NO-side fills recorded at the YES price
   (`source/websocket_client.cpp:319` `dispatch_fill`) — corrupts NO cost basis
   and PnL.** `fill.price_cents` is always parsed from `yes_price_dollars`,
   but `OrderManager::record_fill` treats it as side-native (realized spread
@@ -242,7 +381,7 @@
   instead of `+20c`. Every NO fill mis-accounts. Fix: parse `no_price_dollars`
   (or `100 - yes`) when `outcome_side == "no"`. Confidence: high.
 
-- [ ] **A6. Fill dedup key collides within the same millisecond
+- [x] **A6. Fill dedup key collides within the same millisecond
   (`source/order_manager.cpp:64-67`).** `fill_key = order_id + "@" + ts_ms`;
   an order sweeping two levels can emit two fills with the same order id and
   same `ts_ms` but different price/count — the second is silently dropped as a
@@ -250,13 +389,15 @@
   can linger in `open_orders_`. Fix: include the exchange trade/fill id in
   `Fill` and key on that. Confidence: medium.
 
-- [ ] **A7. `place_order` ignores the response `status` field
+- [x] **A7. `place_order` ignores the response `status` field
   (`source/rest_client.cpp:419-428`) — a killed order is reported as resting.**
-  Status is derived only from `fill_count`, so a `post_only` order the exchange
-  auto-cancels (returns 2xx with `status:"canceled"`, `fill_count:"0.00"`)
-  comes back `Open`; the Quoter records the phantom order id as its live quote
-  and never re-places that side. Fix: parse the response `status` and map
-  canceled → `OrderStatus::Canceled`. Confidence: medium.
+  *Narrowed on investigation (PR #36):* the documented Create Order V2 response
+  has **no `status` field**, and a `post_only` order that would cross is
+  rejected with an HTTP error that `check_response` already throws on — so the
+  phantom-resting-quote half of this finding is **refuted**. The real bug: an
+  IOC (`OrderType::Market`, used by flatten) never rests, yet its dead
+  remainder was reported `Open`/`PartiallyFilled`. Fixed: any IOC that didn't
+  fully fill now reports `Cancelled`.
 
 *Audit complete — 4 subsystem sweeps (orderbook/quoter/risk, portfolio/PnL,
 rest/order-manager/auth/rate-limit, session/paper/main). A2 was independently
@@ -267,7 +408,11 @@ shutdown/flatten paths, steady-vs-system clock usage.*
 
 ### In review (PR open)
 
-- [ ] **WS protocol hardening (PR #30, branch `fix/ws-protocol`).** Four wire
+*(nothing in review)*
+
+### Merged 2026-07-03
+
+- [x] **WS protocol hardening (PR #30, merged).** Four wire
   protocol bugs: (a) no `seq` gap detection — missed deltas silently corrupted
   the local book; now tracked per `sid`, a gap discards the message and recycles
   the connection via new `IWebSocket::request_close()` (async-safe from the
@@ -515,18 +660,22 @@ were found and fixed, plus several environment/strategy learnings.
   unit test used single-level (already-sorted) books.
 
 **Open follow-ups (tracked):**
-- [ ] **D1 — Belt-and-braces non-crossing clamp.** The orderbook fix removed the
+- [x] **D1 — Belt-and-braces non-crossing clamp.** *Clamp shipped — PR #10
+  (`passive_bid`/`passive_ask`, ≥1c behind BBO). Residual (lagging local book on
+  fast markets) tracked as item 3 above.* The orderbook fix removed the
   systematic crossing. Residual risk remains on very fast books: a quote priced
   near the touch can cross by the time the ~300ms REST round-trip lands. Clamp
   quotes to stay strictly passive vs. the observed BBO (≥1c behind) so latency
   jitter can't produce a `post only cross`. Lower priority now that mid is
   correct, but still worth doing.
-- [ ] **D2 — Scanner price band vs. risk price gate are misaligned.** Scanner
+- [x] **D2 — Scanner price band vs. risk price gate are misaligned.** *Done —
+  PR #11: `load_config` intersects the scanner band with the quotable band.* Scanner
   admits `[min_price, max_price]` (was `[2,98]`) but the risk gate only quotes
   `[10,90]`, so the scanner's top picks (2–5c longshots) are un-quotable and
   also the longshots Bürgi/Deng/Whelan say to avoid. Align the scanner's
   `min/max_price_cents` to the risk gate (or derive one from the other).
-- [ ] **D3 — Staleness flapping on quiet markets.** Thin demo markets (e.g. the
+- [x] **D3 — Staleness flapping on quiet markets.** *Done — see item 8: WS
+  ping/pong liveness counts toward freshness; 0 false halts on quiet markets.* Thin demo markets (e.g. the
   CPI tickers) send no WS traffic for >30s, tripping `kStaleBook` repeatedly →
   flatten/re-quote churn. Consider counting heartbeats/pings toward freshness,
   or a longer threshold for low-activity markets. Don't loosen blindly — it
@@ -538,7 +687,7 @@ were found and fixed, plus several environment/strategy learnings.
 
 ## Safety: `ensure()` Fail-Fast Invariant Checks
 
-- [ ] **Add a project-wide `ensure()` primitive.** Used liberally to assert
+- [x] **Add a project-wide `ensure()` primitive.** *(shipped — PR #8)* Used liberally to assert
   invariants that must hold for safe trading. On violation: **flatten (cancel
   all resting orders) then crash** with a non-zero exit. An inconsistent process
   must never keep quoting — fail loud and flat, don't limp on.
@@ -594,7 +743,7 @@ with a test that exercises both the pass and the flatten-then-crash path.
 
 **BLOCKER-1 (resolved):** `IxWebSocket` implemented via FetchContent `machinezone/IXWebSocket`. End-to-end connection to live UAT not yet verified.
 
-**BLOCKER-2 (open — narrowed 2026-06-29):** A live `--capture` run against demo
+**BLOCKER-2 (RESOLVED 2026-07-03 — see resolution below):** A live `--capture` run against demo
 showed network + clock are fine and **public** REST (`GET /orderbook`) returns
 200, but every **authenticated** call (`GET /portfolio/positions`, the WS
 handshake) returns `401 INVALID_PARAMETER`. Root cause: the `api_key` (access key
@@ -606,12 +755,22 @@ if 401 persists after that: RSA-PSS salt length in `auth.cpp` uses
 real key exists. Field-shape drift (price names, `count` vs `quantity`, status
 strings, timestamps) can only be confirmed once authenticated traffic flows.
 
+**Resolution (2026-07-03):** real demo access key + private key configured on the
+Mac (`/Users/jacobfreund/kalshi-demo-key/`, copied to gitignored
+`config-demo.json`). All 10 demo conformance tests pass against the live demo
+environment — authenticated REST (`positions`, `open orders`), order
+place/rest/cancel on both sides, and the authenticated WS handshake with
+snapshot + delta parsing. The RSA-PSS secondary suspect was real and is fixed:
+`auth.cpp` now signs with `RSA_PSS_SALTLEN_DIGEST` (commit `292f274` — salt
+length must equal digest size, matching Kalshi's SDK), and authenticated calls
+succeed.
+
 **Pre-UAT checklist:**
 - [x] `IxWebSocket` implemented and library fetched
-- [x] Demo RSA private key present (`/home/jfreun1/kalshi-demo-private-key.pem`)
-- [ ] Real demo **access key ID** filled into `config-demo.json` (`api_key`) — currently a placeholder
+- [x] Demo RSA private key present (`/Users/jacobfreund/kalshi-demo-key/`, referenced by `config-demo.json`)
+- [x] Real demo **access key ID** filled into `config-demo.json` (`api_key`) — done 2026-07-03
 - [x] `config-demo.json` points at demo base/ws URLs
-- [~] Raw REST/WS bodies captured via `--capture` (public REST verified 200; authenticated blocked on the key above)
+- [~] Raw REST/WS bodies captured via `--capture` (authenticated REST + WS verified 2026-07-03 via conformance suite, 10/10 pass; full `--capture` session for the replay fixture still pending)
 - [x] Paper mode (`--paper`) runs without errors (fixed 2026-06-29 — was silently placing zero orders against the V2 API)
 
 ---
@@ -1139,11 +1298,23 @@ the shared kill-switch into the sharded quoters once Phases 21–22 land.
 
 ### Bürgi, Deng, Whelan 2026 — Makers & Takers (Kalshi)
 
-Full data + notes: [docs/papers/README.md](docs/papers/README.md) §1. Rules driving the build:
-- Quote **≥15c** only — Maker losses below 10c are statistically significant negative.
-- Prefer Financials / Economics / Crypto (larger volume, smaller bias) over sports/culture longshots.
-- `post_only=true` keeps every order a Maker — Makers structurally out-return Takers (avg −9.6% vs −31.5%; ≥50c makers **+2.6%**).
-- β=0.09 belief debias (`ViewBasedModel`, Phase 28); θ=0.60 equilibrium spread ≈ 3–5c → `min_spread_cents` floor.
+Full data + notes: [docs/papers/README.md](docs/papers/README.md) §1
+(re-verified vs the PDF 2026-07-03 — several earlier claims corrected). Rules driving the build:
+- Quote **≥15c** only, and require *extra* edge to buy anything below ~50c —
+  maker returns are negative across the whole sub-50c range (Fig. 6), with
+  significance for positive returns only **above 70c**.
+- `post_only=true` keeps every order a Maker — Makers out-return Takers (avg
+  −9.6% vs −31.5%), but makers still lose on average; the +2.6% on ≥50c is
+  "some evidence" of significance, **pre-maker-fee era** → fee widening on by
+  default (item 23).
+- Category bias (Table 8): **Crypto has the LARGEST bias (ψ=0.058)**;
+  Politics/Entertainment smallest and insignificant — earlier note had this
+  inverted. Response: category-conditional β (item 30), not category avoidance.
+- β=0.09 belief debias (`ViewBasedModel`, Phase 28) — 2021–25 average; 2025-only
+  ψ ≈ 0.021, so decay it (item 30). (The old "θ=0.60 ⇒ 3–5c equilibrium spread"
+  line had no basis in the paper — spreads are never quantified there.)
+- Closing day is a separate regime (steep MAE drop + maker losses on longshots
+  approach taker losses) → item 27.
 
 ### Bawa 2025 — Prediction Market Alpha (execution)
 
@@ -1221,7 +1392,7 @@ Sources: [Liquidity Incentive Program](https://help.kalshi.com/en/articles/13823
 - [x] Pre-live fixes — logging, WS staleness, cancel-on-disconnect, PnL persistence
 
 **Immediate (pricing quality, small ticker set):**
-- [~] UAT Blocker — `--capture` built & run; **blocked on placeholder `api_key` in `config-demo.json`** (fill real access key ID, then capture + verify field shapes). See UAT Blockers.
+- [x] UAT Blocker — resolved 2026-07-03: demo creds configured, 10/10 conformance tests pass against the live demo (auth REST + WS + order place/cancel). Field shapes verified by the conformance assertions.
 - [ ] Real-capture replay — record a demo session, drop into `test/fixtures/`, add capture-specific assertions to `replay_session_test`
 - [ ] Phase 32 — Operational hardening (systemd, logrotate, Telegram alert script)
 - [x] Phase 29 — Price-Range Gate (band gate in `check_order`, default [10,90]c)
