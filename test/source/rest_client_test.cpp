@@ -485,6 +485,39 @@ TEST_F(RestClientTest, PlaceOrderParsesResponseIntoOrder) {
   EXPECT_NE(order.created_at, std::chrono::system_clock::time_point{});
 }
 
+TEST_F(RestClientTest, IocOrderUnfilledRemainderIsCancelledNotOpen) {
+  const std::string unfilled_ioc_response =
+      R"({"order_id":"order-abc","fill_count":"0.00","remaining_count":"0.00","ts_ms":1718000000000})";
+  auto transport = std::make_unique<FakeTransport>();
+  FakeTransport *const transport_raw = transport.get();
+  transport_raw->enqueue({kHttpOk, unfilled_ioc_response});
+  auto client = make_client(std::move(transport));
+
+  auto order = client.place_order(kTestTicker, kalshi::Side::Yes, kTestYesPrice,
+                                  kTestQuantity, kalshi::OrderType::Market);
+
+  EXPECT_EQ(order.status, kalshi::OrderStatus::Cancelled)
+      << "an IOC never rests: its unfilled remainder is cancelled by the "
+         "matching engine";
+}
+
+TEST_F(RestClientTest, IocOrderPartialFillRemainderIsCancelledNotOpen) {
+  constexpr int kPartialFill = 3;
+  const std::string partial_ioc_response =
+      R"({"order_id":"order-abc","fill_count":"3.00","remaining_count":"0.00","ts_ms":1718000000000})";
+  auto transport = std::make_unique<FakeTransport>();
+  FakeTransport *const transport_raw = transport.get();
+  transport_raw->enqueue({kHttpOk, partial_ioc_response});
+  auto client = make_client(std::move(transport));
+
+  auto order = client.place_order(kTestTicker, kalshi::Side::Yes, kTestYesPrice,
+                                  kTestQuantity, kalshi::OrderType::Market);
+
+  EXPECT_EQ(order.filled_quantity,
+            kalshi::Quantity::from_contracts(kPartialFill));
+  EXPECT_EQ(order.status, kalshi::OrderStatus::Cancelled);
+}
+
 TEST_F(RestClientTest, PlaceOrderParsesImmediateFillCountFromResponse) {
   constexpr int kImmediateFill = 3;
   const std::string partial_fill_response =
