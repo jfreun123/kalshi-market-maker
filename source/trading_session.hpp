@@ -8,6 +8,7 @@
 #include "types.hpp"
 
 #include <chrono>
+#include <optional>
 #include <functional>
 #include <string>
 #include <unordered_map>
@@ -89,6 +90,10 @@ public:
   // ---- Read-model access ----
 
   [[nodiscard]] const OrderbookMap &orderbooks() const { return ob_map_; }
+  // Time since the last snapshot/delta for this ticker; nullopt before the
+  // first book update. Distinguishes idle-because-quiet from wedged.
+  [[nodiscard]] std::optional<std::chrono::seconds>
+  book_age(const std::string &ticker) const;
   [[nodiscard]] PortfolioSnapshot portfolio_snapshot() const;
   [[nodiscard]] const PnlMap &prior_pnl() const { return prior_pnl_; }
 
@@ -116,6 +121,8 @@ private:
   std::chrono::milliseconds error_cooldown_{kDefaultErrorCooldown};
   std::unordered_map<std::string, std::chrono::steady_clock::time_point>
       cooldown_until_;
+  std::unordered_map<std::string, std::chrono::steady_clock::time_point>
+      last_book_update_;
   OrderbookMap ob_map_;
   PnlMap prior_pnl_;
   PnlListener pnl_listener_;

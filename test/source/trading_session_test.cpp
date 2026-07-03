@@ -197,6 +197,35 @@ TEST_F(TradingSessionTest, PlaceErrorCoolsDownTickerThenResumes) {
       << "cooldown elapsed — quoting resumes";
 }
 
+TEST_F(TradingSessionTest, BookAgeTracksTimeSinceLastBookUpdate) {
+  // A paused market sends no deltas; book_age is the observable that
+  // distinguishes idle-because-quiet from wedged (demo finding D8).
+  auto clock_now = std::make_shared<std::chrono::steady_clock::time_point>(
+      std::chrono::steady_clock::now());
+  kalshi::TradingSession session{std::vector<std::string>{kTicker},
+                                 order_mgr_,
+                                 risk_mgr_,
+                                 quoter_,
+                                 nullptr,
+                                 [clock_now] { return *clock_now; }};
+
+  EXPECT_FALSE(session.book_age(kTicker).has_value())
+      << "no book yet -> no age";
+
+  transport_.enqueue({kHttpOk, order_json(kOrderId1, kDefaultQuoteSize)});
+  transport_.enqueue({kHttpOk, order_json(kOrderId2, kDefaultQuoteSize)});
+  session.on_snapshot(make_orderbook(kTicker, kYesBid, kNoBid, kObQty));
+
+  constexpr auto kQuietSpell = std::chrono::seconds{90};
+  *clock_now += kQuietSpell;
+  ASSERT_TRUE(session.book_age(kTicker).has_value());
+  EXPECT_EQ(session.book_age(kTicker).value(), kQuietSpell);
+
+  session.on_delta(kTicker, kalshi::Side::Yes, kSubBboDeltaPrice,
+                   kSubBboDeltaQty);
+  EXPECT_EQ(session.book_age(kTicker).value(), std::chrono::seconds{0});
+}
+
 TEST_F(TradingSessionTest, OrderbooksAccessorReflectsSnapshot) {
   session_.on_snapshot(make_orderbook(kTicker, kYesBid, kNoBid, kObQty));
 
