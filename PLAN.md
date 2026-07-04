@@ -96,9 +96,8 @@ until the package lands.
    already persisted per decision); (c) PnL attribution split: realized spread
    vs. mark-to-market vs. inventory vs. fees (extends
    `exposure_decomposition`).
-3. [ ] **22. Round quotes in the maker's favor (S).** `compute_quotes` uses
-   `std::round` both sides — up to 0.5c/fill giveaway. `floor` bid, `ceil` ask.
-   (Berg & Proebsting pp.53–54.)
+3. [x] **22. Round quotes in the maker's favor (S).** *Done — merged PR #53:
+   `floor` bid, `ceil` ask.* (Berg & Proebsting pp.53–54.)
 4. [ ] **23. Maker-fee widening ON by default + ceil-per-order fee model (S).**
    The documented maker edge predates maker fees (Bürgi p.6); fee rounds up to
    the cent per order (1.77% effective at 50c×100).
