@@ -29,6 +29,44 @@ The measured baseline (run 3, 2026-07-03): pure passive quoting on an in-play
 market lost **−2.4c/contract** to one-sided flow. Closing that gap is the whole
 game. Fixes ship one PR each, TDD, per CLAUDE.md.
 
+### Top priority — the low-latency package (Jacob's call, 2026-07-04)
+
+Quoting competitively on fast markets is a latency problem before it is a
+strategy problem. The decision path is already ~300ns (PR #51 benchmark); the
+~1s worst-case from "book moved" to "new quote resting" is geography, two
+serialized REST calls, and defensive timers that exist only to protect a bot
+that is slow and can't tell its own book echo from the market. Attack the
+mechanics in leverage order, then delete the defenses:
+
+- [ ] **L1 = item 37. Deploy near the matching engine (S, ops).** ~300ms REST
+  round trips from the Mac become ~3–5ms from a us-east VM — ~100×, zero code,
+  dollars/month. Prerequisite for judging every other latency change. Steps:
+  (a) RTT measurement from candidate regions vs. home; (b) demo session from
+  the VM, compare cross/reject rates and markout vs. a local run; (c) fold the
+  host into Phase 32 supervision (launchd/systemd, logs, alerts).
+- [ ] **L2 = item 44. Amend + Decrease Order V2 (M).** Replace cancel+replace
+  in the reprice branch with a single atomic amend: one round trip (not two),
+  cheaper in tokens, no quote-less window, no post-only-cross re-entry risk,
+  and very likely no book echo (the D9 root). **Verify semantics empirically
+  first** via gated demo-conformance tests: amend price → expect priority
+  lost, book deltas coherent (no dead-level echo); decrease size → expect
+  `remaining_count` correct, priority kept. Decrease unlocks queue-preserving
+  inventory control ("keep the queue, cut the risk"). Detail in item 44 below.
+- [ ] **L3 = Phase 21 pull-forward: async order dispatch (M).** Order REST
+  calls currently run synchronously on the WS thread — the bot is deaf to
+  deltas while an order is in flight. Already sanctioned as a pull-forward in
+  *Gated behind Gate 2*; on-VM latency makes this the next bottleneck after
+  L1/L2.
+- [ ] **L4. Timer teardown.** Once L2's conformance tests prove amend is
+  echo-free, shrink `min_rest_ms`/`fade_rest_ms` toward zero (config-only) and
+  let the real governors govern: `reprice_threshold_cents` for noise, the
+  write budget for rate, RTT for physics. The item-42a/33 timers were
+  anti-self-harm, not strategy; with sound mechanics they are vestigial.
+
+Measurement items 19/31 stay live — L1's VM-vs-local comparison is judged on
+item-31 markout. Everything else in the ordered list below yields to L1–L4
+until the package lands.
+
 1. [ ] **19. Falsifiable edge + PASS/FAIL/KILL thresholds.** State the edge in
    one falsifiable sentence; pre-declare the demo-profitability criteria that
    Gate 1 is judged by; plan live-vs-paper fill-divergence measurement. Output:
@@ -89,7 +127,7 @@ game. Fixes ship one PR each, TDD, per CLAUDE.md.
    use it for the manipulative variant). Depends on own-quote subtraction
    (shipped, PR #44).
 11. [ ] **3. Passive clamp vs. fresher BBO (D1 residual, M) + 37. deploy near
-    the matching engine (S, ops).** Run 3 measured ~6 `post only cross`
+    the matching engine (S, ops) — item 37 elevated to L1 above.** Run 3 measured ~6 `post only cross`
     rejects/10min on an in-play book — the ~300ms local RTT is the cause. Item
     37 (a US-East VM: measure RTT → demo session → compare reject rates) likely
     buys more than any software mitigation and gates whether FIX (item 11) is
@@ -106,7 +144,8 @@ game. Fixes ship one PR each, TDD, per CLAUDE.md.
     rule: only reprice when `|fv − quoted| · fill_prob` exceeds the queue
     value being abandoned; start with "never reprice on a 1-tick move if we're
     near the front."
-12b. [ ] **44. Amend + Decrease instead of cancel+replace (M).** Two V2
+12b. [ ] **44. Amend + Decrease instead of cancel+replace (M) — elevated to
+    L2 above.** Two V2
     endpoints replace the cancel+create pattern (two calls, 3 rate-limit
     tokens, a quote-less window, and post-only-cross risk on re-entry):
     - [Amend Order V2](https://docs.kalshi.com/api-reference/orders/amend-order-v2)
