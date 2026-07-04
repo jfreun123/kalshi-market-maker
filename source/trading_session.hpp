@@ -80,6 +80,15 @@ public:
   // call it once per loop iteration.
   void enforce_quote_safety();
 
+  // Recovery net for quiet books (item 48 / run-6 finding): quoting normally
+  // happens on WS deltas, so a market whose seed placement failed — or whose
+  // orders vanished for any transient reason — stays quoteless until the next
+  // delta, which on a dormant book may never come. Re-runs the quoter for
+  // every tracked market that has a live book and no resting orders. Skipped
+  // while halted; respects the per-ticker error cooldown; no-op for markets
+  // that are already quoted. Call on a periodic poll cadence.
+  void requote_idle_markets();
+
   // Apply a seed snapshot and immediately quote the market — used to place
   // initial quotes before the live feed connects.
   void seed_orderbook(const Orderbook &snapshot);

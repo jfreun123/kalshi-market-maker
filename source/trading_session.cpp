@@ -192,6 +192,36 @@ void TradingSession::cancel_all_quotes() {
   quoter_.reset_quotes();
 }
 
+void TradingSession::requote_idle_markets() {
+  if (risk_mgr_.is_halted()) {
+    return;
+  }
+  for (const auto &[ticker, book] : ob_map_) {
+    bool has_resting_order = false;
+    for (const auto &order_entry : order_mgr_.open_orders()) {
+      if (order_entry.second.market_ticker == ticker) {
+        has_resting_order = true;
+        break;
+      }
+    }
+    if (has_resting_order) {
+      continue;
+    }
+    const auto cooldown = cooldown_until_.find(ticker);
+    if (cooldown != cooldown_until_.end() && clock_() < cooldown->second) {
+      continue;
+    }
+    get_logger()->debug("requote idle ticker={}", ticker);
+    try {
+      quoter_.update(ticker, book);
+    } catch (const std::exception &ex) {
+      cooldown_until_[ticker] = clock_() + error_cooldown_;
+      get_logger()->error("requote idle error ticker={}: {} — cooling down",
+                          ticker, ex.what());
+    }
+  }
+}
+
 void TradingSession::enforce_quote_safety() {
   if (risk_mgr_.is_halted()) {
     cancel_all_quotes();
