@@ -110,6 +110,8 @@ public:
   void halt();   // sets kManualHalt
   void resume(); // clears all constraints
 
+  [[nodiscard]] const RiskLimits &limits() const { return limits_; }
+
 private:
   static constexpr std::size_t kNumConstraints = 12;
 

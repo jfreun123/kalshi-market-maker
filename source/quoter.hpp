@@ -17,9 +17,20 @@ namespace kalshi {
 class FlowImbalanceGuard; // widen the spread under adverse one-sided flow
 class AnalyticsLogger;    // JSONL quote/fill events for offline measurement
 
+// LMSR log-odds inventory skew (Berg & Proebsting pp.49-56): the reservation
+// price shifts a constant amount per contract in log-odds space, so the skew
+// self-attenuates near 1c/99c and can never push a quote out of range.
+// lmsr_b_from_risk calibrates the liquidity parameter b so holding
+// max_position moves a 50c reservation price exactly to the quote-band edge;
+// a degenerate band (edge <= 50c) returns an infinite b, disabling the skew.
+[[nodiscard]] double lmsr_skewed_fair_value(double fv_cents,
+                                            double net_inventory_contracts,
+                                            double b_contracts);
+[[nodiscard]] double lmsr_b_from_risk(int max_position_contracts,
+                                      int max_quote_price_cents);
+
 struct QuoterConfig {
   static constexpr int kDefaultTargetSpreadCents = 4;
-  static constexpr double kDefaultSkewPerContractCents = 0.05;
   static constexpr int kDefaultRepriceThresholdCents = 1;
   static constexpr int kDefaultQuoteSize = 10;
   // Extra cents added to the target spread while flow is imbalanced.
@@ -42,7 +53,6 @@ struct QuoterConfig {
   static constexpr int kDefaultFadeRestMs = 500;
 
   int target_spread_cents = kDefaultTargetSpreadCents;
-  double skew_per_contract_cents = kDefaultSkewPerContractCents;
   int reprice_threshold_cents = kDefaultRepriceThresholdCents;
   int quote_size = kDefaultQuoteSize;
   int imbalance_spread_cents = kDefaultImbalanceSpreadCents;
@@ -113,9 +123,7 @@ private:
   };
 
   // Returns {bid_cents, ask_cents} with bid ∈ [1,98] and ask ∈ [2,99].
-  // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
-  static std::pair<int, int> compute_quotes(double fv_cents, int half_spread,
-                                            double inventory_skew_cents);
+  static std::pair<int, int> compute_quotes(double fv_cents, int half_spread);
 
   void refresh_bid(const std::string &ticker, OwnQuote &own, int desired_bid,
                    std::chrono::steady_clock::time_point now);
@@ -134,6 +142,7 @@ private:
   RiskManager &risk_mgr_;
   const FlowImbalanceGuard *flow_guard_{nullptr};
   Clock clock_;
+  double inventory_b_contracts_;
   AnalyticsLogger *analytics_{nullptr};
   std::unordered_map<std::string, OwnQuote> own_quotes_;
   LocalOrderbook scratch_book_;

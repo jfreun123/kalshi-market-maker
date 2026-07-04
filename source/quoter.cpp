@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <optional>
 #include <string>
 
@@ -34,7 +35,32 @@ Quoter::Quoter(QuoterConfig config, FairValueEngine fv_engine,
     : config_{config}, fv_engine_{std::move(fv_engine)}, order_mgr_{order_mgr},
       risk_mgr_{risk_mgr}, flow_guard_{flow_guard},
       clock_{clock ? std::move(clock)
-                   : Clock{[] { return std::chrono::steady_clock::now(); }}} {}
+                   : Clock{[] { return std::chrono::steady_clock::now(); }}},
+      inventory_b_contracts_{
+          lmsr_b_from_risk(risk_mgr.limits().max_position_per_market,
+                           risk_mgr.limits().max_quote_price_cents)} {}
+
+double lmsr_b_from_risk(int max_position_contracts, int max_quote_price_cents) {
+  const double upper = static_cast<double>(max_quote_price_cents);
+  constexpr double kHalfContract = kContractMaxCents / 2.0;
+  if (max_position_contracts <= 0 || upper <= kHalfContract ||
+      upper >= kContractMaxCents) {
+    return std::numeric_limits<double>::infinity();
+  }
+  return static_cast<double>(max_position_contracts) /
+         std::log(upper / (kContractMaxCents - upper));
+}
+
+double lmsr_skewed_fair_value(double fv_cents, double net_inventory_contracts,
+                              double b_contracts) {
+  if (!std::isfinite(b_contracts) || net_inventory_contracts == 0.0) {
+    return fv_cents;
+  }
+  const double opposing_odds = kContractMaxCents / fv_cents - 1.0;
+  const double shifted_odds =
+      opposing_odds * std::exp(net_inventory_contracts / b_contracts);
+  return kContractMaxCents / (1.0 + shifted_odds);
+}
 
 bool Quoter::resting_too_young(std::chrono::steady_clock::time_point placed_at,
                                std::chrono::steady_clock::time_point now,
@@ -42,12 +68,11 @@ bool Quoter::resting_too_young(std::chrono::steady_clock::time_point placed_at,
   return now - placed_at < std::chrono::milliseconds{rest_ms};
 }
 
-std::pair<int, int> Quoter::compute_quotes(double fv_cents, int half_spread,
-                                           double inventory_skew_cents) {
-  const auto bid_val = static_cast<int>(std::floor(
-      fv_cents - static_cast<double>(half_spread) - inventory_skew_cents));
-  const auto ask_val = static_cast<int>(std::ceil(
-      fv_cents + static_cast<double>(half_spread) - inventory_skew_cents));
+std::pair<int, int> Quoter::compute_quotes(double fv_cents, int half_spread) {
+  const auto bid_val =
+      static_cast<int>(std::floor(fv_cents - static_cast<double>(half_spread)));
+  const auto ask_val =
+      static_cast<int>(std::ceil(fv_cents + static_cast<double>(half_spread)));
   return {std::clamp(bid_val, kBidMinCents, kBidMaxCents),
           std::clamp(ask_val, kAskMinCents, kAskMaxCents)};
 }
@@ -237,10 +262,10 @@ void Quoter::update(std::string_view ticker, const LocalOrderbook &book) {
   }
   const int half_spread = base_half_spread + fee_cents;
   const double inventory = order_mgr_.net_position(ticker_str).contracts();
-  const double inventory_skew = inventory * config_.skew_per_contract_cents;
+  const double reservation_val =
+      lmsr_skewed_fair_value(fair_val, inventory, inventory_b_contracts_);
 
-  const auto [raw_bid, raw_ask] =
-      compute_quotes(fair_val, half_spread, inventory_skew);
+  const auto [raw_bid, raw_ask] = compute_quotes(reservation_val, half_spread);
 
   const int market_bid = best_bid->price_cents;
   const int market_ask = best_ask->price_cents;
@@ -248,10 +273,10 @@ void Quoter::update(std::string_view ticker, const LocalOrderbook &book) {
   const std::optional<int> desired_ask = passive_ask(raw_ask, market_bid);
 
   get_logger()->debug(
-      "reprice ticker={} mid={:.1f} micro={:.2f} fv={:.2f} raw_bid={} "
-      "raw_ask={} bid={} ask={}",
-      ticker, mid, micro, fair_val, raw_bid, raw_ask, desired_bid.value_or(-1),
-      desired_ask.value_or(-1));
+      "reprice ticker={} mid={:.1f} micro={:.2f} fv={:.2f} resv={:.2f} "
+      "raw_bid={} raw_ask={} bid={} ask={}",
+      ticker, mid, micro, fair_val, reservation_val, raw_bid, raw_ask,
+      desired_bid.value_or(-1), desired_ask.value_or(-1));
 
   if (analytics_ != nullptr) {
     analytics_->quote_decision(
