@@ -71,6 +71,11 @@ static void setup_logger(const std::filesystem::path &log_dir, bool verbose) {
   logger->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%l] %v");
   logger->flush_on(spdlog::level::warn);
 
+  constexpr auto kFlushInterval = std::chrono::seconds{3};
+  spdlog::drop(logger->name());
+  spdlog::register_logger(logger);
+  spdlog::flush_every(kFlushInterval);
+
   kalshi::set_logger(logger);
 }
 
