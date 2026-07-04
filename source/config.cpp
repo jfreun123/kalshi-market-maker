@@ -76,6 +76,10 @@ AppConfig load_config(const std::filesystem::path &path) {
         quoter_json.value("maker_fee_rate", QuoterConfig{}.maker_fee_rate);
     config.quoter.min_rest_ms =
         quoter_json.value("min_rest_ms", QuoterConfig::kDefaultMinRestMs);
+    config.quoter.theo_jump_cents = quoter_json.value(
+        "theo_jump_cents", QuoterConfig::kDefaultTheoJumpCents);
+    config.quoter.fade_rest_ms =
+        quoter_json.value("fade_rest_ms", QuoterConfig::kDefaultFadeRestMs);
   }
 
   // The imbalance guard should engage once roughly one full quote of one-sided

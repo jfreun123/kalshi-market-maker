@@ -3,6 +3,9 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
+#include <unistd.h>
+
+#include <atomic>
 #include <filesystem>
 #include <fstream>
 #include <stdexcept>
@@ -11,8 +14,10 @@
 namespace {
 
 std::filesystem::path write_temp_config(const nlohmann::json &content) {
-  const auto path =
-      std::filesystem::temp_directory_path() / "kalshi_config_test.json";
+  static std::atomic<int> file_counter{0};
+  const auto file_name = "kalshi_config_test_" + std::to_string(getpid()) +
+                         "_" + std::to_string(file_counter++) + ".json";
+  const auto path = std::filesystem::temp_directory_path() / file_name;
   std::ofstream file{path};
   if (!file) {
     throw std::runtime_error{"Failed to create temp config file"};
@@ -48,6 +53,8 @@ TEST(ConfigTest, LoadsAllFields) {
   constexpr double kViewBeta = 0.08;
   constexpr double kMakerFee = 0.07;
   constexpr int kMinRestMs = 5'000;
+  constexpr int kTheoJumpCents = 4;
+  constexpr int kFadeRestMs = 750;
   constexpr int kFlowWindowSeconds = 120;
   constexpr double kFlowRatioThreshold = 1.5;
   constexpr int kFlowMinVolume = 10;
@@ -68,7 +75,9 @@ TEST(ConfigTest, LoadsAllFields) {
         {"use_view_based_pricing", kUseViewBased},
         {"view_debias_beta", kViewBeta},
         {"maker_fee_rate", kMakerFee},
-        {"min_rest_ms", kMinRestMs}}},
+        {"min_rest_ms", kMinRestMs},
+        {"theo_jump_cents", kTheoJumpCents},
+        {"fade_rest_ms", kFadeRestMs}}},
       {"flow",
        {{"window_seconds", kFlowWindowSeconds},
         {"imbalance_ratio_threshold", kFlowRatioThreshold},
@@ -104,6 +113,8 @@ TEST(ConfigTest, LoadsAllFields) {
   EXPECT_DOUBLE_EQ(config.quoter.view_debias_beta, kViewBeta);
   EXPECT_DOUBLE_EQ(config.quoter.maker_fee_rate, kMakerFee);
   EXPECT_EQ(config.quoter.min_rest_ms, kMinRestMs);
+  EXPECT_EQ(config.quoter.theo_jump_cents, kTheoJumpCents);
+  EXPECT_EQ(config.quoter.fade_rest_ms, kFadeRestMs);
   EXPECT_EQ(config.flow.window_seconds, kFlowWindowSeconds);
   EXPECT_DOUBLE_EQ(config.flow.imbalance_ratio_threshold, kFlowRatioThreshold);
   EXPECT_EQ(config.flow.min_flow_volume, kFlowMinVolume);
