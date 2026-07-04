@@ -34,15 +34,17 @@ game. Fixes ship one PR each, TDD, per CLAUDE.md.
    Gate 1 is judged by; plan live-vs-paper fill-divergence measurement. Output:
    `docs/PRE_LIVE_CHECKLIST.md`. *This defines what "profitable in demo" means —
    do it first.*
-2. [ ] **31. Measurement backbone: calibration + fill analytics (S/M).**
-   (a) Brier logger: persist `(ticker, t, P_fair, P_market, config flags)` per
-   quote decision, join settlement outcomes, score offline (Bawa p.9/11).
-   (b) Per-fill quality: log fair value, mid, expected edge, and inventory at
-   fill time; compute markout (mark at +30s/+5min) and effective spread
-   offline — every fill should answer "was this a good fill, or adverse
-   selection?" (c) PnL attribution split: realized spread vs. mark-to-market
-   vs. inventory vs. fees (extends `exposure_decomposition`). Required for
-   Gate 1 and for tuning every knob below.
+2. [~] **31. Measurement backbone: calibration + fill analytics (S/M).**
+   *(b) shipped — `AnalyticsLogger` (`source/analytics.{hpp,cpp}`) emits JSONL
+   quote-decision events (mid/micro/fv/bid/ask/inventory/imbalanced from
+   `Quoter::update`) and fill events (price/qty/fees/mid/inventory-after from
+   `TradingSession::on_fill`) to `logs/analytics.jsonl`;
+   `scripts/analyze_fills.py` computes per-fill markout @30s/@5min and
+   effective spread offline. This is the Gate 1 evaluation input.* Remaining:
+   (a) settlement-outcome join + Brier scoring (the P_fair/P_market stream is
+   already persisted per decision); (c) PnL attribution split: realized spread
+   vs. mark-to-market vs. inventory vs. fees (extends
+   `exposure_decomposition`).
 3. [ ] **22. Round quotes in the maker's favor (S).** `compute_quotes` uses
    `std::round` both sides — up to 0.5c/fill giveaway. `floor` bid, `ceil` ask.
    (Berg & Proebsting pp.53–54.)

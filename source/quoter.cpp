@@ -1,5 +1,6 @@
 #include "quoter.hpp"
 
+#include "analytics.hpp"
 #include "ensure.hpp"
 #include "flow_imbalance.hpp"
 #include "logger.hpp"
@@ -167,7 +168,9 @@ void Quoter::update(std::string_view ticker, const LocalOrderbook &book) {
   ensure(std::isfinite(fair_val), "fair value is not finite");
 
   int target_spread = config_.target_spread_cents;
-  if (flow_guard_ != nullptr && flow_guard_->is_imbalanced(ticker_str)) {
+  const bool imbalanced =
+      flow_guard_ != nullptr && flow_guard_->is_imbalanced(ticker_str);
+  if (imbalanced) {
     target_spread += config_.imbalance_spread_cents;
     get_logger()->debug(
         "flow imbalanced ticker={} ratio={:.2f} — widening spread to {}c",
@@ -186,9 +189,8 @@ void Quoter::update(std::string_view ticker, const LocalOrderbook &book) {
                                             (1.0 - prob) * kContractMaxCents));
   }
   const int half_spread = base_half_spread + fee_cents;
-  const double inventory_skew =
-      order_mgr_.net_position(ticker_str).contracts() *
-      config_.skew_per_contract_cents;
+  const double inventory = order_mgr_.net_position(ticker_str).contracts();
+  const double inventory_skew = inventory * config_.skew_per_contract_cents;
 
   const auto [raw_bid, raw_ask] =
       compute_quotes(fair_val, half_spread, inventory_skew);
@@ -204,12 +206,22 @@ void Quoter::update(std::string_view ticker, const LocalOrderbook &book) {
       ticker, mid, micro, fair_val, raw_bid, raw_ask, desired_bid.value_or(-1),
       desired_ask.value_or(-1));
 
+  if (analytics_ != nullptr) {
+    analytics_->quote_decision(
+        {ticker, mid, micro, fair_val, desired_bid.value_or(-1),
+         desired_ask.value_or(-1), inventory, imbalanced});
+  }
+
   if (desired_bid.has_value()) {
     refresh_bid(ticker_str, own, *desired_bid);
   }
   if (desired_ask.has_value()) {
     refresh_ask(ticker_str, own, *desired_ask);
   }
+}
+
+void Quoter::set_analytics(AnalyticsLogger *analytics) {
+  analytics_ = analytics;
 }
 
 void Quoter::reset_quotes() { own_quotes_.clear(); }

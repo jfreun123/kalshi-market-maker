@@ -13,6 +13,7 @@
 namespace kalshi {
 
 class FlowImbalanceGuard; // widen the spread under adverse one-sided flow
+class AnalyticsLogger;    // JSONL quote/fill events for offline measurement
 
 struct QuoterConfig {
   static constexpr int kDefaultTargetSpreadCents = 4;
@@ -60,6 +61,10 @@ public:
 
   void update(std::string_view ticker, const LocalOrderbook &book);
 
+  // Optional analytics tap: when set, every update() emits a quote-decision
+  // event (PLAN item 31). Must outlive the Quoter; nullptr disables.
+  void set_analytics(AnalyticsLogger *analytics);
+
   // Forget all tracked resting quotes. Call this after the resting orders have
   // been cancelled out-of-band (risk halt, disconnect, shutdown): the quoter's
   // tracked own-quote ids would otherwise be stale, so it would try to cancel
@@ -80,8 +85,7 @@ private:
     std::string bid_order_id;
     std::string ask_order_id;
     int quoted_bid_cents{0};
-    int quoted_ask_cents{
-        0}; // stored as YES ask price (not the NO order price)
+    int quoted_ask_cents{0}; // stored as YES ask price (not the NO order price)
   };
 
   // Returns {bid_cents, ask_cents} with bid ∈ [1,98] and ask ∈ [2,99].
@@ -100,6 +104,7 @@ private:
   IOrderManager &order_mgr_;
   RiskManager &risk_mgr_;
   const FlowImbalanceGuard *flow_guard_{nullptr};
+  AnalyticsLogger *analytics_{nullptr};
   std::unordered_map<std::string, OwnQuote> own_quotes_;
   LocalOrderbook scratch_book_;
 };
