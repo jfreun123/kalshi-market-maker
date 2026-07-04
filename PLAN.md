@@ -227,8 +227,12 @@ until the package lands.
     updates before fading; (c) optional per-side fade cooldown. Config
     band-aid available today: raise `theo_jump_cents`/`fade_rest_ms` on
     in-play markets.
-15b. [ ] **48. Re-quote path independent of book deltas (P1 — found run 6,
-    2026-07-04).** Quotes are only placed inside `Quoter::update()`, which
+15b. [x] **48. Re-quote path independent of book deltas (P1 — found run 6,
+    2026-07-04).** *Done — `TradingSession::requote_idle_markets()` runs on
+    the 30s staleness cadence: any tracked market with a live book and zero
+    resting orders gets a fresh `quoter.update()` (halt-aware, cooldown-aware,
+    no-op for quoted markets). A failed seed is now a ≤30s gap, not a dead
+    session.* Original finding: Quotes are only placed inside `Quoter::update()`, which
     runs on WS deltas (plus the one startup seed). If the seed placement
     fails (run 6: exchange-wide 503s) — or a side is dropped for any
     transient reason — a market with a quiet book is **quoteless for the

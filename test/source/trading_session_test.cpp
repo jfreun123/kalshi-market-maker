@@ -552,3 +552,40 @@ TEST_F(TradingSessionTest, FillEmitsAnalyticsEventWithMidAndInventory) {
   EXPECT_NE(lines.front().find(R"("inventory_after":7.0)"), std::string::npos);
   EXPECT_NE(lines.front().find(R"("mid":)"), std::string::npos);
 }
+
+TEST_F(TradingSessionTest, RequoteIdleMarketsQuotesUnquotedMarket) {
+  transport_.enqueue({kHttpOk, order_json(kOrderId1, kDefaultQuoteSize)});
+  transport_.enqueue({kHttpOk, order_json(kOrderId2, kDefaultQuoteSize)});
+
+  session_.on_snapshot(make_orderbook(kTicker, kYesBid, kNoBid, kObQty));
+  ASSERT_EQ(count_method(transport_, "POST"), 0);
+
+  session_.requote_idle_markets();
+
+  EXPECT_EQ(count_method(transport_, "POST"), 2)
+      << "a market with a live book and no resting orders must be re-quoted";
+}
+
+TEST_F(TradingSessionTest, RequoteIdleMarketsLeavesRestingQuotesUntouched) {
+  transport_.enqueue({kHttpOk, order_json(kOrderId1, kDefaultQuoteSize)});
+  transport_.enqueue({kHttpOk, order_json(kOrderId2, kDefaultQuoteSize)});
+
+  session_.on_snapshot(make_orderbook(kTicker, kYesBid, kNoBid, kObQty));
+  session_.on_delta(kTicker, kalshi::Side::Yes, kSubBboDeltaPrice,
+                    kSubBboDeltaQty);
+  ASSERT_EQ(count_method(transport_, "POST"), 2);
+
+  session_.requote_idle_markets();
+
+  EXPECT_EQ(count_method(transport_, "POST"), 2)
+      << "markets with resting quotes are not touched by the idle re-quote";
+}
+
+TEST_F(TradingSessionTest, RequoteIdleMarketsRespectsRiskHalt) {
+  session_.on_snapshot(make_orderbook(kTicker, kYesBid, kNoBid, kObQty));
+  risk_mgr_.halt();
+
+  session_.requote_idle_markets();
+
+  EXPECT_EQ(count_method(transport_, "POST"), 0) << "no quoting while halted";
+}

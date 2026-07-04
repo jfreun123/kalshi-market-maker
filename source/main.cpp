@@ -681,6 +681,7 @@ int main(int argc, char *argv[]) {
       const std::lock_guard<std::mutex> lock{engine_mtx};
       if (poll_count % kStalenessCheckInterval == 0) {
         check_ws_staleness(ws_client, risk_mgr, log, stale_logged);
+        session.requote_idle_markets();
       }
       // Portfolio kill-switch runs more often than the 60s status log so the
       // global halt reacts quickly to aggregate exposure / drawdown.
