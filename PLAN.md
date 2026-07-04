@@ -43,9 +43,8 @@ game. Fixes ship one PR each, TDD, per CLAUDE.md.
    selection?" (c) PnL attribution split: realized spread vs. mark-to-market
    vs. inventory vs. fees (extends `exposure_decomposition`). Required for
    Gate 1 and for tuning every knob below.
-3. [ ] **22. Round quotes in the maker's favor (S).** `compute_quotes` uses
-   `std::round` both sides — up to 0.5c/fill giveaway. `floor` bid, `ceil` ask.
-   (Berg & Proebsting pp.53–54.)
+3. [x] **22. Round quotes in the maker's favor (S).** *Done — merged PR #53:
+   `floor` bid, `ceil` ask.* (Berg & Proebsting pp.53–54.)
 4. [ ] **23. Maker-fee widening ON by default + ceil-per-order fee model (S).**
    The documented maker edge predates maker fees (Bürgi p.6); fee rounds up to
    the cent per order (1.77% effective at 50c×100).
@@ -53,15 +52,12 @@ game. Fixes ship one PR each, TDD, per CLAUDE.md.
    repricing (Bürgi p.27): if VAMP/theo moves > k cents against a resting
    order, cancel out-of-cycle instead of waiting for the next tick. Directly
    attacks the −2.4c/contract measured in run 3.
-6. [ ] **43. Visible-book sanity guard (S — found by external log review).**
-   Run 3 placed `yes@28`, `yes@29`, and bid `55` in a market quoting 46–52:
-   during fast sweeps the visible book (after own-quote subtraction) flickers
-   crossed/degenerate, a junk level becomes best ask, and `passive_bid =
-   min(desired, ask−1)` drags the quote to garbage (post-only rejected the
-   crossing ones; the deep ones rested briefly). Fix: skip the update (keep
-   resting quotes) when the visible book is crossed (`best_bid ≥ best_ask`) or
-   the inside jumps implausibly vs. the last mid; log the skip with the book
-   state.
+6. [x] **43. Visible-book sanity guard (S — found by external log review).**
+   *Done — merged PR #54: update skipped (resting quotes kept) when the visible
+   book is crossed (`best_bid ≥ best_ask`), with a warn log.* Original run-3
+   evidence: `yes@28`, `yes@29`, bid `55` placed in a market quoting 46–52
+   during fast sweeps. Residual (not shipped): implausible-inside-jump check
+   vs. the last mid.
 7. [ ] **32. Directional flow lean (M).** IR > 0.65 → bounded fair-value offset
    (±1c) or asymmetric size, decaying over 15–30 min (Bawa p.8). Validate
    thresholds via item 31 markout — the headline R² is an equities number.
@@ -85,11 +81,12 @@ game. Fixes ship one PR each, TDD, per CLAUDE.md.
     37 (a US-East VM: measure RTT → demo session → compare reject rates) likely
     buys more than any software mitigation and gates whether FIX (item 11) is
     ever worth it.
-12. [ ] **42. Reprice hysteresis + queue-position value (S/M) — NOW URGENT:
-    second oscillator variant observed (D9, run 5).** (a) Minimum
-    quote rest time / two-consecutive-ticks agreement before cancel/replace —
-    defense-in-depth vs. oscillation, keeps behavior far from
-    manipulative-cancel patterns (item 24 note). (b) Jacob's queue-value rule:
+12. [~] **42. Reprice hysteresis + queue-position value (S/M) — half done.**
+    *(a) shipped — `min_rest_ms` (default 3000, config `quoter.min_rest_ms`):
+    the reprice branch may not cancel a quote younger than the window;
+    placements and out-of-band safety cancels are unaffected. Kills the D9
+    echo-race class (self-reference in time).* Remaining — (b) Jacob's
+    queue-value rule:
     a resting order's price-time priority is an asset — sometimes keep the
     quote even though fair value moved, because expected fill quality from the
     front of the queue exceeds the small edge loss from being 1c off. Rough
