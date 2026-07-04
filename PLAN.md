@@ -66,9 +66,13 @@ game. Fixes ship one PR each, TDD, per CLAUDE.md.
 7. [ ] **32. Directional flow lean (M).** IR > 0.65 → bounded fair-value offset
    (±1c) or asymmetric size, decaying over 15–30 min (Bawa p.8). Validate
    thresholds via item 31 markout — the headline R² is an equities number.
-8. [ ] **29. Asymmetric quoting — longshot-side edge floor (M).** Maker returns
-   are negative on all sub-50c buys (Bürgi Fig. 6); require extra edge or less
-   size on the cheap-side bid.
+8. [x] **29. Asymmetric quoting — longshot-side edge floor (M).** *Done — a
+   quote that would buy below `longshot_price_threshold_cents` (default 40) is
+   shaded by `longshot_edge_cents` (default 1) of extra edge on that side only
+   (YES bid below the threshold, or a NO buy whose price is below it); the
+   favorite side quotes normally. Thresholds are config knobs to tune from
+   item 31 markout data.* Maker returns are negative on all sub-50c buys
+   (Bürgi Fig. 6).
 9. [x] **25. LMSR log-odds inventory skew (S).** *Done — linear
    `skew_per_contract_cents` replaced with `lmsr_skewed_fair_value` (fv' =
    c/(1+(c/fv−1)·e^{q/b})); `lmsr_b_from_risk` derives b so holding

@@ -78,6 +78,11 @@ AppConfig load_config(const std::filesystem::path &path) {
         "theo_jump_cents", QuoterConfig::kDefaultTheoJumpCents);
     config.quoter.fade_rest_ms =
         quoter_json.value("fade_rest_ms", QuoterConfig::kDefaultFadeRestMs);
+    config.quoter.longshot_price_threshold_cents =
+        quoter_json.value("longshot_price_threshold_cents",
+                          QuoterConfig::kDefaultLongshotThresholdCents);
+    config.quoter.longshot_edge_cents = quoter_json.value(
+        "longshot_edge_cents", QuoterConfig::kDefaultLongshotEdgeCents);
   }
 
   // The imbalance guard should engage once roughly one full quote of one-sided
