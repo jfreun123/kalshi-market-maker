@@ -10,6 +10,10 @@ namespace kalshi {
 struct HttpResponse {
   int status_code{200};
   std::string body;
+  // The explicit NSDMI keeps -Wmissing-field-initializers quiet at existing
+  // {status, body} aggregate inits.
+  // NOLINTNEXTLINE(readability-redundant-member-init)
+  std::map<std::string, std::string> headers{};
 };
 
 class IHttpTransport {

@@ -50,7 +50,11 @@ HttpResponse make_response(const httplib::Result &result) {
     throw std::runtime_error("HTTP request failed: " +
                              httplib::to_string(result.error()));
   }
-  return {result->status, result->body};
+  std::map<std::string, std::string> headers;
+  for (const auto &[key, value] : result->headers) {
+    headers.emplace(key, value);
+  }
+  return {result->status, result->body, std::move(headers)};
 }
 
 constexpr int kConnectTimeoutSec = 10;

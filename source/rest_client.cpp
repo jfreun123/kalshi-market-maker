@@ -194,6 +194,29 @@ Order parse_order(const nlohmann::json &order_json) {
   };
 }
 
+// Parses a fill from a GET /portfolio/fills response object. Mirrors the WS
+// fill-channel parse: price stored side-native, `ts` is epoch seconds (the WS
+// channel sends ts_ms).
+Fill parse_fill(const nlohmann::json &fill_json) {
+  Fill fill;
+  fill.trade_id = fill_json.value("trade_id", std::string{});
+  fill.order_id = fill_json.at("order_id").get<std::string>();
+  fill.market_ticker = fill_json.at("market_ticker").get<std::string>();
+  fill.side = parse_side(fill_json.at("outcome_side").get<std::string>());
+  const int yes_price_cents = parse_dollars_to_cents(
+      fill_json.at("yes_price_dollars").get<std::string>());
+  fill.price_cents = (fill.side == Side::Yes)
+                         ? yes_price_cents
+                         : complement_price(yes_price_cents);
+  fill.quantity = parse_fp_count(fill_json.at("count_fp").get<std::string>());
+  fill.fee_cents = std::stod(fill_json.value("fee_cost", std::string{"0"})) *
+                   kCentsPerDollar;
+  fill.is_taker = fill_json.at("is_taker").get<bool>();
+  fill.timestamp = std::chrono::system_clock::time_point{
+      std::chrono::seconds{fill_json.at("ts").get<long long>()}};
+  return fill;
+}
+
 } // namespace
 
 // --- RestClient implementation ---
@@ -440,8 +463,8 @@ Order RestClient::place_order(std::string_view ticker, Side side,
   const auto avg_str = json_data.value("average_fill_price", std::string{});
   if (!avg_str.empty()) {
     const int avg_yes_cents = parse_dollars_to_cents(avg_str);
-    avg_fill_cents = (side == Side::Yes) ? avg_yes_cents
-                                         : complement_price(avg_yes_cents);
+    avg_fill_cents =
+        (side == Side::Yes) ? avg_yes_cents : complement_price(avg_yes_cents);
   }
 
   return Order{
@@ -501,6 +524,58 @@ std::vector<Order> RestClient::get_open_orders() {
     orders.push_back(parse_order(order_json));
   }
   return orders;
+}
+
+std::vector<Fill> RestClient::get_fills(long long min_ts_seconds) {
+  constexpr int kPageLimit = 100;
+  const std::string path = path_prefix_ + "/portfolio/fills";
+  std::string base_query = "limit=" + std::to_string(kPageLimit);
+  if (min_ts_seconds > 0) {
+    base_query += "&min_ts=" + std::to_string(min_ts_seconds);
+  }
+
+  std::vector<Fill> all_fills;
+  std::string cursor;
+
+  auto fetch_page = [&]() {
+    std::string url = base_url_ + "/portfolio/fills?" + base_query;
+    if (!cursor.empty()) {
+      url += "&cursor=" + cursor;
+    }
+
+    auto headers = auth_.sign("GET", path);
+    auto resp = transport_->get(url, headers);
+    check_response(resp);
+
+    auto json_data = nlohmann::json::parse(resp.body);
+    for (const auto &fill_json : json_data.at("fills")) {
+      all_fills.push_back(parse_fill(fill_json));
+    }
+    cursor = json_data.value("cursor", std::string{});
+  };
+
+  fetch_page();
+  while (!cursor.empty()) {
+    fetch_page();
+  }
+
+  return all_fills;
+}
+
+std::optional<std::chrono::seconds>
+RestClient::measure_clock_skew(SystemTimePoint local_now) {
+  const std::string path = path_prefix_ + "/exchange/status";
+  const std::string url = base_url_ + "/exchange/status";
+  auto headers = auth_.sign("GET", path);
+  auto resp = transport_->get(url, headers);
+  auto date_it = resp.headers.find("Date");
+  if (date_it == resp.headers.end()) {
+    date_it = resp.headers.find("date");
+  }
+  if (date_it == resp.headers.end()) {
+    return std::nullopt;
+  }
+  return clock_skew_seconds(date_it->second, local_now);
 }
 
 } // namespace kalshi

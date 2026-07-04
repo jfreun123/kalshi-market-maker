@@ -31,6 +31,8 @@ enum class Constraint : uint8_t {
   kOverExposure = 8,  // total capital at risk exceeded the portfolio cap
   kPortfolioLoss = 9, // total PnL (realized + unrealized) breached the loss cap
   kDrawdown = 10,     // total PnL fell too far from its high-water mark
+  kClockSkew = 11,    // local clock drifted from server time — signed requests
+                      // would 401 (header_timestamp_expired)
 };
 
 struct RiskLimits {
@@ -109,7 +111,7 @@ public:
   void resume(); // clears all constraints
 
 private:
-  static constexpr std::size_t kNumConstraints = 11;
+  static constexpr std::size_t kNumConstraints = 12;
 
   RiskLimits limits_;
   std::bitset<kNumConstraints> constraints_;

@@ -247,6 +247,11 @@ static bool reconcile_against_exchange(kalshi::RestClient &rest,
   if (result.in_sync) {
     log->info("reconcile: in sync ({} exchange positions checked)",
               exchange.size());
+    if (risk_mgr != nullptr &&
+        risk_mgr->is_set(kalshi::Constraint::kModelDiverge)) {
+      risk_mgr->clear(kalshi::Constraint::kModelDiverge);
+      log->info("reconcile back in sync — drift halt cleared");
+    }
     return true;
   }
 
@@ -259,6 +264,48 @@ static bool reconcile_against_exchange(kalshi::RestClient &rest,
     risk_mgr->set(kalshi::Constraint::kModelDiverge);
     log->critical("reconcile: {} position mismatch(es) — quoting halted",
                   result.diffs.size());
+  }
+  return false;
+}
+
+// ---- Clock-skew guard ----
+
+// Beyond this tolerance Kalshi rejects every signed request
+// (header_timestamp_expired), so quoting is pointless and unsafe until the
+// clock resyncs (observed live: a 12m40s drift 401'd the whole session).
+constexpr std::chrono::seconds kMaxClockSkew{5};
+
+// Measures local-vs-server skew via the Date header. Within tolerance clears
+// any prior kClockSkew halt; beyond it sets the halt (when risk_mgr is given)
+// and returns false so startup can refuse to trade.
+static bool check_clock_skew(kalshi::RestClient &rest,
+                             kalshi::RiskManager *risk_mgr,
+                             std::shared_ptr<spdlog::logger> &log) {
+  std::optional<std::chrono::seconds> skew;
+  try {
+    skew = rest.measure_clock_skew();
+  } catch (const std::exception &ex) {
+    log->warn("clock-skew check failed: {}", ex.what());
+    return true;
+  }
+  if (!skew.has_value()) {
+    log->warn("clock-skew check skipped — no parseable Date header");
+    return true;
+  }
+  if (std::chrono::abs(*skew) <= kMaxClockSkew) {
+    if (risk_mgr != nullptr &&
+        risk_mgr->is_set(kalshi::Constraint::kClockSkew)) {
+      risk_mgr->clear(kalshi::Constraint::kClockSkew);
+      log->info("clock skew back within limit ({}s) — halt cleared",
+                skew->count());
+    }
+    return true;
+  }
+  log->critical("local clock skewed {}s vs exchange (limit {}s) — signed "
+                "requests will be rejected until the clock is resynced",
+                skew->count(), kMaxClockSkew.count());
+  if (risk_mgr != nullptr) {
+    risk_mgr->set(kalshi::Constraint::kClockSkew);
   }
   return false;
 }
@@ -472,6 +519,10 @@ int main(int argc, char *argv[]) {
       return 1;
     }
 
+    if (paper_ptr == nullptr && !check_clock_skew(rest, nullptr, log)) {
+      return 1;
+    }
+
     kalshi::WebSocketClient ws_client{
         auth, std::make_unique<kalshi::IxWebSocket>(), app_config.ws_url};
 
@@ -548,14 +599,54 @@ int main(int argc, char *argv[]) {
           session.on_delta(ticker, side, price, qty);
         });
 
-    ws_client.on_fill([&session, &engine_mtx](const kalshi::Fill &fill) {
-      const std::lock_guard<std::mutex> lock{engine_mtx};
-      session.on_fill(fill);
-    });
+    // Timestamp floor for the reconnect fill backfill: fills can only be
+    // missed after the session started, and after the last fill the WS
+    // channel delivered.
+    auto last_fill_time =
+        std::make_shared<std::chrono::system_clock::time_point>(
+            std::chrono::system_clock::now());
+
+    ws_client.on_fill(
+        [&session, &engine_mtx, last_fill_time](const kalshi::Fill &fill) {
+          const std::lock_guard<std::mutex> lock{engine_mtx};
+          *last_fill_time = std::max(*last_fill_time, fill.timestamp);
+          session.on_fill(fill);
+        });
 
     ws_client.on_disconnect([&session, &engine_mtx]() {
       const std::lock_guard<std::mutex> lock{engine_mtx};
       session.on_disconnect();
+    });
+
+    // Fills that land while the WS is down are never re-pushed; without a
+    // backfill the local model silently diverges until reconcile halts on
+    // kModelDiverge (demo finding D10). The dedup by trade_id makes the
+    // overlap window replay-safe.
+    ws_client.on_reconnect([&rest, &session, &engine_mtx, last_fill_time,
+                            &app_config, &log]() {
+      constexpr std::chrono::seconds kBackfillOverlap{60};
+      const std::lock_guard<std::mutex> lock{engine_mtx};
+      const long long min_ts =
+          std::chrono::duration_cast<std::chrono::seconds>(
+              (*last_fill_time - kBackfillOverlap).time_since_epoch())
+              .count();
+      try {
+        const auto missed = rest.get_fills(min_ts);
+        int replayed = 0;
+        for (const auto &fill : missed) {
+          const auto &tickers = app_config.target_tickers;
+          if (std::ranges::find(tickers, fill.market_ticker) == tickers.end()) {
+            continue;
+          }
+          *last_fill_time = std::max(*last_fill_time, fill.timestamp);
+          session.on_fill(fill);
+          ++replayed;
+        }
+        log->info("reconnect fill backfill: fetched={} replayed={}",
+                  missed.size(), replayed);
+      } catch (const std::exception &ex) {
+        log->error("reconnect fill backfill failed: {}", ex.what());
+      }
     });
 
     std::signal(SIGINT, handle_signal);
@@ -623,6 +714,7 @@ int main(int argc, char *argv[]) {
       // Reconcile against the exchange's authoritative positions. Skipped in
       // paper mode (no real exchange positions to compare against).
       if (paper_ptr == nullptr && poll_count % kReconcileInterval == 0) {
+        check_clock_skew(rest, &risk_mgr, log);
         reconcile_against_exchange(rest, order_mgr, app_config.target_tickers,
                                    &risk_mgr, log);
       }

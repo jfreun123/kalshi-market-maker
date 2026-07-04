@@ -522,3 +522,21 @@ TEST_F(RiskManagerTest, ActiveConstraintsEmptyWhenNoneSet) {
   kalshi::RiskManager risk_mgr{default_limits()};
   EXPECT_TRUE(risk_mgr.active_constraints().empty());
 }
+
+TEST_F(RiskManagerTest, ClockSkewConstraintBlocksOrdersUntilCleared) {
+  kalshi::RiskManager risk_mgr{kalshi::RiskLimits{}};
+  constexpr int kMidPrice = 50;
+  constexpr int kOneLot = 1;
+
+  risk_mgr.set(kalshi::Constraint::kClockSkew);
+
+  EXPECT_TRUE(risk_mgr.is_set(kalshi::Constraint::kClockSkew));
+  EXPECT_FALSE(
+      risk_mgr.check_order("KXBTCD", kalshi::Side::Yes, kMidPrice, kOneLot));
+
+  risk_mgr.clear(kalshi::Constraint::kClockSkew);
+
+  EXPECT_FALSE(risk_mgr.is_set(kalshi::Constraint::kClockSkew));
+  EXPECT_TRUE(
+      risk_mgr.check_order("KXBTCD", kalshi::Side::Yes, kMidPrice, kOneLot));
+}
