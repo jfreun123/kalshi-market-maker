@@ -127,13 +127,15 @@ game. Fixes ship one PR each, TDD, per CLAUDE.md.
     new `kClockSkew` halt, so a mid-session drift halts quoting and recovery
     is automatic once the clock resyncs.* Original finding: the Mac drifted
     12m40s and every signed request 401'd (`header_timestamp_expired`).
-15. [ ] **47. REST fill backfill on WS reconnect (M — from D10, run 5).**
-    Fills are only consumed via WS; 3.09 contracts filled during a mid-session
-    disconnect were never recorded, and the 2-min reconcile correctly halted
-    on drift (`kModelDiverge`) — but the halt is permanent. On reconnect,
-    fetch fills since the last seen timestamp via REST and replay them through
-    `record_fill` before re-quoting; then drift-halts become recoverable and
-    disconnect gaps stop corrupting local state.
+15. [x] **47. REST fill backfill on WS reconnect (M — from D10, run 5).**
+    *Done — `RestClient::get_fills(min_ts)` (paginated, schema pinned against
+    live demo + conformance test), `WebSocketClient::on_reconnect` hook, main
+    replays missed fills (60s overlap window) through `session.on_fill`;
+    `record_fill` now returns whether the fill was new so duplicates no longer
+    reach the flow guard; reconcile clears `kModelDiverge` when back in sync —
+    drift halts are recoverable.* Original finding: 3.09 contracts filled
+    during a mid-session disconnect were never recorded and the halt was
+    permanent.
 16. [ ] **45. Decision-oriented quote logging (S).** Today's logs say *what*
     (place/cancel); they should say *why*: per placement log fair value, mid,
     visible inside, inventory + skew, spread components (base/imbalance/fee),

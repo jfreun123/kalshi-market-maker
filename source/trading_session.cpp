@@ -67,7 +67,11 @@ void TradingSession::on_delta(const std::string &ticker, Side side,
 }
 
 void TradingSession::on_fill(const Fill &fill) {
-  order_mgr_.record_fill(fill);
+  if (!order_mgr_.record_fill(fill)) {
+    get_logger()->debug("duplicate fill ignored ticker={} trade_id={}",
+                        fill.market_ticker, fill.trade_id);
+    return;
+  }
   if (!order_mgr_.open_orders().contains(fill.order_id)) {
     quoter_.forget_order(fill.market_ticker, fill.order_id);
   }
@@ -135,8 +139,8 @@ TradingSession::book_age(const std::string &ticker) const {
   if (last_update == last_book_update_.end()) {
     return std::nullopt;
   }
-  return std::chrono::duration_cast<std::chrono::seconds>(
-      clock_() - last_update->second);
+  return std::chrono::duration_cast<std::chrono::seconds>(clock_() -
+                                                          last_update->second);
 }
 
 TradingSession::PnlMap TradingSession::carried_totals() const {

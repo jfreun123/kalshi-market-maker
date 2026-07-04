@@ -26,7 +26,7 @@ struct FakeOrderManager : public kalshi::IOrderManager {
   }
   bool cancel(std::string_view /*order_id*/) override { return true; }
   void cancel_all(std::string_view /*ticker*/) override {}
-  void record_fill(const kalshi::Fill & /*fill*/) override {}
+  bool record_fill(const kalshi::Fill & /*fill*/) override { return true; }
 
   [[nodiscard]] kalshi::Quantity
   net_position(std::string_view ticker) const override {
