@@ -25,9 +25,15 @@
 
 ## Now (ordered)
 
-1. [ ] **Validate the D13/D14 fixes live** — 20-min in-play session on the
-   current build. PASS: single-digit fades, ≤24 order-moves/min, markout
-   ≥ run 7's +1.35c@30s (`scripts/analyze_fills.py logs/analytics_*.jsonl`).
+1. [~] **Validate the D13/D14 fixes live** — needs an in-play book. Run 8
+   (2026-07-04 14:21, ~7 active min, 4 markets): 8 seeds placed cleanly, then
+   **zero cancels / zero fades / zero fills** — books were calm, so this
+   proves no false-positive fades but not behavior under in-play fire; no
+   markout data. Bonus resilience datapoint: the Mac slept mid-session
+   (29-min log gap); on wake the bot cancelled all 8 quotes, flattened, and
+   reconcile is in sync — a laptop sleep is now a safe failure. PASS criteria
+   for the real test: single-digit fades, ≤24 order-moves/min, markout
+   ≥ +1.35c@30s (`scripts/analyze_fills.py logs/analytics_*.jsonl`).
 2. [ ] **L0 — latency baseline before any infra change.** Surface per-request
    RTT (already timed at debug in `http_transport.cpp`), ack latency, and
    delta→decision→request gaps into the analytics JSONL; p50/p95/max report;
