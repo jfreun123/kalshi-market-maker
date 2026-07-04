@@ -471,7 +471,21 @@ int main(int argc, char *argv[]) {
 
     kalshi::Auth auth{app_config.api_key, private_key_pem};
 
+    auto analytics_logger = make_analytics_spdlog(app_config.log_dir);
+    kalshi::AnalyticsLogger analytics{
+        [analytics_logger](const std::string &line) {
+          analytics_logger->info(line);
+        }};
+
     auto [http_transport, paper_ptr] = make_http_transport(cli.paper_mode, log);
+    if (auto *live_transport =
+            dynamic_cast<kalshi::HttpTransport *>(http_transport.get())) {
+      live_transport->set_latency_observer(
+          [&analytics](std::string_view method, std::string_view path,
+                       int status, long long rtt_ms) {
+            analytics.http_latency(method, path, status, rtt_ms);
+          });
+    }
     kalshi::RestClient rest{auth, std::move(http_transport),
                             app_config.base_url};
 
@@ -518,11 +532,6 @@ int main(int argc, char *argv[]) {
     kalshi::TradingSession session{app_config.target_tickers, order_mgr,
                                    risk_mgr, quoter, &flow_guard};
 
-    auto analytics_logger = make_analytics_spdlog(app_config.log_dir);
-    kalshi::AnalyticsLogger analytics{
-        [analytics_logger](const std::string &line) {
-          analytics_logger->info(line);
-        }};
     quoter.set_analytics(&analytics);
     session.set_analytics(&analytics);
 

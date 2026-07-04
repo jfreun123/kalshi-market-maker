@@ -100,3 +100,17 @@ TEST(AnalyticsLoggerTest, NullSinkIsSafeNoOp) {
       {kTicker, kMid, kMicro, kFairValue, kBid, kAsk, kInventory, false});
   analytics.fill(make_fill(), kMid, kInventoryAfter);
 }
+
+TEST(AnalyticsLoggerTest, HttpLatencyEmitsJsonLine) {
+  CollectingSink sink;
+  kalshi::AnalyticsLogger analytics{sink.as_sink(), fixed_clock()};
+
+  analytics.http_latency("POST", "/trade-api/v2/portfolio/orders", 201, 142);
+
+  ASSERT_EQ(sink.lines.size(), 1U);
+  const auto parsed = nlohmann::json::parse(sink.lines.front());
+  EXPECT_EQ(parsed.at("type"), "http");
+  EXPECT_EQ(parsed.at("method"), "POST");
+  EXPECT_EQ(parsed.at("status"), 201);
+  EXPECT_EQ(parsed.at("rtt_ms"), 142);
+}

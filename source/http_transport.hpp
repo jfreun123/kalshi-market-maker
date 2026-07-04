@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <map>
 #include <memory>
 #include <string>
@@ -32,6 +33,10 @@ public:
 // Production HTTP transport backed by cpp-httplib with OpenSSL HTTPS support.
 class HttpTransport : public IHttpTransport {
 public:
+  using LatencyObserver =
+      std::function<void(std::string_view method, std::string_view path,
+                         int status_code, long long rtt_ms)>;
+
   HttpTransport();
   ~HttpTransport() override;
 
@@ -51,6 +56,11 @@ public:
   [[nodiscard]] HttpResponse
   delete_(std::string_view url,
           const std::map<std::string, std::string> &headers) override;
+
+  // Called after every request with the measured round-trip time (L0
+  // latency baseline). Set before trading starts; invoked from whichever
+  // thread issued the request, so the observer must be thread-safe.
+  void set_latency_observer(LatencyObserver observer);
 
 private:
   struct Impl;
