@@ -85,7 +85,8 @@ game. Fixes ship one PR each, TDD, per CLAUDE.md.
     37 (a US-East VM: measure RTT → demo session → compare reject rates) likely
     buys more than any software mitigation and gates whether FIX (item 11) is
     ever worth it.
-12. [ ] **42. Reprice hysteresis + queue-position value (S/M).** (a) Minimum
+12. [ ] **42. Reprice hysteresis + queue-position value (S/M) — NOW URGENT:
+    second oscillator variant observed (D9, run 5).** (a) Minimum
     quote rest time / two-consecutive-ticks agreement before cancel/replace —
     defense-in-depth vs. oscillation, keeps behavior far from
     manipulative-cancel patterns (item 24 note). (b) Jacob's queue-value rule:
@@ -116,10 +117,22 @@ game. Fixes ship one PR each, TDD, per CLAUDE.md.
     a second session's order behind ours, or at minimum pin the API contract).
     Composes with item 42's queue-value rule: decrease makes "keep the queue,
     cut the risk" a real third option.
-13. [ ] **41. `spdlog::flush_every(3s)` (S, ops).** Info-level lines buffer up
+13. [x] **41. `spdlog::flush_every(3s)` — PR #52.** *(was:)* `spdlog::flush_every(3s)` (S, ops).** Info-level lines buffer up
     to ~4KB on quiet sessions (flush_on is warn+) — `tail -f` lags minutes
     behind. Found in run 2.
-14. [ ] **45. Decision-oriented quote logging (S).** Today's logs say *what*
+14. [ ] **46. Clock-skew guard (S — found 2026-07-03 evening).** The Mac
+    drifted 12m40s and every signed request 401'd (`header_timestamp_expired`)
+    — clock drift silently kills all authenticated trading. At startup (and
+    periodically) compare local time against the server `Date` header; refuse
+    to trade / alert beyond a few seconds of skew.
+15. [ ] **47. REST fill backfill on WS reconnect (M — from D10, run 5).**
+    Fills are only consumed via WS; 3.09 contracts filled during a mid-session
+    disconnect were never recorded, and the 2-min reconcile correctly halted
+    on drift (`kModelDiverge`) — but the halt is permanent. On reconnect,
+    fetch fills since the last seen timestamp via REST and replay them through
+    `record_fill` before re-quoting; then drift-halts become recoverable and
+    disconnect gaps stop corrupting local state.
+16. [ ] **45. Decision-oriented quote logging (S).** Today's logs say *what*
     (place/cancel); they should say *why*: per placement log fair value, mid,
     visible inside, inventory + skew, spread components (base/imbalance/fee),
     and the reprice reason. The debug-level `reprice` line has half of this —
@@ -219,6 +232,28 @@ R4 constraints-vs-guards · R7 message docs + rate-limit review ·
   quoting → crossed/degenerate visible-book flicker → **item 43** (sanity
   guard). Quoter hot path benchmarked and ~2× faster (PR #51):
   256–315 ns/update steady-state.
+
+### 2026-07-03 evening — runs 4–5 (integration preview: PRs #51-#54 + #52)
+
+- **Run 4** (single market, 15 min, "7+ corners"): $0.00, zero fills — and
+  zero churn/rejects/warnings across 15 min of live deltas (pre-fix
+  equivalent: ~1,700 orders). Discipline confirmed; no edge data.
+- **Run 5** (5 markets, ~13 min): **−$2.59** (CAPT −$0.39; MLB WSH −$2.20 =
+  −22c/contract — sold into an in-play team-win move 66c → 91c). New findings:
+  - **D9 — echo-race oscillator (item 42 now urgent):** ARG-CAPT flipped
+    between two quote states 3c apart every ~150ms (376 places). The D4 fix
+    subtracts our *current* quotes, but after cancel@27/replace@30 the book
+    still echoes the *old* 27-level for a beat — self-reference in time, not
+    space. Only rest-time hysteresis (item 42) kills the whole class.
+  - **D10 — disconnect fills lost → drift halt (item 47):** WS dropped
+    mid-churn (server guard suspected); 3.09 contracts filled in the gap were
+    never seen; reconcile caught it (local −22.61 vs exchange −25.70) and
+    halted via `kModelDiverge`. Safety stack validated end-to-end: cancel-all
+    on disconnect, drift detection, halt, flatten at **exchange** truth, PnL
+    recorded and persisted for both tickers.
+  - **Clock-skew outage (item 46):** 12m40s local drift 401'd every signed
+    request until resynced.
+- Lifetime demo ledger (honest, carried): **−$3.13**.
 
 ### 2026-07-03 — run 1 findings D4–D8: all resolved same day
 
