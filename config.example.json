@@ -9,7 +9,6 @@
   ],
   "quoter": {
     "target_spread_cents": 4,
-    "skew_per_contract_cents": 0.05,
     "reprice_threshold_cents": 1,
     "quote_size": 10,
     "imbalance_spread_cents": 2,

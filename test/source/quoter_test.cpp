@@ -34,7 +34,9 @@ constexpr int kNoBid55 = 41; // mid = (51+59)/2 = 55
 constexpr int kYesBid70 = 67;
 constexpr int kNoBid70 = 27; // mid = (67+73)/2 = 70
 
-// Inventory skew positions (20 = one skew unit, 1000 = extreme clamp).
+// Inventory skew positions (LMSR log-odds: b = 100/ln(9) ≈ 45.5 contracts
+// from max_position=100 and band edge 90c, so q=20 shifts fv 52 → 41.11 and
+// q=−20 shifts fv 52 → 62.70; 1000 = extreme clamp).
 constexpr int kInventoryPosition = 20;
 constexpr int kExtremeLongPosition = 1'000;
 
@@ -42,8 +44,9 @@ constexpr int kExtremeLongPosition = 1'000;
 constexpr std::string_view kBidPriceMid52 = R"("price":"0.5000")";
 constexpr std::string_view kAskPriceMid52 =
     R"("price":"0.5400")"; // YES=100-46=54
-constexpr std::string_view kBidPriceMid52Long20 = R"("price":"0.4900")";
-constexpr std::string_view kBidPriceMid52Short20 = R"("price":"0.5100")";
+constexpr std::string_view kBidPriceMid52Long20 = R"("price":"0.3900")";
+constexpr std::string_view kBidPriceMid52Short20 =
+    R"("price":"0.5200")"; // floor(62.70−2)=60, passive-clamped to ask−1=52
 constexpr std::string_view kBidPriceExtremeClamp = R"("price":"0.0100")";
 constexpr std::string_view kAskPriceExtremeClamp = R"("price":"0.5200")";
 // Flow imbalance: default spread 4 → half 2 → bid 50; +2 imbalance → half 3 →
@@ -486,11 +489,13 @@ TEST_F(QuoterTest, RepriceResumesOnceQuoteHasRestedMinRest) {
 
 TEST_F(QuoterTest, RepriceIgnoresOwnRestingQuotesEchoedInBook) {
   // Thin book (both sides 1 lot): mid = micro = 35 → bid=33, ask=37 (NO 63).
-  // The exchange then echoes our resting 10-lot bid at 33 as the new best bid
-  // while the filled ask side reverts. Priced off the raw echo, micro jumps to
-  // (33*1 + 40*10)/11 ≈ 39.4 and the quoter cancels its own bid — the
+  // The exchange then echoes our resting 10-lot bid at 33 back as the best
+  // bid. Priced off the raw echo, micro jumps to (33*1 + 40*10)/11 ≈ 39.4 and
+  // the quoter chases its own order even past min_rest_ms — the
   // self-referential churn oscillator (finding D4). Priced off the book minus
-  // our own orders, fair value stays 35 and the resting bid is left alone.
+  // our own orders, fair value stays 35 and both resting quotes are left
+  // alone. No fill is involved, so inventory stays zero and the LMSR skew is
+  // inert — this isolates the own-quote subtraction.
   constexpr int kThinYesBid = 30;
   constexpr int kThinNoBid = 60;
   constexpr int kOwnBidPrice = 33;
@@ -506,13 +511,6 @@ TEST_F(QuoterTest, RepriceIgnoresOwnRestingQuotesEchoedInBook) {
   transport.enqueue(
       {kHttpOk,
        order_json(kOrderId2, kalshi::QuoterConfig::kDefaultQuoteSize)});
-  transport.enqueue(
-      {kHttpOk,
-       order_json(kOrderId3, kalshi::QuoterConfig::kDefaultQuoteSize)});
-  transport.enqueue(
-      {kHttpOk,
-       order_json(kOrderId4, kalshi::QuoterConfig::kDefaultQuoteSize)});
-  transport.enqueue({kHttpOk, "{}"});
   kalshi::RestClient rest{kalshi::Auth{kApiKey, kPemPrivateKey},
                           std::move(transport_ptr), kBaseUrl};
   kalshi::OrderManager order_mgr{rest};
@@ -532,10 +530,6 @@ TEST_F(QuoterTest, RepriceIgnoresOwnRestingQuotesEchoedInBook) {
   ASSERT_EQ(transport.recorded_requests().size(), 2U);
 
   *clock_now += kMinRestElapsed;
-  record_position_fill(order_mgr, kOrderId2, kalshi::Side::No,
-                       kalshi::QuoterConfig::kDefaultQuoteSize);
-  quoter.forget_order(kTicker, kOrderId2);
-
   kalshi::Orderbook echo;
   echo.ticker = kTicker;
   echo.yes = {{kThinYesBid, kThinQty}, {kOwnBidPrice, kOwnQty}};
@@ -544,8 +538,8 @@ TEST_F(QuoterTest, RepriceIgnoresOwnRestingQuotesEchoedInBook) {
   echo_book.apply_snapshot(echo);
   quoter.update(kTicker, echo_book);
 
-  EXPECT_EQ(transport.recorded_requests().size(), 3U)
-      << "only the filled ask may be re-placed; the echoed bid must rest";
+  EXPECT_EQ(transport.recorded_requests().size(), 2U)
+      << "the echoed own bid must not move either quote even after min_rest";
 }
 
 TEST_F(QuoterTest, ResetQuotesForgetsLiveStateSoNextUpdatePlacesFresh) {
@@ -986,4 +980,54 @@ TEST_F(QuoterTest, AdverseTheoJumpStillHeldUnderFadeRestFloor) {
 
   EXPECT_EQ(transport.recorded_requests().size(), 2U)
       << "the sub-second echo window must not trigger fades";
+}
+
+TEST_F(QuoterTest, LmsrSkewZeroInventoryLeavesFairValueUnchanged) {
+  const double b_inv =
+      kalshi::lmsr_b_from_risk(kalshi::RiskLimits::kDefaultMaxPosition,
+                               kalshi::RiskLimits::kDefaultMaxQuotePrice);
+
+  EXPECT_DOUBLE_EQ(kalshi::lmsr_skewed_fair_value(52.0, 0.0, b_inv), 52.0);
+}
+
+TEST_F(QuoterTest, LmsrSkewAtMaxPositionReachesQuoteBandEdge) {
+  constexpr int kMaxPositionContracts = 100;
+  constexpr int kUpperBandCents = 90;
+  constexpr double kMidFairValue = 50.0;
+  const double b_inv =
+      kalshi::lmsr_b_from_risk(kMaxPositionContracts, kUpperBandCents);
+
+  EXPECT_NEAR(kalshi::lmsr_skewed_fair_value(kMidFairValue,
+                                             -kMaxPositionContracts, b_inv),
+              90.0, 1e-9)
+      << "max short must move the reservation price to the upper band edge";
+  EXPECT_NEAR(kalshi::lmsr_skewed_fair_value(kMidFairValue,
+                                             kMaxPositionContracts, b_inv),
+              10.0, 1e-9)
+      << "max long must move the reservation price symmetrically down";
+}
+
+TEST_F(QuoterTest, LmsrSkewNeverLeavesValidPriceRange) {
+  constexpr double kExtremeInventory = 100'000.0;
+  const double b_inv =
+      kalshi::lmsr_b_from_risk(kalshi::RiskLimits::kDefaultMaxPosition,
+                               kalshi::RiskLimits::kDefaultMaxQuotePrice);
+
+  const double marked_down =
+      kalshi::lmsr_skewed_fair_value(52.0, kExtremeInventory, b_inv);
+  const double marked_up =
+      kalshi::lmsr_skewed_fair_value(52.0, -kExtremeInventory, b_inv);
+
+  EXPECT_GE(marked_down, 0.0);
+  EXPECT_LT(marked_down, 52.0);
+  EXPECT_GT(marked_up, 52.0);
+  EXPECT_LE(marked_up, 100.0);
+}
+
+TEST_F(QuoterTest, LmsrDegenerateBandDisablesSkew) {
+  constexpr int kDegenerateUpperBand = 50;
+  const double b_inv = kalshi::lmsr_b_from_risk(
+      kalshi::RiskLimits::kDefaultMaxPosition, kDegenerateUpperBand);
+
+  EXPECT_DOUBLE_EQ(kalshi::lmsr_skewed_fair_value(52.0, 40.0, b_inv), 52.0);
 }

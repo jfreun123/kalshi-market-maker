@@ -70,10 +70,13 @@ game. Fixes ship one PR each, TDD, per CLAUDE.md.
 8. [ ] **29. Asymmetric quoting — longshot-side edge floor (M).** Maker returns
    are negative on all sub-50c buys (Bürgi Fig. 6); require extra edge or less
    size on the cheap-side bid.
-9. [ ] **25. LMSR log-odds inventory skew (S).** Replace linear
-   `skew_per_contract_cents` with `fv' = c/(1+(c/fv−1)·e^{q/b})`; derive `b`
-   from the risk budget (hit `max_position` ⇒ reservation price reaches
-   P_upper). Fixes the invisible-skew half of D5. (Berg & Proebsting pp.49–56.)
+9. [x] **25. LMSR log-odds inventory skew (S).** *Done — linear
+   `skew_per_contract_cents` replaced with `lmsr_skewed_fair_value` (fv' =
+   c/(1+(c/fv−1)·e^{q/b})); `lmsr_b_from_risk` derives b so holding
+   `max_position` moves a 50c reservation exactly to the band edge (defaults:
+   b = 100/ln 9 ≈ 45.5 → 20 contracts shift fv 52 → 41). Self-attenuates near
+   1c/99c, can never leave range; degenerate band (edge ≤ 50c) disables it.
+   Fixes the invisible-skew half of D5.* (Berg & Proebsting pp.49–56.)
 10. [ ] **24. Layered quoting — queue priming (S/M).** Rest 2–3 size layers 1–3c
    behind the inside: price-time FIFO means queue position is earned by resting
    *before* the move (item 9's measurement: ~115k ahead when joining late);

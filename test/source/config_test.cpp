@@ -36,7 +36,6 @@ nlohmann::json minimal_config_json() {
 
 TEST(ConfigTest, LoadsAllFields) {
   constexpr int kSpreadCents = 6;
-  constexpr double kSkew = 0.1;
   constexpr int kRepriceCents = 2;
   constexpr int kQuoteSize = 5;
   constexpr int kMaxPosition = 50;
@@ -67,7 +66,6 @@ TEST(ConfigTest, LoadsAllFields) {
       {"target_tickers", {"TICK-A", "TICK-B"}},
       {"quoter",
        {{"target_spread_cents", kSpreadCents},
-        {"skew_per_contract_cents", kSkew},
         {"reprice_threshold_cents", kRepriceCents},
         {"quote_size", kQuoteSize},
         {"imbalance_spread_cents", kImbalanceSpread},
@@ -104,7 +102,6 @@ TEST(ConfigTest, LoadsAllFields) {
   EXPECT_EQ(config.target_tickers.at(0), "TICK-A");
   EXPECT_EQ(config.target_tickers.at(1), "TICK-B");
   EXPECT_EQ(config.quoter.target_spread_cents, kSpreadCents);
-  EXPECT_DOUBLE_EQ(config.quoter.skew_per_contract_cents, kSkew);
   EXPECT_EQ(config.quoter.reprice_threshold_cents, kRepriceCents);
   EXPECT_EQ(config.quoter.quote_size, kQuoteSize);
   EXPECT_EQ(config.quoter.imbalance_spread_cents, kImbalanceSpread);
@@ -170,8 +167,6 @@ TEST(ConfigTest, DefaultsAppliedWhenOptionalSectionsAbsent) {
   EXPECT_EQ(config.ws_url, "wss://trading-api.kalshi.com/trade-api/ws/v2");
   EXPECT_EQ(config.quoter.target_spread_cents,
             kalshi::QuoterConfig::kDefaultTargetSpreadCents);
-  EXPECT_DOUBLE_EQ(config.quoter.skew_per_contract_cents,
-                   kalshi::QuoterConfig::kDefaultSkewPerContractCents);
   EXPECT_EQ(config.quoter.reprice_threshold_cents,
             kalshi::QuoterConfig::kDefaultRepriceThresholdCents);
   EXPECT_EQ(config.quoter.quote_size, kalshi::QuoterConfig::kDefaultQuoteSize);
