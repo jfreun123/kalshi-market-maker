@@ -591,3 +591,42 @@ TEST_F(TradingSessionTest, RequoteIdleMarketsRespectsRiskHalt) {
 
   EXPECT_EQ(count_method(transport_, "POST"), 0) << "no quoting while halted";
 }
+
+TEST_F(TradingSessionTest, AddMarketSeedsQuotesAndTracks) {
+  transport_.enqueue({kHttpOk, order_json(kOrderId1, kDefaultQuoteSize)});
+  transport_.enqueue({kHttpOk, order_json(kOrderId2, kDefaultQuoteSize)});
+
+  session_.add_market(make_orderbook("KXNEW-MARKET", kYesBid, kNoBid, kObQty));
+
+  EXPECT_EQ(count_method(transport_, "POST"), 2);
+  EXPECT_TRUE(session_.is_tracked("KXNEW-MARKET"));
+}
+
+TEST_F(TradingSessionTest, RemoveMarketOnlyWhenFlatAndOrderless) {
+  transport_.enqueue({kHttpOk, order_json(kOrderId1, kDefaultQuoteSize)});
+  transport_.enqueue({kHttpOk, order_json(kOrderId2, kDefaultQuoteSize)});
+  session_.on_snapshot(make_orderbook(kTicker, kYesBid, kNoBid, kObQty));
+  session_.on_delta(kTicker, kalshi::Side::Yes, kSubBboDeltaPrice,
+                    kSubBboDeltaQty);
+  ASSERT_EQ(count_method(transport_, "POST"), 2);
+
+  EXPECT_FALSE(session_.remove_market_if_idle(kTicker))
+      << "resting orders must block rotation out";
+
+  session_.on_fill(make_fill(kOrderId1, kTicker, kalshi::Side::Yes, kYesBid,
+                             kDefaultQuoteSize));
+  EXPECT_FALSE(session_.remove_market_if_idle(kTicker))
+      << "an open position must block rotation out";
+}
+
+TEST_F(TradingSessionTest, RemoveIdleMarketStopsQuotingItsDeltas) {
+  session_.on_snapshot(make_orderbook(kTicker, kYesBid, kNoBid, kObQty));
+
+  EXPECT_TRUE(session_.remove_market_if_idle(kTicker));
+
+  session_.on_delta(kTicker, kalshi::Side::Yes, kSubBboDeltaPrice,
+                    kSubBboDeltaQty);
+  EXPECT_EQ(count_method(transport_, "POST"), 0)
+      << "deltas for a rotated-out market must not quote";
+  EXPECT_FALSE(session_.is_tracked(kTicker));
+}
