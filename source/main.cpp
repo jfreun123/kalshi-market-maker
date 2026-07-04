@@ -1,3 +1,4 @@
+#include "analytics.hpp"
 #include "auth.hpp"
 #include "capture.hpp"
 #include "cli.hpp"
@@ -77,6 +78,25 @@ static void setup_logger(const std::filesystem::path &log_dir, bool verbose) {
   spdlog::flush_every(kFlushInterval);
 
   kalshi::set_logger(logger);
+}
+
+// Dedicated raw-line JSONL sink for AnalyticsLogger events (PLAN item 31),
+// kept out of the human log so offline analysis never parses log prose.
+static std::shared_ptr<spdlog::logger>
+make_analytics_spdlog(const std::filesystem::path &log_dir) {
+  std::filesystem::create_directories(log_dir);
+  constexpr int kRotationHour = 0;
+  constexpr int kRotationMinute = 0;
+  constexpr bool kTruncate = false;
+  constexpr std::uint16_t kMaxLogFiles = 14U;
+  auto sink = std::make_shared<spdlog::sinks::daily_file_sink_mt>(
+      (log_dir / "analytics.jsonl").string(), kRotationHour, kRotationMinute,
+      kTruncate, kMaxLogFiles);
+  auto logger = std::make_shared<spdlog::logger>("analytics", sink);
+  logger->set_pattern("%v");
+  spdlog::drop(logger->name());
+  spdlog::register_logger(logger);
+  return logger;
 }
 
 // ---- Helpers ----
@@ -492,6 +512,14 @@ int main(int argc, char *argv[]) {
                           order_mgr, risk_mgr, &flow_guard};
     kalshi::TradingSession session{app_config.target_tickers, order_mgr,
                                    risk_mgr, quoter, &flow_guard};
+
+    auto analytics_logger = make_analytics_spdlog(app_config.log_dir);
+    kalshi::AnalyticsLogger analytics{
+        [analytics_logger](const std::string &line) {
+          analytics_logger->info(line);
+        }};
+    quoter.set_analytics(&analytics);
+    session.set_analytics(&analytics);
 
     kalshi::set_panic_handler([&session]() { session.cancel_all_quotes(); });
     kalshi::install_crash_flatten_handlers();
