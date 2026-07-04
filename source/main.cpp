@@ -650,6 +650,29 @@ int main(int argc, char *argv[]) {
           }
           session.cancel_all_quotes();
           if (!cli.paper_mode) {
+            // Verify against exchange truth and retry: run 8's shutdown died
+            // mid-flatten with the network down and left live orders behind
+            // (item 53). Never assume a fired cancel landed.
+            constexpr int kShutdownAttempts = 3;
+            constexpr auto kShutdownRetryDelay = std::chrono::seconds{2};
+            for (int attempt = 1; attempt <= kShutdownAttempts; ++attempt) {
+              try {
+                const auto still_open = rest.get_open_orders();
+                if (still_open.empty()) {
+                  break;
+                }
+                log->warn("shutdown: {} order(s) still resting (attempt "
+                          "{}/{}) — cancelling account-wide",
+                          still_open.size(), attempt, kShutdownAttempts);
+                session.cancel_preexisting_orders(still_open);
+              } catch (const std::exception &ex) {
+                log->error("shutdown cancel sweep failed (attempt {}/{}): {}",
+                           attempt, kShutdownAttempts, ex.what());
+                if (attempt < kShutdownAttempts) {
+                  std::this_thread::sleep_for(kShutdownRetryDelay);
+                }
+              }
+            }
             try {
               const int closed = flatten_all_positions(rest, log, &session);
               if (closed > 0) {
