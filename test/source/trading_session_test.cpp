@@ -1,5 +1,6 @@
 #include "analytics.hpp"
 #include "fake_transport.hpp"
+#include "flow_imbalance.hpp"
 #include "order_manager.hpp"
 #include "quoter.hpp"
 #include "rest_client.hpp"
@@ -513,6 +514,25 @@ TEST_F(TradingSessionTest, SeedOrderbookPlacesInitialQuotes) {
   session_.seed_orderbook(make_orderbook(kTicker, kYesBid, kNoBid, kObQty));
 
   EXPECT_EQ(count_method(transport_, "POST"), 2);
+}
+
+TEST_F(TradingSessionTest, DuplicateFillDoesNotDoubleCountInFlowGuard) {
+  constexpr int kDupFillQty = 10;
+  constexpr int kDupFillPrice = 44;
+  constexpr int kFloorTrippedOnlyByDoubleCount = 2 * kDupFillQty;
+  kalshi::FlowImbalanceConfig flow_config;
+  flow_config.min_flow_volume = kFloorTrippedOnlyByDoubleCount;
+  kalshi::FlowImbalanceGuard flow_guard{flow_config};
+  kalshi::TradingSession session{std::vector<std::string>{kTicker}, order_mgr_,
+                                 risk_mgr_, quoter_, &flow_guard};
+
+  const auto fill = make_fill("dup-order", kTicker, kalshi::Side::No,
+                              kDupFillPrice, kDupFillQty);
+  session.on_fill(fill);
+  session.on_fill(fill);
+
+  EXPECT_FALSE(flow_guard.is_imbalanced(kTicker))
+      << "a replayed duplicate fill must not feed the flow guard twice";
 }
 
 TEST_F(TradingSessionTest, FillEmitsAnalyticsEventWithMidAndInventory) {
