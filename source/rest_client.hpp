@@ -40,6 +40,12 @@ public:
   // Used to bias scanner ranking toward markets that pay for resting size.
   std::vector<IncentiveProgram> get_incentive_programs();
 
+  // Fetches fills from the exchange (paginated), oldest cutoff controlled by
+  // min_ts_seconds (0 = no cutoff). Used to backfill fills that arrived while
+  // the WS fill channel was disconnected; replaying them through record_fill
+  // is duplicate-safe (dedup by trade_id).
+  std::vector<Fill> get_fills(long long min_ts_seconds = 0);
+
 private:
   Auth auth_;
   std::unique_ptr<IHttpTransport> transport_;

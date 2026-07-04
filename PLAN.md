@@ -117,18 +117,22 @@ game. Fixes ship one PR each, TDD, per CLAUDE.md.
 13. [x] **41. `spdlog::flush_every(3s)` — PR #52.** *(was:)* `spdlog::flush_every(3s)` (S, ops).** Info-level lines buffer up
     to ~4KB on quiet sessions (flush_on is warn+) — `tail -f` lags minutes
     behind. Found in run 2.
-14. [ ] **46. Clock-skew guard (S — found 2026-07-03 evening).** The Mac
-    drifted 12m40s and every signed request 401'd (`header_timestamp_expired`)
-    — clock drift silently kills all authenticated trading. At startup (and
-    periodically) compare local time against the server `Date` header; refuse
-    to trade / alert beyond a few seconds of skew.
-15. [ ] **47. REST fill backfill on WS reconnect (M — from D10, run 5).**
-    Fills are only consumed via WS; 3.09 contracts filled during a mid-session
-    disconnect were never recorded, and the 2-min reconcile correctly halted
-    on drift (`kModelDiverge`) — but the halt is permanent. On reconnect,
-    fetch fills since the last seen timestamp via REST and replay them through
-    `record_fill` before re-quoting; then drift-halts become recoverable and
-    disconnect gaps stop corrupting local state.
+14. [ ] **46. Clock-skew guard (S — found 2026-07-03 evening) — DEFERRED
+    (Jacob, 2026-07-04, PR #57 closed unmerged).** The Mac drifted 12m40s and
+    every signed request 401'd (`header_timestamp_expired`). Call: keep the
+    host clock synced (and move soak runs to the item-37 VM) instead of
+    carrying guard code for a host-only failure. Revisit only if drift recurs
+    during unattended soak runs; the closed PR #57 branch has a working
+    implementation.
+15. [x] **47. REST fill backfill on WS reconnect (M — from D10, run 5).**
+    *Done — `RestClient::get_fills(min_ts)` (paginated, schema pinned against
+    live demo + conformance test), `WebSocketClient::on_reconnect` hook, main
+    replays missed fills (60s overlap window) through `session.on_fill`;
+    `record_fill` now returns whether the fill was new so duplicates no longer
+    reach the flow guard; reconcile clears `kModelDiverge` when back in sync —
+    drift halts are recoverable.* Original finding: 3.09 contracts filled
+    during a mid-session disconnect were never recorded and the halt was
+    permanent.
 16. [ ] **45. Decision-oriented quote logging (S).** Today's logs say *what*
     (place/cancel); they should say *why*: per placement log fair value, mid,
     visible inside, inventory + skew, spread components (base/imbalance/fee),
