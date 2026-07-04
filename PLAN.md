@@ -82,7 +82,10 @@ mechanics in leverage order, then delete the defenses:
   deltas while an order is in flight. Already sanctioned as a pull-forward in
   *Gated behind Gate 2*; on-VM latency makes this the next bottleneck after
   L1/L2.
-- [ ] **L4. Timer teardown.** Once L2's conformance tests prove amend is
+- [ ] **L4. Timer teardown — now also gated on item 50 (belief smoothing).**
+  Run 7 showed the timers are currently *containing* micro-price noise on
+  in-play books; tearing them down before the fair-value anchor is smoothed
+  would re-open D9/D13 at full speed. Once L2's conformance tests prove amend is
   echo-free, shrink `min_rest_ms`/`fade_rest_ms` toward zero (config-only) and
   let the real governors govern: `reprice_threshold_cents` for noise, the
   write budget for rate, RTT for physics. The item-42a/33 timers were
@@ -211,6 +214,19 @@ until the package lands.
     drift halts are recoverable.* Original finding: 3.09 contracts filled
     during a mid-session disconnect were never recorded and the halt was
     permanent.
+15a. [ ] **50. D13 — fade-lane oscillator on in-play books (P0 — found run 7,
+    2026-07-04). Fix before the next in-play session.** The item-33 fade
+    re-opened a bounded churn loop: on the in-play CANMAR book the raw
+    micro-price flaps ±3c sub-second, every flap qualifies as an "adverse
+    jump", and both sides faded alternately at the fade_rest cadence — 133
+    fades / 296 place-cancel pairs in 7 minutes (~42/min; healthy run-3 was
+    5–24/min). The rest-time defense works (bounded, no reject storm) but the
+    fade lane needs the same discipline: (a) **EMA-smooth the fair-value
+    anchor** (item 21(a), now urgent — the root cause is a noisy belief, not
+    the gate); (b) require the adverse jump to persist across two consecutive
+    updates before fading; (c) optional per-side fade cooldown. Config
+    band-aid available today: raise `theo_jump_cents`/`fade_rest_ms` on
+    in-play markets.
 15b. [ ] **48. Re-quote path independent of book deltas (P1 — found run 6,
     2026-07-04).** Quotes are only placed inside `Quoter::update()`, which
     runs on WS deltas (plus the one startup seed). If the seed placement
@@ -352,6 +368,28 @@ R4 constraints-vs-guards · R7 message docs + rate-limit review ·
   quoting → crossed/degenerate visible-book flicker → **item 43** (sanity
   guard). Quoter hot path benchmarked and ~2× faster (PR #51):
   256–315 ns/update steady-state.
+
+### 2026-07-04 — run 7 (wave-2 quoter live): first Gate-1 metrics; D13 found
+
+7 min live on 5 markets (in-play Canada–Morocco + hot dog contest + 3 WC
+markets), first session with fade + LMSR skew + longshot floor + analytics:
+
+- **First measured markout (the Gate 1 metric): +1.35c/contract @30s, −0.46c
+  @5min** (11 maker fills, one market) vs. the run-3 baseline of
+  **−2.4c/contract**. Effective spread 4.06c. Small sample, but the @5min
+  number already sits inside the proposed Gate-1 PASS bound (≥ −0.5c).
+- Session PnL **−$0.23** with a clean SIGINT flatten (short 12.28 bought back
+  @28) and reconcile **in sync** throughout — in-play exposure whose damage
+  was bounded by the skew walking the ask up as the short built.
+- **D13 (item 50): fade-lane oscillator** — 133 theo fades, all on the
+  in-play book, both sides alternating at ~600ms; raw micro-price noise
+  passes the theo-jump gate every fade window. Churn 42 place/min (bounded,
+  zero failed cancels, but burns write budget and queue priority).
+- Item 31b pipeline validated end-to-end live: analytics JSONL → markout
+  report worked first try.
+- Ops: 11 transient 503s mid-session (self-recovered), 4 post-only crosses
+  (D1 residual), flow guard never armed (fills were slow drips, one-sided
+  ratio under window threshold).
 
 ### 2026-07-04 — run 6 (first run of the wave-2 quoter): demo order placement down
 
