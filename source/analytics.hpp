@@ -35,6 +35,8 @@ public:
   void quote_decision(const QuoteDecision &decision);
   void fill(const Fill &fill_event, double mid_cents,
             double inventory_after_contracts);
+  void http_latency(std::string_view method, std::string_view path,
+                    int status_code, long long rtt_ms);
 
 private:
   Sink sink_;
