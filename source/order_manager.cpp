@@ -69,12 +69,12 @@ std::string OrderManager::fill_key(const Fill &fill) {
          std::to_string(fill.timestamp.time_since_epoch().count());
 }
 
-void OrderManager::record_fill(const Fill &fill) {
+bool OrderManager::record_fill(const Fill &fill) {
   ensure(is_valid_price(fill.price_cents), "fill price outside [1,99]");
   ensure(fill.quantity.is_positive(), "fill quantity must be positive");
 
   if (!seen_fills_.insert(fill_key(fill)).second) {
-    return; // Duplicate fill; ignore.
+    return false; // Duplicate fill; ignore.
   }
   get_logger()->info("fill ticker={} order_id={} side={} price={} qty={}",
                      fill.market_ticker, fill.order_id,
@@ -124,6 +124,7 @@ void OrderManager::record_fill(const Fill &fill) {
       order_iter->second.status = OrderStatus::PartiallyFilled;
     }
   }
+  return true;
 }
 
 Quantity OrderManager::net_position(std::string_view ticker) const {

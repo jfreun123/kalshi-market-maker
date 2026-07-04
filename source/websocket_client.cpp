@@ -245,6 +245,10 @@ void WebSocketClient::on_disconnect(DisconnectCallback callback) {
   disconnect_callback_ = std::move(callback);
 }
 
+void WebSocketClient::on_reconnect(ReconnectCallback callback) {
+  reconnect_callback_ = std::move(callback);
+}
+
 std::chrono::steady_clock::time_point
 WebSocketClient::last_message_time() const {
   return last_message_time_.load();
@@ -289,6 +293,10 @@ void WebSocketClient::handle_connect() {
   for (const auto &ticker : subscribed_tickers_) {
     send_subscribe(ticker);
   }
+  if (has_connected_once_ && reconnect_callback_) {
+    reconnect_callback_();
+  }
+  has_connected_once_ = true;
 }
 
 namespace {

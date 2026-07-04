@@ -643,3 +643,14 @@ TEST_F(OrderManagerTest, ExposureSplitsMatchedSpreadFromDirectional) {
                    static_cast<double>(remaining) * kContractPayout - cost);
   EXPECT_DOUBLE_EQ(exposure.e_loss_cents, -cost);
 }
+
+TEST_F(OrderManagerTest, RecordFillReportsWhetherFillWasRecorded) {
+  auto rest_client = make_rest_client(std::make_unique<FakeTransport>());
+  kalshi::OrderManager mgr{rest_client};
+
+  const auto fill =
+      make_fill(kOrderId, kTicker, kalshi::Side::Yes, kYesFillPrice, kFillQty);
+
+  EXPECT_TRUE(mgr.record_fill(fill));
+  EXPECT_FALSE(mgr.record_fill(fill));
+}
