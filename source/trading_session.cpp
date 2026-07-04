@@ -49,6 +49,9 @@ void TradingSession::on_delta(const std::string &ticker, Side side,
   auto &book = ob_map_[ticker];
   book.apply_delta(side, price_cents, qty);
   last_book_update_[ticker] = clock_();
+  if (!is_tracked(ticker)) {
+    return;
+  }
   get_logger()->debug("delta ticker={} side={} price={} qty={} mid={:.1f}",
                       ticker, side_name(side), price_cents, qty.to_fp_string(),
                       book.mid_price_cents());
@@ -190,6 +193,37 @@ void TradingSession::cancel_all_quotes() {
   // orders we just cancelled; without this it would try to cancel dead ids and
   // never re-quote when the feed recovers.
   quoter_.reset_quotes();
+}
+
+void TradingSession::add_market(const Orderbook &snapshot) {
+  if (!is_tracked(snapshot.ticker)) {
+    tickers_.push_back(snapshot.ticker);
+    get_logger()->info("rotation: adopted ticker={}", snapshot.ticker);
+  }
+  seed_orderbook(snapshot);
+}
+
+bool TradingSession::remove_market_if_idle(const std::string &ticker) {
+  if (!is_tracked(ticker)) {
+    return false;
+  }
+  if (!order_mgr_.net_position(ticker).is_zero()) {
+    return false;
+  }
+  for (const auto &order_entry : order_mgr_.open_orders()) {
+    if (order_entry.second.market_ticker == ticker) {
+      return false;
+    }
+  }
+  std::erase(tickers_, ticker);
+  ob_map_.erase(ticker);
+  last_book_update_.erase(ticker);
+  get_logger()->info("rotation: dropped idle ticker={}", ticker);
+  return true;
+}
+
+bool TradingSession::is_tracked(std::string_view ticker) const {
+  return std::find(tickers_.begin(), tickers_.end(), ticker) != tickers_.end();
 }
 
 void TradingSession::requote_idle_markets() {

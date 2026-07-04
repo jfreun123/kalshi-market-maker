@@ -288,6 +288,60 @@ static bool reconcile_against_exchange(kalshi::RestClient &rest,
   return false;
 }
 
+// ---- In-session market rotation (item 52) ----
+
+// Re-scans and swaps dead-idle markets for currently-live ones. The scan and
+// snapshot fetches run WITHOUT the engine lock (they are seconds of REST);
+// only session mutations take it. Markets holding a position or resting
+// orders are never rotated out.
+static void rotate_markets(kalshi::RestClient &rest,
+                           kalshi::TradingSession &session,
+                           kalshi::WebSocketClient &ws_client,
+                           const kalshi::AppConfig &app_config,
+                           std::mutex &engine_mtx,
+                           std::shared_ptr<spdlog::logger> &log) {
+  try {
+    kalshi::TickerScanner scanner{rest, app_config.scanner};
+    const auto picks = scanner.scan(app_config.scanner.trade_top_n);
+    std::vector<std::string> pick_tickers;
+    pick_tickers.reserve(picks.size());
+    for (const auto &pick : picks) {
+      pick_tickers.push_back(pick.ticker);
+    }
+
+    std::vector<std::string> to_add;
+    {
+      const std::lock_guard<std::mutex> lock{engine_mtx};
+      const auto tracked = session.tickers();
+      for (const auto &ticker : tracked) {
+        if (std::ranges::find(pick_tickers, ticker) == pick_tickers.end()) {
+          (void)session.remove_market_if_idle(ticker);
+        }
+      }
+      for (const auto &ticker : pick_tickers) {
+        if (!session.is_tracked(ticker)) {
+          to_add.push_back(ticker);
+        }
+      }
+    }
+
+    for (const auto &ticker : to_add) {
+      try {
+        const auto snapshot = rest.get_orderbook(ticker);
+        {
+          const std::lock_guard<std::mutex> lock{engine_mtx};
+          session.add_market(snapshot);
+        }
+        ws_client.subscribe(ticker);
+      } catch (const std::exception &ex) {
+        log->error("rotation: adopt failed ticker={}: {}", ticker, ex.what());
+      }
+    }
+  } catch (const std::exception &ex) {
+    log->error("rotation scan failed: {}", ex.what());
+  }
+}
+
 // Standalone --reconcile: compares local (flat at startup) against the exchange
 // and exits non-zero on any mismatch. Useful as a pre-trade / CI sanity check.
 static int run_reconcile_mode(kalshi::RestClient &rest,
@@ -670,12 +724,22 @@ int main(int argc, char *argv[]) {
     constexpr int kPositionLogInterval = 600;    // 600 × 100ms = 60s
     constexpr int kPortfolioRiskInterval = 10;   // 10 × 100ms = 1s
 
+    constexpr int kTicksPerMinute = 600;
+    const int rotation_ticks =
+        app_config.scanner.rotation_minutes * kTicksPerMinute;
     int poll_count = 0;
     bool stale_logged = false;
 
     while (!g_shutdown.load()) {
       std::this_thread::sleep_for(kPollInterval);
       ++poll_count;
+
+      // Rotation runs OUTSIDE the engine lock: its scan is seconds of REST
+      // and it takes the lock itself only for the brief session mutations.
+      if (paper_ptr == nullptr && rotation_ticks > 0 &&
+          poll_count % rotation_ticks == 0) {
+        rotate_markets(rest, session, ws_client, app_config, engine_mtx, log);
+      }
 
       // Hold the engine lock only for the work, never across the sleep.
       const std::lock_guard<std::mutex> lock{engine_mtx};

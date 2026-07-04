@@ -24,6 +24,9 @@ struct ScannerConfig {
   // Number of top-ranked tickers written into the generated trade config.
   // PLAN.md notes the Basic rate tier is safe at <=5 concurrent tickers.
   static constexpr int kDefaultTradeTopN = 5;
+  // In-session market rotation cadence (item 52): re-scan and swap dead-idle
+  // markets for live ones every this many minutes; 0 disables rotation.
+  static constexpr int kDefaultRotationMinutes = 5;
 
   int min_price_cents{kDefaultMinPriceCents};
   int max_price_cents{kDefaultMaxPriceCents};
@@ -34,6 +37,7 @@ struct ScannerConfig {
   double max_days_to_close{kDefaultMaxDaysToClose};
   double incentive_weight{kDefaultIncentiveWeight};
   int trade_top_n{kDefaultTradeTopN};
+  int rotation_minutes{kDefaultRotationMinutes};
   // When non-empty, scan fetches each event series separately instead of
   // using the global /markets listing (which returns zero-volume junk).
   std::vector<std::string> event_series{};

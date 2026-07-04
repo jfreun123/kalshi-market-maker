@@ -93,6 +93,17 @@ public:
   // initial quotes before the live feed connects.
   void seed_orderbook(const Orderbook &snapshot);
 
+  // ---- Market rotation (item 52) ----
+  // Flow moves around the exchange faster than session boundaries; these let
+  // the host rotate the tracked set mid-session. Removal is refused while the
+  // market holds a position or resting orders — never rotate away exposure.
+  void add_market(const Orderbook &snapshot);
+  [[nodiscard]] bool remove_market_if_idle(const std::string &ticker);
+  [[nodiscard]] bool is_tracked(std::string_view ticker) const;
+  [[nodiscard]] const std::vector<std::string> &tickers() const {
+    return tickers_;
+  }
+
   // ---- Periodic work ----
 
   // Portfolio kill-switch: build the read-model snapshot and feed it to the
