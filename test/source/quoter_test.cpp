@@ -66,6 +66,16 @@ constexpr double kMakerFeeRate = 0.07;
 
 constexpr auto kJustUnderMinRest =
     std::chrono::milliseconds{kalshi::QuoterConfig::kDefaultMinRestMs - 1};
+constexpr auto kFadeRestElapsed =
+    std::chrono::milliseconds{kalshi::QuoterConfig::kDefaultFadeRestMs};
+constexpr auto kJustUnderFadeRest =
+    std::chrono::milliseconds{kalshi::QuoterConfig::kDefaultFadeRestMs - 1};
+constexpr int kYesBid54 = 51;
+constexpr int kNoBid54 = 43;
+constexpr int kYesBid47 = 45;
+constexpr int kNoBid47 = 51;
+constexpr int kYesBid57 = 55;
+constexpr int kNoBid57 = 41;
 constexpr auto kMinRestElapsed =
     std::chrono::milliseconds{kalshi::QuoterConfig::kDefaultMinRestMs};
 
@@ -433,10 +443,11 @@ TEST_F(QuoterTest, RepriceSuppressedWhileQuoteYoungerThanMinRest) {
 
   quoter.update(kTicker, make_ob(kYesBid52, kNoBid52));
   *clock_now += kJustUnderMinRest;
-  quoter.update(kTicker, make_ob(kYesBid55, kNoBid55));
+  quoter.update(kTicker, make_ob(kYesBid54, kNoBid54));
 
   EXPECT_EQ(transport.recorded_requests().size(), 2U)
-      << "a 3c move must not cancel a quote that has rested < min_rest_ms";
+      << "a sub-theo-jump move must not cancel a quote that has rested "
+         "< min_rest_ms";
 }
 
 TEST_F(QuoterTest, RepriceResumesOnceQuoteHasRestedMinRest) {
@@ -883,4 +894,96 @@ TEST_F(QuoterTest, UpdateEmitsQuoteDecisionAnalyticsEvent) {
   EXPECT_NE(lines.front().find(R"("ticker":"KXBTCD")"), std::string::npos);
   EXPECT_NE(lines.front().find(R"("bid":50)"), std::string::npos);
   EXPECT_NE(lines.front().find(R"("ask":54)"), std::string::npos);
+}
+
+TEST_F(QuoterTest, BidFadesOnAdverseTheoDropDespiteMinRest) {
+  auto transport_ptr = std::make_unique<FakeTransport>();
+  FakeTransport &transport = *transport_ptr;
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId1, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId2, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  transport.enqueue({kHttpOk, "{}"});
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId3, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  kalshi::RestClient rest{kalshi::Auth{kApiKey, kPemPrivateKey},
+                          std::move(transport_ptr), kBaseUrl};
+  kalshi::OrderManager order_mgr{rest};
+  kalshi::RiskManager risk_mgr{kalshi::RiskLimits{}};
+  auto clock_now = std::make_shared<std::chrono::steady_clock::time_point>(
+      std::chrono::steady_clock::now());
+  kalshi::Quoter quoter{kalshi::QuoterConfig{}, order_mgr, risk_mgr, nullptr,
+                        [clock_now] { return *clock_now; }};
+
+  quoter.update(kTicker, make_ob(kYesBid52, kNoBid52));
+  *clock_now += kFadeRestElapsed;
+  quoter.update(kTicker, make_ob(kYesBid47, kNoBid47));
+
+  EXPECT_EQ(transport.recorded_requests().size(), 4U)
+      << "the toxic bid must fade out-of-cycle; the safe ask must keep "
+         "resting under min_rest_ms";
+  const std::string &replaced_bid = transport.recorded_requests().at(3).body;
+  EXPECT_NE(replaced_bid.find("\"side\":\"bid\""), std::string::npos);
+}
+
+TEST_F(QuoterTest, AskFadesOnAdverseTheoRiseDespiteMinRest) {
+  auto transport_ptr = std::make_unique<FakeTransport>();
+  FakeTransport &transport = *transport_ptr;
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId1, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId2, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  transport.enqueue({kHttpOk, "{}"});
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId3, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  kalshi::RestClient rest{kalshi::Auth{kApiKey, kPemPrivateKey},
+                          std::move(transport_ptr), kBaseUrl};
+  kalshi::OrderManager order_mgr{rest};
+  kalshi::RiskManager risk_mgr{kalshi::RiskLimits{}};
+  auto clock_now = std::make_shared<std::chrono::steady_clock::time_point>(
+      std::chrono::steady_clock::now());
+  kalshi::Quoter quoter{kalshi::QuoterConfig{}, order_mgr, risk_mgr, nullptr,
+                        [clock_now] { return *clock_now; }};
+
+  quoter.update(kTicker, make_ob(kYesBid52, kNoBid52));
+  *clock_now += kFadeRestElapsed;
+  quoter.update(kTicker, make_ob(kYesBid57, kNoBid57));
+
+  EXPECT_EQ(transport.recorded_requests().size(), 4U)
+      << "the toxic ask must fade out-of-cycle; the safe bid must keep "
+         "resting under min_rest_ms";
+  const std::string &replaced_ask = transport.recorded_requests().at(3).body;
+  EXPECT_NE(replaced_ask.find("\"side\":\"ask\""), std::string::npos);
+}
+
+TEST_F(QuoterTest, AdverseTheoJumpStillHeldUnderFadeRestFloor) {
+  auto transport_ptr = std::make_unique<FakeTransport>();
+  FakeTransport &transport = *transport_ptr;
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId1, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId2, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  kalshi::RestClient rest{kalshi::Auth{kApiKey, kPemPrivateKey},
+                          std::move(transport_ptr), kBaseUrl};
+  kalshi::OrderManager order_mgr{rest};
+  kalshi::RiskManager risk_mgr{kalshi::RiskLimits{}};
+  auto clock_now = std::make_shared<std::chrono::steady_clock::time_point>(
+      std::chrono::steady_clock::now());
+  kalshi::Quoter quoter{kalshi::QuoterConfig{}, order_mgr, risk_mgr, nullptr,
+                        [clock_now] { return *clock_now; }};
+
+  quoter.update(kTicker, make_ob(kYesBid52, kNoBid52));
+  *clock_now += kJustUnderFadeRest;
+  quoter.update(kTicker, make_ob(kYesBid47, kNoBid47));
+
+  EXPECT_EQ(transport.recorded_requests().size(), 2U)
+      << "the sub-second echo window must not trigger fades";
 }

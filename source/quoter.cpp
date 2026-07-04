@@ -36,10 +36,10 @@ Quoter::Quoter(QuoterConfig config, FairValueEngine fv_engine,
       clock_{clock ? std::move(clock)
                    : Clock{[] { return std::chrono::steady_clock::now(); }}} {}
 
-bool Quoter::resting_too_young(
-    std::chrono::steady_clock::time_point placed_at,
-    std::chrono::steady_clock::time_point now) const {
-  return now - placed_at < std::chrono::milliseconds{config_.min_rest_ms};
+bool Quoter::resting_too_young(std::chrono::steady_clock::time_point placed_at,
+                               std::chrono::steady_clock::time_point now,
+                               int rest_ms) {
+  return now - placed_at < std::chrono::milliseconds{rest_ms};
 }
 
 std::pair<int, int> Quoter::compute_quotes(double fv_cents, int half_spread,
@@ -93,12 +93,22 @@ void Quoter::refresh_bid(const std::string &ticker, OwnQuote &own,
     own.bid_placed_at = now;
   } else if (std::abs(own.quoted_bid_cents - desired_bid) >
              config_.reprice_threshold_cents) {
-    if (resting_too_young(own.bid_placed_at, now)) {
+    const bool adverse_jump =
+        own.quoted_bid_cents - desired_bid >= config_.theo_jump_cents;
+    const int rest_ms =
+        adverse_jump ? config_.fade_rest_ms : config_.min_rest_ms;
+    if (resting_too_young(own.bid_placed_at, now, rest_ms)) {
       get_logger()->debug(
           "reprice suppressed ticker={} side=bid quoted={} desired={} — "
-          "resting under min_rest_ms",
-          ticker, own.quoted_bid_cents, desired_bid);
+          "resting under {}ms",
+          ticker, own.quoted_bid_cents, desired_bid, rest_ms);
       return;
+    }
+    if (adverse_jump) {
+      get_logger()->info(
+          "theo fade ticker={} side=bid quoted={} desired={} — fair value "
+          "jumped against the resting bid",
+          ticker, own.quoted_bid_cents, desired_bid);
     }
     if (!release_order(own.bid_order_id)) {
       return;
@@ -139,12 +149,22 @@ void Quoter::refresh_ask(const std::string &ticker, OwnQuote &own,
     own.ask_placed_at = now;
   } else if (std::abs(own.quoted_ask_cents - desired_ask) >
              config_.reprice_threshold_cents) {
-    if (resting_too_young(own.ask_placed_at, now)) {
+    const bool adverse_jump =
+        desired_ask - own.quoted_ask_cents >= config_.theo_jump_cents;
+    const int rest_ms =
+        adverse_jump ? config_.fade_rest_ms : config_.min_rest_ms;
+    if (resting_too_young(own.ask_placed_at, now, rest_ms)) {
       get_logger()->debug(
           "reprice suppressed ticker={} side=ask quoted={} desired={} — "
-          "resting under min_rest_ms",
-          ticker, own.quoted_ask_cents, desired_ask);
+          "resting under {}ms",
+          ticker, own.quoted_ask_cents, desired_ask, rest_ms);
       return;
+    }
+    if (adverse_jump) {
+      get_logger()->info(
+          "theo fade ticker={} side=ask quoted={} desired={} — fair value "
+          "jumped against the resting ask",
+          ticker, own.quoted_ask_cents, desired_ask);
     }
     if (!release_order(own.ask_order_id)) {
       return;
