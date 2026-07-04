@@ -265,7 +265,13 @@ void Quoter::update(std::string_view ticker, const LocalOrderbook &book) {
   const double reservation_val =
       lmsr_skewed_fair_value(fair_val, inventory, inventory_b_contracts_);
 
-  const auto [raw_bid, raw_ask] = compute_quotes(reservation_val, half_spread);
+  auto [raw_bid, raw_ask] = compute_quotes(reservation_val, half_spread);
+  if (raw_bid < config_.longshot_price_threshold_cents) {
+    raw_bid = std::max(kBidMinCents, raw_bid - config_.longshot_edge_cents);
+  }
+  if (complement_price(raw_ask) < config_.longshot_price_threshold_cents) {
+    raw_ask = std::min(kAskMaxCents, raw_ask + config_.longshot_edge_cents);
+  }
 
   const int market_bid = best_bid->price_cents;
   const int market_ask = best_ask->price_cents;

@@ -51,6 +51,11 @@ struct QuoterConfig {
   // the D9 oscillator class stays dead.
   static constexpr int kDefaultTheoJumpCents = 3;
   static constexpr int kDefaultFadeRestMs = 500;
+  // Longshot-side edge floor (Bürgi Fig. 6 / Table 10): maker returns are
+  // negative on cheap-side buys, so a quote that would buy below the threshold
+  // is shaded by extra cents of edge; the favorite side quotes normally.
+  static constexpr int kDefaultLongshotThresholdCents = 40;
+  static constexpr int kDefaultLongshotEdgeCents = 1;
 
   int target_spread_cents = kDefaultTargetSpreadCents;
   int reprice_threshold_cents = kDefaultRepriceThresholdCents;
@@ -60,6 +65,8 @@ struct QuoterConfig {
   int min_rest_ms = kDefaultMinRestMs;
   int theo_jump_cents = kDefaultTheoJumpCents;
   int fade_rest_ms = kDefaultFadeRestMs;
+  int longshot_price_threshold_cents = kDefaultLongshotThresholdCents;
+  int longshot_edge_cents = kDefaultLongshotEdgeCents;
   // Price toward the favorite-longshot-debiased view instead of the raw mid.
   // Off by default (HeuristicModel is the safe baseline); β per Bürgi et al.
   bool use_view_based_pricing = false;

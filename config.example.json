@@ -18,7 +18,9 @@
     "maker_fee_rate": 0.0,
     "min_rest_ms": 3000,
     "theo_jump_cents": 3,
-    "fade_rest_ms": 500
+    "fade_rest_ms": 500,
+    "longshot_price_threshold_cents": 40,
+    "longshot_edge_cents": 1
   },
   "flow": {
     "window_seconds": 300,

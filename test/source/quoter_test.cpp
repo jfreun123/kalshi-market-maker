@@ -44,7 +44,8 @@ constexpr int kExtremeLongPosition = 1'000;
 constexpr std::string_view kBidPriceMid52 = R"("price":"0.5000")";
 constexpr std::string_view kAskPriceMid52 =
     R"("price":"0.5400")"; // YES=100-46=54
-constexpr std::string_view kBidPriceMid52Long20 = R"("price":"0.3900")";
+constexpr std::string_view kBidPriceMid52Long20 =
+    R"("price":"0.3800")"; // LMSR fv' 41.11 → bid 39, longshot-shaded to 38
 constexpr std::string_view kBidPriceMid52Short20 =
     R"("price":"0.5200")"; // floor(62.70−2)=60, passive-clamped to ask−1=52
 constexpr std::string_view kBidPriceExtremeClamp = R"("price":"0.0100")";
@@ -488,9 +489,9 @@ TEST_F(QuoterTest, RepriceResumesOnceQuoteHasRestedMinRest) {
 }
 
 TEST_F(QuoterTest, RepriceIgnoresOwnRestingQuotesEchoedInBook) {
-  // Thin book (both sides 1 lot): mid = micro = 35 → bid=33, ask=37 (NO 63).
-  // The exchange then echoes our resting 10-lot bid at 33 back as the best
-  // bid. Priced off the raw echo, micro jumps to (33*1 + 40*10)/11 ≈ 39.4 and
+  // Thin book (both sides 1 lot): mid = micro = 35 → bid=33, longshot-shaded
+  // to 32; ask=37 (NO 63). The exchange then echoes our resting 10-lot bid at
+  // 32 back as the best bid. Priced off the raw echo, micro jumps and
   // the quoter chases its own order even past min_rest_ms — the
   // self-referential churn oscillator (finding D4). Priced off the book minus
   // our own orders, fair value stays 35 and both resting quotes are left
@@ -498,7 +499,7 @@ TEST_F(QuoterTest, RepriceIgnoresOwnRestingQuotesEchoedInBook) {
   // inert — this isolates the own-quote subtraction.
   constexpr int kThinYesBid = 30;
   constexpr int kThinNoBid = 60;
-  constexpr int kOwnBidPrice = 33;
+  constexpr int kOwnBidPrice = 32;
   const kalshi::Quantity kThinQty = kalshi::Quantity::from_contracts(1);
   const kalshi::Quantity kOwnQty =
       kalshi::Quantity::from_contracts(kalshi::QuoterConfig::kDefaultQuoteSize);
@@ -1030,4 +1031,81 @@ TEST_F(QuoterTest, LmsrDegenerateBandDisablesSkew) {
       kalshi::RiskLimits::kDefaultMaxPosition, kDegenerateUpperBand);
 
   EXPECT_DOUBLE_EQ(kalshi::lmsr_skewed_fair_value(52.0, 40.0, b_inv), 52.0);
+}
+
+TEST_F(QuoterTest, LongshotBidShadedByExtraEdge) {
+  constexpr int kYesBid30 = 29;
+  constexpr int kNoBid30 = 69;
+  auto transport_ptr = std::make_unique<FakeTransport>();
+  FakeTransport &transport = *transport_ptr;
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId1, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId2, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  kalshi::RestClient rest{kalshi::Auth{kApiKey, kPemPrivateKey},
+                          std::move(transport_ptr), kBaseUrl};
+  kalshi::OrderManager order_mgr{rest};
+  kalshi::RiskManager risk_mgr{kalshi::RiskLimits{}};
+  kalshi::Quoter quoter{kalshi::QuoterConfig{}, order_mgr, risk_mgr};
+
+  quoter.update(kTicker, make_ob(kYesBid30, kNoBid30));
+
+  const std::string &bid_body = transport.recorded_requests().at(0).body;
+  EXPECT_NE(bid_body.find("\"side\":\"bid\""), std::string::npos);
+  EXPECT_NE(bid_body.find(R"("price":"0.2700")"), std::string::npos)
+      << "buying YES below the longshot threshold must cost 1c extra edge";
+  const std::string &ask_body = transport.recorded_requests().at(1).body;
+  EXPECT_NE(ask_body.find("\"side\":\"ask\""), std::string::npos);
+  EXPECT_NE(ask_body.find(R"("price":"0.3200")"), std::string::npos)
+      << "the favorite-side ask quotes normally";
+}
+
+TEST_F(QuoterTest, LongshotAskShadedByExtraEdge) {
+  auto transport_ptr = std::make_unique<FakeTransport>();
+  FakeTransport &transport = *transport_ptr;
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId1, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId2, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  kalshi::RestClient rest{kalshi::Auth{kApiKey, kPemPrivateKey},
+                          std::move(transport_ptr), kBaseUrl};
+  kalshi::OrderManager order_mgr{rest};
+  kalshi::RiskManager risk_mgr{kalshi::RiskLimits{}};
+  kalshi::Quoter quoter{kalshi::QuoterConfig{}, order_mgr, risk_mgr};
+
+  quoter.update(kTicker, make_ob(kYesBid70, kNoBid70));
+
+  const std::string &bid_body = transport.recorded_requests().at(0).body;
+  EXPECT_NE(bid_body.find(R"("price":"0.6800")"), std::string::npos)
+      << "the favorite-side bid quotes normally";
+  const std::string &ask_body = transport.recorded_requests().at(1).body;
+  EXPECT_NE(ask_body.find(R"("price":"0.7300")"), std::string::npos)
+      << "buying NO below the longshot threshold must cost 1c extra edge";
+}
+
+TEST_F(QuoterTest, MidRangeQuotesNotShadedByLongshotFloor) {
+  auto transport_ptr = std::make_unique<FakeTransport>();
+  FakeTransport &transport = *transport_ptr;
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId1, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId2, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  kalshi::RestClient rest{kalshi::Auth{kApiKey, kPemPrivateKey},
+                          std::move(transport_ptr), kBaseUrl};
+  kalshi::OrderManager order_mgr{rest};
+  kalshi::RiskManager risk_mgr{kalshi::RiskLimits{}};
+  kalshi::Quoter quoter{kalshi::QuoterConfig{}, order_mgr, risk_mgr};
+
+  quoter.update(kTicker, make_ob(kYesBid52, kNoBid52));
+
+  const std::string &bid_body = transport.recorded_requests().at(0).body;
+  EXPECT_NE(bid_body.find(std::string(kBidPriceMid52)), std::string::npos);
+  const std::string &ask_body = transport.recorded_requests().at(1).body;
+  EXPECT_NE(ask_body.find(std::string(kAskPriceMid52)), std::string::npos);
 }
