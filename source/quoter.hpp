@@ -17,9 +17,20 @@ namespace kalshi {
 class FlowImbalanceGuard; // widen the spread under adverse one-sided flow
 class AnalyticsLogger;    // JSONL quote/fill events for offline measurement
 
+// LMSR log-odds inventory skew (Berg & Proebsting pp.49-56): the reservation
+// price shifts a constant amount per contract in log-odds space, so the skew
+// self-attenuates near 1c/99c and can never push a quote out of range.
+// lmsr_b_from_risk calibrates the liquidity parameter b so holding
+// max_position moves a 50c reservation price exactly to the quote-band edge;
+// a degenerate band (edge <= 50c) returns an infinite b, disabling the skew.
+[[nodiscard]] double lmsr_skewed_fair_value(double fv_cents,
+                                            double net_inventory_contracts,
+                                            double b_contracts);
+[[nodiscard]] double lmsr_b_from_risk(int max_position_contracts,
+                                      int max_quote_price_cents);
+
 struct QuoterConfig {
   static constexpr int kDefaultTargetSpreadCents = 4;
-  static constexpr double kDefaultSkewPerContractCents = 0.05;
   static constexpr int kDefaultRepriceThresholdCents = 1;
   static constexpr int kDefaultQuoteSize = 10;
   // Extra cents added to the target spread while flow is imbalanced.
@@ -32,14 +43,30 @@ struct QuoterConfig {
   // exchange's echo of a cancelled level clears well within this window, and
   // healthy repricing (run 3: one reprice per 2.5–12s) is barely delayed.
   static constexpr int kDefaultMinRestMs = 3'000;
+  // Adverse theo-jump fade (Bürgi p.27: the maker edge *is* repricing). A fair
+  // value move of at least theo_jump_cents against a resting order makes it
+  // toxic — someone can trade it at an immediate profit — so that side may
+  // cancel after only fade_rest_ms instead of the full min_rest_ms. The fade
+  // floor stays above the exchange's sub-second echo of a cancelled level, so
+  // the D9 oscillator class stays dead.
+  static constexpr int kDefaultTheoJumpCents = 3;
+  static constexpr int kDefaultFadeRestMs = 500;
+  // Longshot-side edge floor (Bürgi Fig. 6 / Table 10): maker returns are
+  // negative on cheap-side buys, so a quote that would buy below the threshold
+  // is shaded by extra cents of edge; the favorite side quotes normally.
+  static constexpr int kDefaultLongshotThresholdCents = 40;
+  static constexpr int kDefaultLongshotEdgeCents = 1;
 
   int target_spread_cents = kDefaultTargetSpreadCents;
-  double skew_per_contract_cents = kDefaultSkewPerContractCents;
   int reprice_threshold_cents = kDefaultRepriceThresholdCents;
   int quote_size = kDefaultQuoteSize;
   int imbalance_spread_cents = kDefaultImbalanceSpreadCents;
   int min_spread_cents = kDefaultMinSpreadCents;
   int min_rest_ms = kDefaultMinRestMs;
+  int theo_jump_cents = kDefaultTheoJumpCents;
+  int fade_rest_ms = kDefaultFadeRestMs;
+  int longshot_price_threshold_cents = kDefaultLongshotThresholdCents;
+  int longshot_edge_cents = kDefaultLongshotEdgeCents;
   // Price toward the favorite-longshot-debiased view instead of the raw mid.
   // Off by default (HeuristicModel is the safe baseline); β per Bürgi et al.
   bool use_view_based_pricing = false;
@@ -103,17 +130,15 @@ private:
   };
 
   // Returns {bid_cents, ask_cents} with bid ∈ [1,98] and ask ∈ [2,99].
-  // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
-  static std::pair<int, int> compute_quotes(double fv_cents, int half_spread,
-                                            double inventory_skew_cents);
+  static std::pair<int, int> compute_quotes(double fv_cents, int half_spread);
 
   void refresh_bid(const std::string &ticker, OwnQuote &own, int desired_bid,
                    std::chrono::steady_clock::time_point now);
   void refresh_ask(const std::string &ticker, OwnQuote &own, int desired_ask,
                    std::chrono::steady_clock::time_point now);
-  [[nodiscard]] bool
+  [[nodiscard]] static bool
   resting_too_young(std::chrono::steady_clock::time_point placed_at,
-                    std::chrono::steady_clock::time_point now) const;
+                    std::chrono::steady_clock::time_point now, int rest_ms);
   [[nodiscard]] bool release_order(const std::string &order_id);
   [[nodiscard]] const LocalOrderbook &
   book_without_own_quotes(const OwnQuote &own, const LocalOrderbook &book);
@@ -124,6 +149,7 @@ private:
   RiskManager &risk_mgr_;
   const FlowImbalanceGuard *flow_guard_{nullptr};
   Clock clock_;
+  double inventory_b_contracts_;
   AnalyticsLogger *analytics_{nullptr};
   std::unordered_map<std::string, OwnQuote> own_quotes_;
   LocalOrderbook scratch_book_;

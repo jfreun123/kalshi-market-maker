@@ -58,8 +58,6 @@ AppConfig load_config(const std::filesystem::path &path) {
     const auto &quoter_json = json_data.at("quoter");
     config.quoter.target_spread_cents = quoter_json.value(
         "target_spread_cents", QuoterConfig::kDefaultTargetSpreadCents);
-    config.quoter.skew_per_contract_cents = quoter_json.value(
-        "skew_per_contract_cents", QuoterConfig::kDefaultSkewPerContractCents);
     config.quoter.reprice_threshold_cents = quoter_json.value(
         "reprice_threshold_cents", QuoterConfig::kDefaultRepriceThresholdCents);
     config.quoter.quote_size =
@@ -76,6 +74,15 @@ AppConfig load_config(const std::filesystem::path &path) {
         quoter_json.value("maker_fee_rate", QuoterConfig{}.maker_fee_rate);
     config.quoter.min_rest_ms =
         quoter_json.value("min_rest_ms", QuoterConfig::kDefaultMinRestMs);
+    config.quoter.theo_jump_cents = quoter_json.value(
+        "theo_jump_cents", QuoterConfig::kDefaultTheoJumpCents);
+    config.quoter.fade_rest_ms =
+        quoter_json.value("fade_rest_ms", QuoterConfig::kDefaultFadeRestMs);
+    config.quoter.longshot_price_threshold_cents =
+        quoter_json.value("longshot_price_threshold_cents",
+                          QuoterConfig::kDefaultLongshotThresholdCents);
+    config.quoter.longshot_edge_cents = quoter_json.value(
+        "longshot_edge_cents", QuoterConfig::kDefaultLongshotEdgeCents);
   }
 
   // The imbalance guard should engage once roughly one full quote of one-sided

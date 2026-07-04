@@ -3,6 +3,9 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
+#include <unistd.h>
+
+#include <atomic>
 #include <filesystem>
 #include <fstream>
 #include <stdexcept>
@@ -11,8 +14,10 @@
 namespace {
 
 std::filesystem::path write_temp_config(const nlohmann::json &content) {
-  const auto path =
-      std::filesystem::temp_directory_path() / "kalshi_config_test.json";
+  static std::atomic<int> file_counter{0};
+  const auto file_name = "kalshi_config_test_" + std::to_string(getpid()) +
+                         "_" + std::to_string(file_counter++) + ".json";
+  const auto path = std::filesystem::temp_directory_path() / file_name;
   std::ofstream file{path};
   if (!file) {
     throw std::runtime_error{"Failed to create temp config file"};
@@ -31,7 +36,6 @@ nlohmann::json minimal_config_json() {
 
 TEST(ConfigTest, LoadsAllFields) {
   constexpr int kSpreadCents = 6;
-  constexpr double kSkew = 0.1;
   constexpr int kRepriceCents = 2;
   constexpr int kQuoteSize = 5;
   constexpr int kMaxPosition = 50;
@@ -48,6 +52,10 @@ TEST(ConfigTest, LoadsAllFields) {
   constexpr double kViewBeta = 0.08;
   constexpr double kMakerFee = 0.07;
   constexpr int kMinRestMs = 5'000;
+  constexpr int kTheoJumpCents = 4;
+  constexpr int kFadeRestMs = 750;
+  constexpr int kLongshotThreshold = 35;
+  constexpr int kLongshotEdge = 2;
   constexpr int kFlowWindowSeconds = 120;
   constexpr double kFlowRatioThreshold = 1.5;
   constexpr int kFlowMinVolume = 10;
@@ -60,7 +68,6 @@ TEST(ConfigTest, LoadsAllFields) {
       {"target_tickers", {"TICK-A", "TICK-B"}},
       {"quoter",
        {{"target_spread_cents", kSpreadCents},
-        {"skew_per_contract_cents", kSkew},
         {"reprice_threshold_cents", kRepriceCents},
         {"quote_size", kQuoteSize},
         {"imbalance_spread_cents", kImbalanceSpread},
@@ -68,7 +75,11 @@ TEST(ConfigTest, LoadsAllFields) {
         {"use_view_based_pricing", kUseViewBased},
         {"view_debias_beta", kViewBeta},
         {"maker_fee_rate", kMakerFee},
-        {"min_rest_ms", kMinRestMs}}},
+        {"min_rest_ms", kMinRestMs},
+        {"theo_jump_cents", kTheoJumpCents},
+        {"fade_rest_ms", kFadeRestMs},
+        {"longshot_price_threshold_cents", kLongshotThreshold},
+        {"longshot_edge_cents", kLongshotEdge}}},
       {"flow",
        {{"window_seconds", kFlowWindowSeconds},
         {"imbalance_ratio_threshold", kFlowRatioThreshold},
@@ -95,7 +106,6 @@ TEST(ConfigTest, LoadsAllFields) {
   EXPECT_EQ(config.target_tickers.at(0), "TICK-A");
   EXPECT_EQ(config.target_tickers.at(1), "TICK-B");
   EXPECT_EQ(config.quoter.target_spread_cents, kSpreadCents);
-  EXPECT_DOUBLE_EQ(config.quoter.skew_per_contract_cents, kSkew);
   EXPECT_EQ(config.quoter.reprice_threshold_cents, kRepriceCents);
   EXPECT_EQ(config.quoter.quote_size, kQuoteSize);
   EXPECT_EQ(config.quoter.imbalance_spread_cents, kImbalanceSpread);
@@ -104,6 +114,10 @@ TEST(ConfigTest, LoadsAllFields) {
   EXPECT_DOUBLE_EQ(config.quoter.view_debias_beta, kViewBeta);
   EXPECT_DOUBLE_EQ(config.quoter.maker_fee_rate, kMakerFee);
   EXPECT_EQ(config.quoter.min_rest_ms, kMinRestMs);
+  EXPECT_EQ(config.quoter.theo_jump_cents, kTheoJumpCents);
+  EXPECT_EQ(config.quoter.fade_rest_ms, kFadeRestMs);
+  EXPECT_EQ(config.quoter.longshot_price_threshold_cents, kLongshotThreshold);
+  EXPECT_EQ(config.quoter.longshot_edge_cents, kLongshotEdge);
   EXPECT_EQ(config.flow.window_seconds, kFlowWindowSeconds);
   EXPECT_DOUBLE_EQ(config.flow.imbalance_ratio_threshold, kFlowRatioThreshold);
   EXPECT_EQ(config.flow.min_flow_volume, kFlowMinVolume);
@@ -159,8 +173,6 @@ TEST(ConfigTest, DefaultsAppliedWhenOptionalSectionsAbsent) {
   EXPECT_EQ(config.ws_url, "wss://trading-api.kalshi.com/trade-api/ws/v2");
   EXPECT_EQ(config.quoter.target_spread_cents,
             kalshi::QuoterConfig::kDefaultTargetSpreadCents);
-  EXPECT_DOUBLE_EQ(config.quoter.skew_per_contract_cents,
-                   kalshi::QuoterConfig::kDefaultSkewPerContractCents);
   EXPECT_EQ(config.quoter.reprice_threshold_cents,
             kalshi::QuoterConfig::kDefaultRepriceThresholdCents);
   EXPECT_EQ(config.quoter.quote_size, kalshi::QuoterConfig::kDefaultQuoteSize);

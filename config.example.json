@@ -9,7 +9,6 @@
   ],
   "quoter": {
     "target_spread_cents": 4,
-    "skew_per_contract_cents": 0.05,
     "reprice_threshold_cents": 1,
     "quote_size": 10,
     "imbalance_spread_cents": 2,
@@ -17,7 +16,11 @@
     "use_view_based_pricing": false,
     "view_debias_beta": 0.09,
     "maker_fee_rate": 0.0,
-    "min_rest_ms": 3000
+    "min_rest_ms": 3000,
+    "theo_jump_cents": 3,
+    "fade_rest_ms": 500,
+    "longshot_price_threshold_cents": 40,
+    "longshot_edge_cents": 1
   },
   "flow": {
     "window_seconds": 300,

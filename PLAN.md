@@ -29,6 +29,74 @@ The measured baseline (run 3, 2026-07-03): pure passive quoting on an in-play
 market lost **−2.4c/contract** to one-sided flow. Closing that gap is the whole
 game. Fixes ship one PR each, TDD, per CLAUDE.md.
 
+### Top priority — the low-latency package (Jacob's call, 2026-07-04)
+
+Quoting competitively on fast markets is a latency problem before it is a
+strategy problem. The decision path is already ~300ns (PR #51 benchmark); the
+~1s worst-case from "book moved" to "new quote resting" is geography, two
+serialized REST calls, and defensive timers that exist only to protect a bot
+that is slow and can't tell its own book echo from the market. Attack the
+mechanics in leverage order, then delete the defenses:
+
+- [ ] **L0 = item 45 (latency half), pulled forward: instrument + baseline
+  BEFORE any change (S).** You can't compare what you didn't measure. Add
+  latency counters to the analytics JSONL: REST RTT per order call
+  (place/cancel/amend — the transport already times every request at debug,
+  `http_transport.cpp` `timed()`; surface it), order ack latency,
+  WS-delta→quote-decision gap, and decision→request-sent gap. Extend
+  `scripts/analyze_fills.py` (or add `latency_report.py`) to print
+  p50/p95/max per stage. Then run **one baseline session on the Mac** and
+  record the numbers in the Findings Log. Every later change (L1 VM, L2
+  amend, L3 async, L4 timers) is judged as a measured delta against this
+  baseline — same script, same stages.
+- [ ] **L1 = item 37. Deploy near the matching engine (S, ops).** ~300ms REST
+  round trips from the Mac become ~3–5ms from a us-east VM — ~100×, zero code,
+  dollars/month. Steps: (a) region probe first — measure RTT to
+  `demo-api.kalshi.co` (and prod) from us-east-1 AND us-east-2 and let the
+  numbers pick (Kalshi is AWS-hosted US East; third parties claim us-east-2 /
+  Ohio, unverified); (b) run the L0-instrumented session from the winning
+  region and compare stage-by-stage vs. the Mac baseline; (c) compare
+  cross/reject rates and markout; (d) fold the host into Phase 32 supervision
+  (launchd/systemd, logs, alerts).
+  **Host decision (2026-07-04): small EC2 in Kalshi's own region (t4g.small
+  ~$12/mo is ample for a 2-thread, ~300ns-decision bot), NOT a third-party
+  "trading VPS".** Evaluated tradoxvps.com: $39–249/mo for Chicago placement
+  with a self-benchmarked "~10ms" claim and gaming-CPU specs that are
+  irrelevant to a network-bound bot — and their own copy concedes that
+  beating ~10ms "requires an instance physically inside AWS us-east-2",
+  which is exactly what we rent directly for a fraction of the price.
+  Placement beats hardware. Same finding re-affirms the item-11 gate: FIX
+  saves per-order milliseconds that only matter once in-region with amend
+  (L2) landed, and needs Kalshi-side access — judge it from L0 deltas then,
+  not from VPS marketing.
+- [ ] **L2 = item 44. Amend + Decrease Order V2 (M).** Replace cancel+replace
+  in the reprice branch with a single atomic amend: one round trip (not two),
+  cheaper in tokens, no quote-less window, no post-only-cross re-entry risk,
+  and very likely no book echo (the D9 root). **Verify semantics empirically
+  first** via gated demo-conformance tests: amend price → expect priority
+  lost, book deltas coherent (no dead-level echo); decrease size → expect
+  `remaining_count` correct, priority kept. Decrease unlocks queue-preserving
+  inventory control ("keep the queue, cut the risk"). Detail in item 44 below.
+- [ ] **L3 = Phase 21 pull-forward: async order dispatch (M).** Order REST
+  calls currently run synchronously on the WS thread — the bot is deaf to
+  deltas while an order is in flight. Already sanctioned as a pull-forward in
+  *Gated behind Gate 2*; on-VM latency makes this the next bottleneck after
+  L1/L2.
+- [ ] **L4. Timer teardown — now also gated on item 50 (belief smoothing).**
+  Run 7 showed the timers are currently *containing* micro-price noise on
+  in-play books; tearing them down before the fair-value anchor is smoothed
+  would re-open D9/D13 at full speed. Once L2's conformance tests prove amend is
+  echo-free, shrink `min_rest_ms`/`fade_rest_ms` toward zero (config-only) and
+  let the real governors govern: `reprice_threshold_cents` for noise, the
+  write budget for rate, RTT for physics. The item-42a/33 timers were
+  anti-self-harm, not strategy; with sound mechanics they are vestigial.
+  Each L-step ships with an L0-comparable measurement so the speedup is a
+  number, not a feeling.
+
+Measurement items 19/31 stay live — L1's VM-vs-local comparison is judged on
+item-31 markout. Everything else in the ordered list below yields to L1–L4
+until the package lands.
+
 1. [ ] **19. Falsifiable edge + PASS/FAIL/KILL thresholds.** State the edge in
    one falsifiable sentence; pre-declare the demo-profitability criteria that
    Gate 1 is judged by; plan live-vs-paper fill-divergence measurement. Output:
@@ -50,10 +118,13 @@ game. Fixes ship one PR each, TDD, per CLAUDE.md.
 4. [ ] **23. Maker-fee widening ON by default + ceil-per-order fee model (S).**
    The documented maker edge predates maker fees (Bürgi p.6); fee rounds up to
    the cent per order (1.77% effective at 50c×100).
-5. [ ] **33. Cancel-on-theo-jump quote fade (M).** The maker edge *is*
-   repricing (Bürgi p.27): if VAMP/theo moves > k cents against a resting
-   order, cancel out-of-cycle instead of waiting for the next tick. Directly
-   attacks the −2.4c/contract measured in run 3.
+5. [x] **33. Cancel-on-theo-jump quote fade (M).** *Done — a fair-value move
+   ≥ `theo_jump_cents` (default 3) against a resting order drops that side's
+   rest floor from `min_rest_ms` (3000) to `fade_rest_ms` (500): the toxic
+   side fades fast, the safe side keeps its queue position, and the fade floor
+   stays above the exchange's sub-second echo so D9 stays dead. Directly
+   attacks the −2.4c/contract measured in run 3 (Bürgi p.27: the maker edge
+   *is* repricing).*
 6. [x] **43. Visible-book sanity guard (S — found by external log review).**
    *Done — merged PR #54: update skipped (resting quotes kept) when the visible
    book is crossed (`best_bid ≥ best_ask`), with a warn log.* Original run-3
@@ -63,13 +134,20 @@ game. Fixes ship one PR each, TDD, per CLAUDE.md.
 7. [ ] **32. Directional flow lean (M).** IR > 0.65 → bounded fair-value offset
    (±1c) or asymmetric size, decaying over 15–30 min (Bawa p.8). Validate
    thresholds via item 31 markout — the headline R² is an equities number.
-8. [ ] **29. Asymmetric quoting — longshot-side edge floor (M).** Maker returns
-   are negative on all sub-50c buys (Bürgi Fig. 6); require extra edge or less
-   size on the cheap-side bid.
-9. [ ] **25. LMSR log-odds inventory skew (S).** Replace linear
-   `skew_per_contract_cents` with `fv' = c/(1+(c/fv−1)·e^{q/b})`; derive `b`
-   from the risk budget (hit `max_position` ⇒ reservation price reaches
-   P_upper). Fixes the invisible-skew half of D5. (Berg & Proebsting pp.49–56.)
+8. [x] **29. Asymmetric quoting — longshot-side edge floor (M).** *Done — a
+   quote that would buy below `longshot_price_threshold_cents` (default 40) is
+   shaded by `longshot_edge_cents` (default 1) of extra edge on that side only
+   (YES bid below the threshold, or a NO buy whose price is below it); the
+   favorite side quotes normally. Thresholds are config knobs to tune from
+   item 31 markout data.* Maker returns are negative on all sub-50c buys
+   (Bürgi Fig. 6).
+9. [x] **25. LMSR log-odds inventory skew (S).** *Done — linear
+   `skew_per_contract_cents` replaced with `lmsr_skewed_fair_value` (fv' =
+   c/(1+(c/fv−1)·e^{q/b})); `lmsr_b_from_risk` derives b so holding
+   `max_position` moves a 50c reservation exactly to the band edge (defaults:
+   b = 100/ln 9 ≈ 45.5 → 20 contracts shift fv 52 → 41). Self-attenuates near
+   1c/99c, can never leave range; degenerate band (edge ≤ 50c) disables it.
+   Fixes the invisible-skew half of D5.* (Berg & Proebsting pp.49–56.)
 10. [ ] **24. Layered quoting — queue priming (S/M).** Rest 2–3 size layers 1–3c
    behind the inside: price-time FIFO means queue position is earned by resting
    *before* the move (item 9's measurement: ~115k ahead when joining late);
@@ -78,7 +156,7 @@ game. Fixes ship one PR each, TDD, per CLAUDE.md.
    use it for the manipulative variant). Depends on own-quote subtraction
    (shipped, PR #44).
 11. [ ] **3. Passive clamp vs. fresher BBO (D1 residual, M) + 37. deploy near
-    the matching engine (S, ops).** Run 3 measured ~6 `post only cross`
+    the matching engine (S, ops) — item 37 elevated to L1 above.** Run 3 measured ~6 `post only cross`
     rejects/10min on an in-play book — the ~300ms local RTT is the cause. Item
     37 (a US-East VM: measure RTT → demo session → compare reject rates) likely
     buys more than any software mitigation and gates whether FIX (item 11) is
@@ -95,7 +173,8 @@ game. Fixes ship one PR each, TDD, per CLAUDE.md.
     rule: only reprice when `|fv − quoted| · fill_prob` exceeds the queue
     value being abandoned; start with "never reprice on a 1-tick move if we're
     near the front."
-12b. [ ] **44. Amend + Decrease instead of cancel+replace (M).** Two V2
+12b. [ ] **44. Amend + Decrease instead of cancel+replace (M) — elevated to
+    L2 above.** Two V2
     endpoints replace the cancel+create pattern (two calls, 3 rate-limit
     tokens, a quote-less window, and post-only-cross risk on re-entry):
     - [Amend Order V2](https://docs.kalshi.com/api-reference/orders/amend-order-v2)
@@ -135,6 +214,38 @@ game. Fixes ship one PR each, TDD, per CLAUDE.md.
     drift halts are recoverable.* Original finding: 3.09 contracts filled
     during a mid-session disconnect were never recorded and the halt was
     permanent.
+15a. [ ] **50. D13 — fade-lane oscillator on in-play books (P0 — found run 7,
+    2026-07-04). Fix before the next in-play session.** The item-33 fade
+    re-opened a bounded churn loop: on the in-play CANMAR book the raw
+    micro-price flaps ±3c sub-second, every flap qualifies as an "adverse
+    jump", and both sides faded alternately at the fade_rest cadence — 133
+    fades / 296 place-cancel pairs in 7 minutes (~42/min; healthy run-3 was
+    5–24/min). The rest-time defense works (bounded, no reject storm) but the
+    fade lane needs the same discipline: (a) **EMA-smooth the fair-value
+    anchor** (item 21(a), now urgent — the root cause is a noisy belief, not
+    the gate); (b) require the adverse jump to persist across two consecutive
+    updates before fading; (c) optional per-side fade cooldown. Config
+    band-aid available today: raise `theo_jump_cents`/`fade_rest_ms` on
+    in-play markets.
+15b. [ ] **48. Re-quote path independent of book deltas (P1 — found run 6,
+    2026-07-04).** Quotes are only placed inside `Quoter::update()`, which
+    runs on WS deltas (plus the one startup seed). If the seed placement
+    fails (run 6: exchange-wide 503s) — or a side is dropped for any
+    transient reason — a market with a quiet book is **quoteless for the
+    entire session**: nothing retries. Fix: on the periodic poll cadence
+    (e.g., each status tick), for every tracked market with a live book and
+    missing resting quotes, call `quoter.update()` with the current
+    `LocalOrderbook`. Cheap, idempotent (reprice threshold/rest-time already
+    guard churn), and turns any transient placement failure into a ≤60s gap
+    instead of a dead session.
+15c. [ ] **49. Scanner: liveness filter (P2 — found run 6).** The scanner
+    ranks on `vol_24h`, which is stale by up to a day: on a holiday morning
+    it picked three markets whose books never ticked once in 8+ minutes
+    (golf outrights 14 days from close, `book_age_s=435`). Require recent
+    activity — e.g., last trade / book update within N minutes (via
+    `/markets/trades` or a short WS sample) — or prefer events starting
+    soon. Complements item 36's volume-cap caveat and the D8 scanner
+    follow-up.
 16. [ ] **45. Decision-oriented quote logging (S).** Today's logs say *what*
     (place/cancel); they should say *why*: per placement log fair value, mid,
     visible inside, inventory + skew, spread components (base/imbalance/fee),
@@ -196,13 +307,35 @@ Detail and diagrams in the archive and [ADR-007](docs/adr/007-process-per-strate
 | Phase 24 | Aggregator process (PortfolioModel + global risk) | One risk/PnL authority across processes |
 | Phase 25 | Cross-ticker delta hedging | Unhedged exposure across series |
 | Phase 26+ | Multi-exchange adapters (Polymarket, …) | New venues behind `IHttpTransport`/`IWebSocket` |
-| Item 11 | FIX transport | REST order-entry latency — evaluate only after item 37 |
+| Item 11 | FIX transport | REST order-entry latency — volume-gated, see FIX north-star below |
 | Items 15/16 | `Session` concept + process-per-exchange | Multi-exchange isolation |
 
 *Exception:* a Phase-21-style "don't block the WS callback on the rate-limiter
 sleep" change may be pulled forward if single-market latency measurements (item
 37 experiment) show it matters — it is a quoter-responsiveness issue, not only
 a scaling issue.
+
+### North-star: FIX access (Jacob's goal, 2026-07-04)
+
+Kalshi Institutional (Brad, email 2026-07-04): FIX access requires trading
+volume **consistently ≥ 5% of total exchange-wide volume on a rolling monthly
+basis**. So FIX is a *scale gate*, not a technology unlock — no integration
+work shortens the road to it. Consequences:
+
+- **REST + WS is our platform for the foreseeable future.** The low-latency
+  package (L0–L4: VM, amend, async dispatch, timer teardown) is not a stopgap
+  before FIX — it IS the latency ceiling available to us, which raises its
+  priority, not lowers it.
+- **The road to FIX runs through the gates in order**: Gate 1 (profitable in
+  demo) → Gate 2 (profitable live, then scale markets/uptime) → sustained
+  volume growth. Volume per month is the metric that eventually matters;
+  track it once live.
+- **Intermediate relationship path**: Kalshi's market-maker / liquidity
+  incentive programs (item 18 already feeds scanner ranking) are the
+  realistic first formal relationship with the exchange; revisit FIX via the
+  same institutional thread (reply with volumes + strategy) when scale
+  warrants.
+
 
 ## P3 — Structural refactors (nice-to-have, never block the gates)
 
@@ -235,6 +368,47 @@ R4 constraints-vs-guards · R7 message docs + rate-limit review ·
   quoting → crossed/degenerate visible-book flicker → **item 43** (sanity
   guard). Quoter hot path benchmarked and ~2× faster (PR #51):
   256–315 ns/update steady-state.
+
+### 2026-07-04 — run 7 (wave-2 quoter live): first Gate-1 metrics; D13 found
+
+7 min live on 5 markets (in-play Canada–Morocco + hot dog contest + 3 WC
+markets), first session with fade + LMSR skew + longshot floor + analytics:
+
+- **First measured markout (the Gate 1 metric): +1.35c/contract @30s, −0.46c
+  @5min** (11 maker fills, one market) vs. the run-3 baseline of
+  **−2.4c/contract**. Effective spread 4.06c. Small sample, but the @5min
+  number already sits inside the proposed Gate-1 PASS bound (≥ −0.5c).
+- Session PnL **−$0.23** with a clean SIGINT flatten (short 12.28 bought back
+  @28) and reconcile **in sync** throughout — in-play exposure whose damage
+  was bounded by the skew walking the ask up as the short built.
+- **D13 (item 50): fade-lane oscillator** — 133 theo fades, all on the
+  in-play book, both sides alternating at ~600ms; raw micro-price noise
+  passes the theo-jump gate every fade window. Churn 42 place/min (bounded,
+  zero failed cancels, but burns write budget and queue priority).
+- Item 31b pipeline validated end-to-end live: analytics JSONL → markout
+  report worked first try.
+- Ops: 11 transient 503s mid-session (self-recovered), 4 post-only crosses
+  (D1 residual), flow guard never armed (fills were slow drips, one-sided
+  ratio under window threshold).
+
+### 2026-07-04 — run 6 (first run of the wave-2 quoter): demo order placement down
+
+- Attempted the first live validation of theo-fade + LMSR skew + longshot
+  floor (items 33/25/29). **No quoting data: every order create returned
+  `HTTP 503 service_unavailable (service: exchange)`** — on all 3 scanned
+  markets, across a restart, and confirmed exchange-wide by the conformance
+  suite's own market pick (`CreateOrderResponseParsesRestsAndCancels` 503s).
+  Reads, WS snapshots/deltas, and `/exchange/status` (`trading_active:
+  true`!) all healthy — demo order entry was down on the July 4 holiday.
+  Re-run the 20-minute validation session when placement recovers.
+- **D11 → item 48:** failed seed + quiet book = quoteless session (no retry
+  path outside WS deltas).
+- **D12 → item 49:** scanner picked dormant markets (vol_24h is yesterday's
+  number; holiday morning books never ticked).
+- Ops notes: Mac clock synced (+0.09s, `sntp`); first informal L0 datapoint —
+  unauthenticated `GET /markets` from the Mac ≈ **140ms**; status-endpoint
+  `trading_active` does NOT imply order entry is up (a placement probe is the
+  only honest preflight).
 
 ### 2026-07-03 evening — runs 4–5 (integration preview: PRs #51-#54 + #52)
 
