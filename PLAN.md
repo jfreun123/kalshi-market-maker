@@ -291,13 +291,35 @@ Detail and diagrams in the archive and [ADR-007](docs/adr/007-process-per-strate
 | Phase 24 | Aggregator process (PortfolioModel + global risk) | One risk/PnL authority across processes |
 | Phase 25 | Cross-ticker delta hedging | Unhedged exposure across series |
 | Phase 26+ | Multi-exchange adapters (Polymarket, …) | New venues behind `IHttpTransport`/`IWebSocket` |
-| Item 11 | FIX transport | REST order-entry latency — evaluate only after item 37 |
+| Item 11 | FIX transport | REST order-entry latency — volume-gated, see FIX north-star below |
 | Items 15/16 | `Session` concept + process-per-exchange | Multi-exchange isolation |
 
 *Exception:* a Phase-21-style "don't block the WS callback on the rate-limiter
 sleep" change may be pulled forward if single-market latency measurements (item
 37 experiment) show it matters — it is a quoter-responsiveness issue, not only
 a scaling issue.
+
+### North-star: FIX access (Jacob's goal, 2026-07-04)
+
+Kalshi Institutional (Brad, email 2026-07-04): FIX access requires trading
+volume **consistently ≥ 5% of total exchange-wide volume on a rolling monthly
+basis**. So FIX is a *scale gate*, not a technology unlock — no integration
+work shortens the road to it. Consequences:
+
+- **REST + WS is our platform for the foreseeable future.** The low-latency
+  package (L0–L4: VM, amend, async dispatch, timer teardown) is not a stopgap
+  before FIX — it IS the latency ceiling available to us, which raises its
+  priority, not lowers it.
+- **The road to FIX runs through the gates in order**: Gate 1 (profitable in
+  demo) → Gate 2 (profitable live, then scale markets/uptime) → sustained
+  volume growth. Volume per month is the metric that eventually matters;
+  track it once live.
+- **Intermediate relationship path**: Kalshi's market-maker / liquidity
+  incentive programs (item 18 already feeds scanner ranking) are the
+  realistic first formal relationship with the exchange; revisit FIX via the
+  same institutional thread (reply with volumes + strategy) when scale
+  warrants.
+
 
 ## P3 — Structural refactors (nice-to-have, never block the gates)
 
