@@ -1,5 +1,8 @@
 #include "fair_value.hpp"
+#include "order_manager.hpp"
 #include "orderbook.hpp"
+#include "quoter.hpp"
+#include "risk_manager.hpp"
 #include "types.hpp"
 
 #include <benchmark/benchmark.h>
@@ -113,6 +116,87 @@ static void BM_FairValueEstimateWithInventory(benchmark::State &state) {
 }
 // NOLINTBEGIN(cppcoreguidelines-avoid-non-const-global-variables,cppcoreguidelines-owning-memory)
 BENCHMARK(BM_FairValueEstimateWithInventory);
+// NOLINTEND(cppcoreguidelines-avoid-non-const-global-variables,cppcoreguidelines-owning-memory)
+
+
+// ---- Quoter benchmarks ----
+
+namespace {
+
+// In-memory IOrderManager: no HTTP, deterministic ids — isolates the Quoter's
+// pricing-path cost from transport.
+class StubOrderManager final : public kalshi::IOrderManager {
+public:
+  kalshi::Order place(std::string_view ticker, kalshi::Side side,
+                      int price_cents, int quantity) override {
+    kalshi::Order order;
+    order.id = "stub-" + std::to_string(next_id_++);
+    order.market_ticker = std::string{ticker};
+    order.side = side;
+    order.price_cents = price_cents;
+    order.quantity = kalshi::Quantity::from_contracts(quantity);
+    open_orders_[order.id] = order;
+    return order;
+  }
+  bool cancel(std::string_view order_id) override {
+    return open_orders_.erase(std::string{order_id}) > 0;
+  }
+  void cancel_all(std::string_view) override { open_orders_.clear(); }
+  void record_fill(const kalshi::Fill &) override {}
+  [[nodiscard]] kalshi::Quantity net_position(std::string_view) const override {
+    return {};
+  }
+  [[nodiscard]] double realized_pnl(std::string_view) const override {
+    return 0.0;
+  }
+  [[nodiscard]] double fees_paid(std::string_view) const override {
+    return 0.0;
+  }
+  [[nodiscard]] double unrealized_pnl(std::string_view, int) const override {
+    return 0.0;
+  }
+  [[nodiscard]] double position_cost(std::string_view) const override {
+    return 0.0;
+  }
+  [[nodiscard]] kalshi::ExposureDecomposition
+  exposure_decomposition(std::string_view) const override {
+    return {};
+  }
+  [[nodiscard]] const std::unordered_map<std::string, kalshi::Order> &
+  open_orders() const override {
+    return open_orders_;
+  }
+
+private:
+  std::unordered_map<std::string, kalshi::Order> open_orders_;
+  int next_id_{0};
+};
+
+} // namespace
+
+// Steady-state per-delta cost: quotes rest, desired price is unchanged, the
+// quoter prices the book (minus its own quotes) and decides to do nothing.
+// This is the path taken on nearly every book update in production.
+static void BM_QuoterUpdateSteadyState(benchmark::State &state) {
+  StubOrderManager order_mgr;
+  kalshi::RiskManager risk_mgr{kalshi::RiskLimits{}};
+  kalshi::Quoter quoter{kalshi::QuoterConfig{}, order_mgr, risk_mgr};
+
+  const auto snap = make_snapshot(static_cast<int>(state.range(0)));
+  kalshi::LocalOrderbook book;
+  book.apply_snapshot(snap);
+  quoter.update(snap.ticker, book);
+
+  for ([[maybe_unused]] auto iter : state) {
+    quoter.update(snap.ticker, book);
+    benchmark::DoNotOptimize(quoter);
+  }
+}
+// NOLINTBEGIN(cppcoreguidelines-avoid-non-const-global-variables,cppcoreguidelines-owning-memory)
+BENCHMARK(BM_QuoterUpdateSteadyState)
+    ->Arg(kSmallLevelCount)
+    ->Arg(kMediumLevelCount)
+    ->Arg(kLargeLevelCount);
 // NOLINTEND(cppcoreguidelines-avoid-non-const-global-variables,cppcoreguidelines-owning-memory)
 
 // NOLINTBEGIN(cppcoreguidelines-avoid-non-const-global-variables,cppcoreguidelines-owning-memory,cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-pro-bounds-array-to-pointer-decay,modernize-avoid-c-arrays)
