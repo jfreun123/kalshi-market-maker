@@ -8,8 +8,8 @@
 #include "types.hpp"
 
 #include <chrono>
-#include <functional>
 #include <optional>
+#include <functional>
 #include <string>
 #include <unordered_map>
 #include <vector>

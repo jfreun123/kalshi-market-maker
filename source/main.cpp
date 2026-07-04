@@ -247,11 +247,6 @@ static bool reconcile_against_exchange(kalshi::RestClient &rest,
   if (result.in_sync) {
     log->info("reconcile: in sync ({} exchange positions checked)",
               exchange.size());
-    if (risk_mgr != nullptr &&
-        risk_mgr->is_set(kalshi::Constraint::kModelDiverge)) {
-      risk_mgr->clear(kalshi::Constraint::kModelDiverge);
-      log->info("reconcile back in sync — drift halt cleared");
-    }
     return true;
   }
 
@@ -599,54 +594,14 @@ int main(int argc, char *argv[]) {
           session.on_delta(ticker, side, price, qty);
         });
 
-    // Timestamp floor for the reconnect fill backfill: fills can only be
-    // missed after the session started, and after the last fill the WS
-    // channel delivered.
-    auto last_fill_time =
-        std::make_shared<std::chrono::system_clock::time_point>(
-            std::chrono::system_clock::now());
-
-    ws_client.on_fill(
-        [&session, &engine_mtx, last_fill_time](const kalshi::Fill &fill) {
-          const std::lock_guard<std::mutex> lock{engine_mtx};
-          *last_fill_time = std::max(*last_fill_time, fill.timestamp);
-          session.on_fill(fill);
-        });
+    ws_client.on_fill([&session, &engine_mtx](const kalshi::Fill &fill) {
+      const std::lock_guard<std::mutex> lock{engine_mtx};
+      session.on_fill(fill);
+    });
 
     ws_client.on_disconnect([&session, &engine_mtx]() {
       const std::lock_guard<std::mutex> lock{engine_mtx};
       session.on_disconnect();
-    });
-
-    // Fills that land while the WS is down are never re-pushed; without a
-    // backfill the local model silently diverges until reconcile halts on
-    // kModelDiverge (demo finding D10). The dedup by trade_id makes the
-    // overlap window replay-safe.
-    ws_client.on_reconnect([&rest, &session, &engine_mtx, last_fill_time,
-                            &app_config, &log]() {
-      constexpr std::chrono::seconds kBackfillOverlap{60};
-      const std::lock_guard<std::mutex> lock{engine_mtx};
-      const long long min_ts =
-          std::chrono::duration_cast<std::chrono::seconds>(
-              (*last_fill_time - kBackfillOverlap).time_since_epoch())
-              .count();
-      try {
-        const auto missed = rest.get_fills(min_ts);
-        int replayed = 0;
-        for (const auto &fill : missed) {
-          const auto &tickers = app_config.target_tickers;
-          if (std::ranges::find(tickers, fill.market_ticker) == tickers.end()) {
-            continue;
-          }
-          *last_fill_time = std::max(*last_fill_time, fill.timestamp);
-          session.on_fill(fill);
-          ++replayed;
-        }
-        log->info("reconnect fill backfill: fetched={} replayed={}",
-                  missed.size(), replayed);
-      } catch (const std::exception &ex) {
-        log->error("reconnect fill backfill failed: {}", ex.what());
-      }
     });
 
     std::signal(SIGINT, handle_signal);

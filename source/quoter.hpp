@@ -80,7 +80,8 @@ private:
     std::string bid_order_id;
     std::string ask_order_id;
     int quoted_bid_cents{0};
-    int quoted_ask_cents{0}; // stored as YES ask price (not the NO order price)
+    int quoted_ask_cents{
+        0}; // stored as YES ask price (not the NO order price)
   };
 
   // Returns {bid_cents, ask_cents} with bid ∈ [1,98] and ask ∈ [2,99].

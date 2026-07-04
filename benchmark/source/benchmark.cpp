@@ -142,7 +142,7 @@ public:
     return open_orders_.erase(std::string{order_id}) > 0;
   }
   void cancel_all(std::string_view) override { open_orders_.clear(); }
-  bool record_fill(const kalshi::Fill &) override { return true; }
+  void record_fill(const kalshi::Fill &) override {}
   [[nodiscard]] kalshi::Quantity net_position(std::string_view) const override {
     return {};
   }

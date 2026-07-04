@@ -98,7 +98,6 @@ public:
                                            int price, Quantity delta)>;
   using FillCallback = std::function<void(const Fill &)>;
   using DisconnectCallback = std::function<void()>;
-  using ReconnectCallback = std::function<void()>;
 
   // max_reconnects: number of reconnect attempts after the first disconnect.
   //   -1 = unlimited (production default).
@@ -117,11 +116,6 @@ public:
   void on_orderbook_delta(DeltaCallback callback);
   void on_fill(FillCallback callback);
   void on_disconnect(DisconnectCallback callback);
-
-  // Fires after a connection is re-established and subscriptions are resent —
-  // never on the first connect. Fills that arrived while disconnected are only
-  // ever pushed once, so this is the hook for a REST fill backfill.
-  void on_reconnect(ReconnectCallback callback);
 
   // Time of the last message received. Initialized to construction time.
   // Use this to detect a silently stalled connection.
@@ -152,7 +146,6 @@ private:
   bool running_{false};
   int next_msg_id_{1};
   int consecutive_connect_failures_{0};
-  bool has_connected_once_{false};
   std::vector<std::string> subscribed_tickers_;
   std::map<long long, long long> last_seq_by_sid_;
 
@@ -160,7 +153,6 @@ private:
   DeltaCallback delta_callback_;
   FillCallback fill_callback_;
   DisconnectCallback disconnect_callback_;
-  ReconnectCallback reconnect_callback_;
 
   std::atomic<std::chrono::steady_clock::time_point> last_message_time_{
       std::chrono::steady_clock::now()};

@@ -737,17 +737,3 @@ TEST_F(WebSocketClientTest, HeartbeatRefreshesLastMessageTimeWithoutMessages) {
   EXPECT_GE(last, before);
   EXPECT_LE(last, after);
 }
-
-TEST_F(WebSocketClientTest, ReconnectCallbackFiresOnReconnectNotFirstConnect) {
-  auto fake_ws = std::make_unique<kalshi::FakeWebSocket>();
-  kalshi::FakeWebSocket *ws_raw = fake_ws.get();
-  ws_raw->trigger_disconnect();
-
-  auto client = make_client(std::move(fake_ws), kOneReconnect);
-  int reconnect_count = 0;
-  client.on_reconnect([&reconnect_count]() { ++reconnect_count; });
-  client.run();
-
-  EXPECT_EQ(ws_raw->connect_count(), kTwoConnects);
-  EXPECT_EQ(reconnect_count, 1);
-}

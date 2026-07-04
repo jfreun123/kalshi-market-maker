@@ -152,19 +152,6 @@ TEST_F(DemoConformanceTest, GetOpenOrdersParses) {
   EXPECT_NO_THROW((void)rest.get_open_orders());
 }
 
-TEST_F(DemoConformanceTest, GetFillsParsesWithSaneFields) {
-  auto rest = make_rest();
-  std::vector<kalshi::Fill> fills;
-  ASSERT_NO_THROW(fills = rest.get_fills());
-  for (const auto &fill : fills) {
-    EXPECT_FALSE(fill.trade_id.empty());
-    EXPECT_FALSE(fill.market_ticker.empty());
-    EXPECT_GE(fill.price_cents, 1);
-    EXPECT_LE(fill.price_cents, 99);
-    EXPECT_TRUE(fill.quantity.is_positive());
-  }
-}
-
 TEST_F(DemoConformanceTest, GetIncentiveProgramsParses) {
   auto rest = make_rest();
   std::vector<kalshi::IncentiveProgram> programs;

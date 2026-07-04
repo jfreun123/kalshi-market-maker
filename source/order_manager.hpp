@@ -40,7 +40,7 @@ public:
                       int quantity) = 0;
   virtual bool cancel(std::string_view order_id) = 0;
   virtual void cancel_all(std::string_view ticker) = 0;
-  virtual bool record_fill(const Fill &fill) = 0;
+  virtual void record_fill(const Fill &fill) = 0;
 
   [[nodiscard]] virtual Quantity
   net_position(std::string_view ticker) const = 0;
@@ -70,8 +70,7 @@ public:
 // - place/cancel/cancel_all forward to RestClient and maintain local state.
 // - record_fill updates net_position and realized_pnl using FIFO matching:
 //   each incoming fill is matched against the oldest opposing-side lots.
-//   Duplicate fills (same trade_id, or order_id + timestamp when the trade_id
-//   is missing) are ignored; the return value says whether the fill was new.
+//   Duplicate fills (same order_id + timestamp) are silently ignored.
 class OrderManager : public IOrderManager {
 public:
   explicit OrderManager(RestClient &rest_client);
@@ -86,7 +85,7 @@ public:
               int quantity) override;
   bool cancel(std::string_view order_id) override;
   void cancel_all(std::string_view ticker) override;
-  bool record_fill(const Fill &fill) override;
+  void record_fill(const Fill &fill) override;
 
   [[nodiscard]] Quantity net_position(std::string_view ticker) const override;
   [[nodiscard]] double realized_pnl(std::string_view ticker) const override;
