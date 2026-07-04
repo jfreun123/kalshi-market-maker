@@ -1,3 +1,4 @@
+#include "analytics.hpp"
 #include "fake_transport.hpp"
 #include "flow_imbalance.hpp"
 #include "order_manager.hpp"
@@ -532,4 +533,22 @@ TEST_F(TradingSessionTest, DuplicateFillDoesNotDoubleCountInFlowGuard) {
 
   EXPECT_FALSE(flow_guard.is_imbalanced(kTicker))
       << "a replayed duplicate fill must not feed the flow guard twice";
+}
+
+TEST_F(TradingSessionTest, FillEmitsAnalyticsEventWithMidAndInventory) {
+  constexpr int kAnalyticsFillQty = 7;
+  std::vector<std::string> lines;
+  kalshi::AnalyticsLogger analytics{
+      [&lines](const std::string &line) { lines.push_back(line); }};
+  session_.set_analytics(&analytics);
+
+  session_.on_snapshot(make_orderbook(kTicker, kYesBid, kNoBid, kObQty));
+  session_.on_fill(make_fill("analytics-order", kTicker, kalshi::Side::Yes,
+                             kYesBid, kAnalyticsFillQty));
+
+  ASSERT_EQ(lines.size(), 1U);
+  EXPECT_NE(lines.front().find(R"("type":"fill")"), std::string::npos);
+  EXPECT_NE(lines.front().find(R"("qty":7.0)"), std::string::npos);
+  EXPECT_NE(lines.front().find(R"("inventory_after":7.0)"), std::string::npos);
+  EXPECT_NE(lines.front().find(R"("mid":)"), std::string::npos);
 }

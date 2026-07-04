@@ -1,5 +1,6 @@
 #include "trading_session.hpp"
 
+#include "analytics.hpp"
 #include "flow_imbalance.hpp"
 #include "logger.hpp"
 #include "portfolio.hpp"
@@ -80,6 +81,13 @@ void TradingSession::on_fill(const Fill &fill) {
     flow_guard_->record_fill(fill.market_ticker, fill.side, fill.quantity,
                              fill.timestamp);
   }
+  if (analytics_ != nullptr) {
+    const auto book = ob_map_.find(fill.market_ticker);
+    const double mid_cents =
+        (book != ob_map_.end()) ? book->second.mid_price_cents() : 0.0;
+    analytics_->fill(fill, mid_cents,
+                     order_mgr_.net_position(fill.market_ticker).contracts());
+  }
 
   const double session_pnl = order_mgr_.realized_pnl(fill.market_ticker);
   const double total_pnl =
@@ -100,6 +108,10 @@ void TradingSession::on_fill(const Fill &fill) {
   if (pnl_listener_) {
     pnl_listener_(carried_totals());
   }
+}
+
+void TradingSession::set_analytics(AnalyticsLogger *analytics) {
+  analytics_ = analytics;
 }
 
 void TradingSession::record_flatten(const Order &order) {
