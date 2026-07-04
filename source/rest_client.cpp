@@ -440,8 +440,8 @@ Order RestClient::place_order(std::string_view ticker, Side side,
   const auto avg_str = json_data.value("average_fill_price", std::string{});
   if (!avg_str.empty()) {
     const int avg_yes_cents = parse_dollars_to_cents(avg_str);
-    avg_fill_cents = (side == Side::Yes) ? avg_yes_cents
-                                         : complement_price(avg_yes_cents);
+    avg_fill_cents =
+        (side == Side::Yes) ? avg_yes_cents : complement_price(avg_yes_cents);
   }
 
   return Order{
@@ -501,6 +501,22 @@ std::vector<Order> RestClient::get_open_orders() {
     orders.push_back(parse_order(order_json));
   }
   return orders;
+}
+
+std::optional<std::chrono::seconds>
+RestClient::measure_clock_skew(SystemTimePoint local_now) {
+  const std::string path = path_prefix_ + "/exchange/status";
+  const std::string url = base_url_ + "/exchange/status";
+  auto headers = auth_.sign("GET", path);
+  auto resp = transport_->get(url, headers);
+  auto date_it = resp.headers.find("Date");
+  if (date_it == resp.headers.end()) {
+    date_it = resp.headers.find("date");
+  }
+  if (date_it == resp.headers.end()) {
+    return std::nullopt;
+  }
+  return clock_skew_seconds(date_it->second, local_now);
 }
 
 } // namespace kalshi

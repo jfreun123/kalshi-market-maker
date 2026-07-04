@@ -263,6 +263,48 @@ static bool reconcile_against_exchange(kalshi::RestClient &rest,
   return false;
 }
 
+// ---- Clock-skew guard ----
+
+// Beyond this tolerance Kalshi rejects every signed request
+// (header_timestamp_expired), so quoting is pointless and unsafe until the
+// clock resyncs (observed live: a 12m40s drift 401'd the whole session).
+constexpr std::chrono::seconds kMaxClockSkew{5};
+
+// Measures local-vs-server skew via the Date header. Within tolerance clears
+// any prior kClockSkew halt; beyond it sets the halt (when risk_mgr is given)
+// and returns false so startup can refuse to trade.
+static bool check_clock_skew(kalshi::RestClient &rest,
+                             kalshi::RiskManager *risk_mgr,
+                             std::shared_ptr<spdlog::logger> &log) {
+  std::optional<std::chrono::seconds> skew;
+  try {
+    skew = rest.measure_clock_skew();
+  } catch (const std::exception &ex) {
+    log->warn("clock-skew check failed: {}", ex.what());
+    return true;
+  }
+  if (!skew.has_value()) {
+    log->warn("clock-skew check skipped — no parseable Date header");
+    return true;
+  }
+  if (std::chrono::abs(*skew) <= kMaxClockSkew) {
+    if (risk_mgr != nullptr &&
+        risk_mgr->is_set(kalshi::Constraint::kClockSkew)) {
+      risk_mgr->clear(kalshi::Constraint::kClockSkew);
+      log->info("clock skew back within limit ({}s) — halt cleared",
+                skew->count());
+    }
+    return true;
+  }
+  log->critical("local clock skewed {}s vs exchange (limit {}s) — signed "
+                "requests will be rejected until the clock is resynced",
+                skew->count(), kMaxClockSkew.count());
+  if (risk_mgr != nullptr) {
+    risk_mgr->set(kalshi::Constraint::kClockSkew);
+  }
+  return false;
+}
+
 // Standalone --reconcile: compares local (flat at startup) against the exchange
 // and exits non-zero on any mismatch. Useful as a pre-trade / CI sanity check.
 static int run_reconcile_mode(kalshi::RestClient &rest,
@@ -472,6 +514,10 @@ int main(int argc, char *argv[]) {
       return 1;
     }
 
+    if (paper_ptr == nullptr && !check_clock_skew(rest, nullptr, log)) {
+      return 1;
+    }
+
     kalshi::WebSocketClient ws_client{
         auth, std::make_unique<kalshi::IxWebSocket>(), app_config.ws_url};
 
@@ -623,6 +669,7 @@ int main(int argc, char *argv[]) {
       // Reconcile against the exchange's authoritative positions. Skipped in
       // paper mode (no real exchange positions to compare against).
       if (paper_ptr == nullptr && poll_count % kReconcileInterval == 0) {
+        check_clock_skew(rest, &risk_mgr, log);
         reconcile_against_exchange(rest, order_mgr, app_config.target_tickers,
                                    &risk_mgr, log);
       }

@@ -660,3 +660,51 @@ TEST_F(RestClientTest, GetOpenOrdersThrowsOnHttpError) {
 
   EXPECT_THROW(client.get_open_orders(), std::runtime_error);
 }
+
+TEST_F(RestClientTest, MeasureClockSkewReadsDateHeader) {
+  const std::string server_date = "Fri, 03 Jul 2026 19:37:09 GMT";
+  constexpr long long kServerEpochSeconds = 1'783'107'429LL;
+  constexpr auto kLocalAhead = std::chrono::seconds{760};
+  auto transport = std::make_unique<FakeTransport>();
+  FakeTransport *const transport_raw = transport.get();
+  transport_raw->enqueue(
+      {kHttpOk, R"({"exchange_active":true})", {{"Date", server_date}}});
+  auto client = make_client(std::move(transport));
+  const auto local_now =
+      kalshi::SystemTimePoint{std::chrono::seconds{kServerEpochSeconds}} +
+      kLocalAhead;
+
+  const auto skew = client.measure_clock_skew(local_now);
+
+  ASSERT_TRUE(skew.has_value());
+  EXPECT_EQ(*skew, kLocalAhead);
+  EXPECT_NE(transport_raw->last_request().url.find("/exchange/status"),
+            std::string::npos);
+}
+
+TEST_F(RestClientTest, MeasureClockSkewWorksEvenWhenRequestIsRejected) {
+  const std::string server_date = "Fri, 03 Jul 2026 19:37:09 GMT";
+  constexpr long long kServerEpochSeconds = 1'783'107'429LL;
+  auto transport = std::make_unique<FakeTransport>();
+  FakeTransport *const transport_raw = transport.get();
+  transport_raw->enqueue({kHttpUnauthorized,
+                          R"({"error":"header_timestamp_expired"})",
+                          {{"Date", server_date}}});
+  auto client = make_client(std::move(transport));
+  const auto local_now =
+      kalshi::SystemTimePoint{std::chrono::seconds{kServerEpochSeconds}};
+
+  const auto skew = client.measure_clock_skew(local_now);
+
+  ASSERT_TRUE(skew.has_value());
+  EXPECT_EQ(skew->count(), 0);
+}
+
+TEST_F(RestClientTest, MeasureClockSkewEmptyWithoutDateHeader) {
+  auto transport = std::make_unique<FakeTransport>();
+  FakeTransport *const transport_raw = transport.get();
+  transport_raw->enqueue({kHttpOk, R"({"exchange_active":true})"});
+  auto client = make_client(std::move(transport));
+
+  EXPECT_FALSE(client.measure_clock_skew().has_value());
+}

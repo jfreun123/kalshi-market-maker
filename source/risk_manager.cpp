@@ -16,10 +16,10 @@ namespace kalshi {
 constexpr double kCentsToDollars = 100.0;
 
 // Human-readable names for each constraint bit — indexed by Constraint value.
-constexpr std::array<std::string_view, 11> kConstraintNames = {
+constexpr std::array<std::string_view, 12> kConstraintNames = {
     "kPnLLimit",     "kPositionLimit", "kOpenOrders", "kHighFillRate",
     "kStaleBook",    "kModelDiverge",  "kManualHalt", "kConnectivity",
-    "kOverExposure", "kPortfolioLoss", "kDrawdown",
+    "kOverExposure", "kPortfolioLoss", "kDrawdown",   "kClockSkew",
 };
 
 RiskManager::RiskManager(RiskLimits limits) : limits_{limits} {}
