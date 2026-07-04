@@ -72,7 +72,7 @@ The reviewer should never have to figure out ordering themselves. When opening a
 
 ## Architecture Diagrams
 
-Every phase of the build plan has a Mermaid diagram. When adding a new component:
-- Update `PLAN.md` with a Mermaid diagram showing where the new component fits in the overall system.
+Every major component has a Mermaid diagram. When adding a new component:
+- Update `docs/architecture.md` with a Mermaid diagram showing where the new component fits in the overall system (PLAN.md stays lean; superseded diagrams live in `docs/archive/`).
 - Diagrams use `graph TD` (top-down) for system architecture and `sequenceDiagram` for request/response flows.
 - Keep diagrams focused: each one should show only the components relevant to that phase, with already-built components shown as grey/completed nodes using `style NodeName fill:#555`.
