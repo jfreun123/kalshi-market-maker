@@ -526,6 +526,28 @@ std::vector<Order> RestClient::get_open_orders() {
   return orders;
 }
 
+std::optional<std::chrono::system_clock::time_point>
+RestClient::get_last_trade_time(std::string_view ticker) {
+  const std::string path = path_prefix_ + "/markets/trades";
+  const std::string url =
+      base_url_ + "/markets/trades?limit=1&ticker=" + std::string{ticker};
+  try {
+    auto headers = auth_.sign("GET", path);
+    auto resp = transport_->get(url, headers);
+    check_response(resp);
+    auto json_data = nlohmann::json::parse(resp.body);
+    const auto &trades = json_data.at("trades");
+    if (trades.empty()) {
+      return std::nullopt;
+    }
+    return parse_iso8601(trades.front().at("created_time").get<std::string>());
+  } catch (const std::exception &ex) {
+    get_logger()->debug("last-trade probe failed ticker={}: {}", ticker,
+                        ex.what());
+    return std::nullopt;
+  }
+}
+
 std::vector<Fill> RestClient::get_fills(long long min_ts_seconds) {
   constexpr int kPageLimit = 100;
   const std::string path = path_prefix_ + "/portfolio/fills";

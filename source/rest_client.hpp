@@ -5,7 +5,9 @@
 #include "rate_limiter.hpp"
 #include "types.hpp"
 
+#include <chrono>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -39,6 +41,13 @@ public:
   // Fetches active liquidity incentive pools (public endpoint, paginated).
   // Used to bias scanner ranking toward markets that pay for resting size.
   std::vector<IncentiveProgram> get_incentive_programs();
+
+  // Most recent public trade time for a market (GET /markets/trades?limit=1).
+  // Empty when the market has never traded or the response is unparseable —
+  // callers treat unknown as fresh (fail-open). Used by the scanner's
+  // liveness filter (item 49): vol_24h says yesterday, this says now.
+  std::optional<std::chrono::system_clock::time_point>
+  get_last_trade_time(std::string_view ticker);
 
   // Fetches fills from the exchange (paginated), oldest cutoff controlled by
   // min_ts_seconds (0 = no cutoff). Used to backfill fills that arrived while
