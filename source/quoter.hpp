@@ -32,6 +32,14 @@ struct QuoterConfig {
   // exchange's echo of a cancelled level clears well within this window, and
   // healthy repricing (run 3: one reprice per 2.5–12s) is barely delayed.
   static constexpr int kDefaultMinRestMs = 3'000;
+  // Adverse theo-jump fade (Bürgi p.27: the maker edge *is* repricing). A fair
+  // value move of at least theo_jump_cents against a resting order makes it
+  // toxic — someone can trade it at an immediate profit — so that side may
+  // cancel after only fade_rest_ms instead of the full min_rest_ms. The fade
+  // floor stays above the exchange's sub-second echo of a cancelled level, so
+  // the D9 oscillator class stays dead.
+  static constexpr int kDefaultTheoJumpCents = 3;
+  static constexpr int kDefaultFadeRestMs = 500;
 
   int target_spread_cents = kDefaultTargetSpreadCents;
   double skew_per_contract_cents = kDefaultSkewPerContractCents;
@@ -40,6 +48,8 @@ struct QuoterConfig {
   int imbalance_spread_cents = kDefaultImbalanceSpreadCents;
   int min_spread_cents = kDefaultMinSpreadCents;
   int min_rest_ms = kDefaultMinRestMs;
+  int theo_jump_cents = kDefaultTheoJumpCents;
+  int fade_rest_ms = kDefaultFadeRestMs;
   // Price toward the favorite-longshot-debiased view instead of the raw mid.
   // Off by default (HeuristicModel is the safe baseline); β per Bürgi et al.
   bool use_view_based_pricing = false;
@@ -111,9 +121,9 @@ private:
                    std::chrono::steady_clock::time_point now);
   void refresh_ask(const std::string &ticker, OwnQuote &own, int desired_ask,
                    std::chrono::steady_clock::time_point now);
-  [[nodiscard]] bool
+  [[nodiscard]] static bool
   resting_too_young(std::chrono::steady_clock::time_point placed_at,
-                    std::chrono::steady_clock::time_point now) const;
+                    std::chrono::steady_clock::time_point now, int rest_ms);
   [[nodiscard]] bool release_order(const std::string &order_id);
   [[nodiscard]] const LocalOrderbook &
   book_without_own_quotes(const OwnQuote &own, const LocalOrderbook &book);

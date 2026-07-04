@@ -50,10 +50,13 @@ game. Fixes ship one PR each, TDD, per CLAUDE.md.
 4. [ ] **23. Maker-fee widening ON by default + ceil-per-order fee model (S).**
    The documented maker edge predates maker fees (Bürgi p.6); fee rounds up to
    the cent per order (1.77% effective at 50c×100).
-5. [ ] **33. Cancel-on-theo-jump quote fade (M).** The maker edge *is*
-   repricing (Bürgi p.27): if VAMP/theo moves > k cents against a resting
-   order, cancel out-of-cycle instead of waiting for the next tick. Directly
-   attacks the −2.4c/contract measured in run 3.
+5. [x] **33. Cancel-on-theo-jump quote fade (M).** *Done — a fair-value move
+   ≥ `theo_jump_cents` (default 3) against a resting order drops that side's
+   rest floor from `min_rest_ms` (3000) to `fade_rest_ms` (500): the toxic
+   side fades fast, the safe side keeps its queue position, and the fade floor
+   stays above the exchange's sub-second echo so D9 stays dead. Directly
+   attacks the −2.4c/contract measured in run 3 (Bürgi p.27: the maker edge
+   *is* repricing).*
 6. [x] **43. Visible-book sanity guard (S — found by external log review).**
    *Done — merged PR #54: update skipped (resting quotes kept) when the visible
    book is crossed (`best_bid ≥ best_ask`), with a warn log.* Original run-3
