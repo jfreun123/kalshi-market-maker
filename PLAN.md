@@ -38,12 +38,23 @@ serialized REST calls, and defensive timers that exist only to protect a bot
 that is slow and can't tell its own book echo from the market. Attack the
 mechanics in leverage order, then delete the defenses:
 
+- [ ] **L0 = item 45 (latency half), pulled forward: instrument + baseline
+  BEFORE any change (S).** You can't compare what you didn't measure. Add
+  latency counters to the analytics JSONL: REST RTT per order call
+  (place/cancel/amend — the transport already times every request at debug,
+  `http_transport.cpp` `timed()`; surface it), order ack latency,
+  WS-delta→quote-decision gap, and decision→request-sent gap. Extend
+  `scripts/analyze_fills.py` (or add `latency_report.py`) to print
+  p50/p95/max per stage. Then run **one baseline session on the Mac** and
+  record the numbers in the Findings Log. Every later change (L1 VM, L2
+  amend, L3 async, L4 timers) is judged as a measured delta against this
+  baseline — same script, same stages.
 - [ ] **L1 = item 37. Deploy near the matching engine (S, ops).** ~300ms REST
   round trips from the Mac become ~3–5ms from a us-east VM — ~100×, zero code,
-  dollars/month. Prerequisite for judging every other latency change. Steps:
-  (a) RTT measurement from candidate regions vs. home; (b) demo session from
-  the VM, compare cross/reject rates and markout vs. a local run; (c) fold the
-  host into Phase 32 supervision (launchd/systemd, logs, alerts).
+  dollars/month. Steps: (a) run the L0-instrumented session from the VM and
+  compare stage-by-stage vs. the Mac baseline; (b) compare cross/reject rates
+  and markout; (c) fold the host into Phase 32 supervision (launchd/systemd,
+  logs, alerts).
 - [ ] **L2 = item 44. Amend + Decrease Order V2 (M).** Replace cancel+replace
   in the reprice branch with a single atomic amend: one round trip (not two),
   cheaper in tokens, no quote-less window, no post-only-cross re-entry risk,
@@ -62,6 +73,8 @@ mechanics in leverage order, then delete the defenses:
   let the real governors govern: `reprice_threshold_cents` for noise, the
   write budget for rate, RTT for physics. The item-42a/33 timers were
   anti-self-harm, not strategy; with sound mechanics they are vestigial.
+  Each L-step ships with an L0-comparable measurement so the speedup is a
+  number, not a feeling.
 
 Measurement items 19/31 stay live — L1's VM-vs-local comparison is judged on
 item-31 markout. Everything else in the ordered list below yields to L1–L4
