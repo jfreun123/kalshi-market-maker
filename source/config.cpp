@@ -83,6 +83,8 @@ AppConfig load_config(const std::filesystem::path &path) {
                           QuoterConfig::kDefaultLongshotThresholdCents);
     config.quoter.longshot_edge_cents = quoter_json.value(
         "longshot_edge_cents", QuoterConfig::kDefaultLongshotEdgeCents);
+    config.quoter.fv_ema_alpha =
+        quoter_json.value("fv_ema_alpha", QuoterConfig::kDefaultFvEmaAlpha);
   }
 
   // The imbalance guard should engage once roughly one full quote of one-sided

@@ -214,8 +214,17 @@ until the package lands.
     drift halts are recoverable.* Original finding: 3.09 contracts filled
     during a mid-session disconnect were never recorded and the halt was
     permanent.
-15a. [ ] **50. D13 — fade-lane oscillator on in-play books (P0 — found run 7,
-    2026-07-04). Fix before the next in-play session.** The item-33 fade
+15a. [x] **50. D13 — fade-lane oscillator on in-play books (P0 — found run 7,
+    2026-07-04).** *Done — three fixes: (a) the micro-price fair-value anchor
+    is EMA-smoothed per ticker (`quoter.fv_ema_alpha`, default 0.2, 1.0 =
+    off; a ±3c flap dampens below the fade trigger while a sustained move
+    converges in ~3–4 updates; EMA resets with `reset_quotes`); (b) a fade
+    requires the adverse jump to persist two consecutive updates
+    (`fade pending` debug line shows the armed state); (c) **D14, found by
+    the new tests**: the reprice branch never re-armed `placed_at`, so after
+    the first 3s the rest-time gate was permanently unlocked — re-placed
+    quotes now restart their rest clock. (c) alone explains much of run 7's
+    600ms fade cadence.* Original finding: The item-33 fade
     re-opened a bounded churn loop: on the in-play CANMAR book the raw
     micro-price flaps ±3c sub-second, every flap qualifies as an "adverse
     jump", and both sides faded alternately at the fade_rest cadence — 133

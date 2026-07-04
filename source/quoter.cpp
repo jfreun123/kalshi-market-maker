@@ -120,6 +120,17 @@ void Quoter::refresh_bid(const std::string &ticker, OwnQuote &own,
              config_.reprice_threshold_cents) {
     const bool adverse_jump =
         own.quoted_bid_cents - desired_bid >= config_.theo_jump_cents;
+    if (adverse_jump && !own.bid_fade_pending) {
+      own.bid_fade_pending = true;
+      get_logger()->debug(
+          "fade pending ticker={} side=bid quoted={} desired={} — awaiting "
+          "confirmation on the next update",
+          ticker, own.quoted_bid_cents, desired_bid);
+      return;
+    }
+    if (!adverse_jump) {
+      own.bid_fade_pending = false;
+    }
     const int rest_ms =
         adverse_jump ? config_.fade_rest_ms : config_.min_rest_ms;
     if (resting_too_young(own.bid_placed_at, now, rest_ms)) {
@@ -130,6 +141,7 @@ void Quoter::refresh_bid(const std::string &ticker, OwnQuote &own,
       return;
     }
     if (adverse_jump) {
+      own.bid_fade_pending = false;
       get_logger()->info(
           "theo fade ticker={} side=bid quoted={} desired={} — fair value "
           "jumped against the resting bid",
@@ -151,6 +163,7 @@ void Quoter::refresh_bid(const std::string &ticker, OwnQuote &own,
         order_mgr_.place(ticker, Side::Yes, desired_bid, config_.quote_size);
     own.bid_order_id = order.id;
     own.quoted_bid_cents = desired_bid;
+    own.bid_placed_at = now;
   }
 }
 
@@ -176,6 +189,17 @@ void Quoter::refresh_ask(const std::string &ticker, OwnQuote &own,
              config_.reprice_threshold_cents) {
     const bool adverse_jump =
         desired_ask - own.quoted_ask_cents >= config_.theo_jump_cents;
+    if (adverse_jump && !own.ask_fade_pending) {
+      own.ask_fade_pending = true;
+      get_logger()->debug(
+          "fade pending ticker={} side=ask quoted={} desired={} — awaiting "
+          "confirmation on the next update",
+          ticker, own.quoted_ask_cents, desired_ask);
+      return;
+    }
+    if (!adverse_jump) {
+      own.ask_fade_pending = false;
+    }
     const int rest_ms =
         adverse_jump ? config_.fade_rest_ms : config_.min_rest_ms;
     if (resting_too_young(own.ask_placed_at, now, rest_ms)) {
@@ -186,6 +210,7 @@ void Quoter::refresh_ask(const std::string &ticker, OwnQuote &own,
       return;
     }
     if (adverse_jump) {
+      own.ask_fade_pending = false;
       get_logger()->info(
           "theo fade ticker={} side=ask quoted={} desired={} — fair value "
           "jumped against the resting ask",
@@ -207,6 +232,7 @@ void Quoter::refresh_ask(const std::string &ticker, OwnQuote &own,
         order_mgr_.place(ticker, Side::No, no_price, config_.quote_size);
     own.ask_order_id = order.id;
     own.quoted_ask_cents = desired_ask;
+    own.ask_placed_at = now;
   }
 }
 
@@ -235,8 +261,15 @@ void Quoter::update(std::string_view ticker, const LocalOrderbook &book) {
   // quotes lean toward the side the book is pressuring (less adverse
   // selection).
   const double micro = visible.micro_price_cents();
+  const auto ema_it = fv_ema_.find(ticker_str);
+  const double smoothed_micro =
+      (ema_it == fv_ema_.end())
+          ? micro
+          : config_.fv_ema_alpha * micro +
+                (1.0 - config_.fv_ema_alpha) * ema_it->second;
+  fv_ema_[ticker_str] = smoothed_micro;
   const double fair_val = fv_engine_.estimate(
-      FairValueInput{micro, kDefaultTimeToCloseHours, 0, {}});
+      FairValueInput{smoothed_micro, kDefaultTimeToCloseHours, 0, {}});
   ensure(std::isfinite(fair_val), "fair value is not finite");
 
   int target_spread = config_.target_spread_cents;
@@ -303,7 +336,10 @@ void Quoter::set_analytics(AnalyticsLogger *analytics) {
   analytics_ = analytics;
 }
 
-void Quoter::reset_quotes() { own_quotes_.clear(); }
+void Quoter::reset_quotes() {
+  own_quotes_.clear();
+  fv_ema_.clear();
+}
 
 const LocalOrderbook &
 Quoter::book_without_own_quotes(const OwnQuote &own,
