@@ -54,6 +54,8 @@ TEST(ConfigTest, LoadsAllFields) {
   constexpr int kMinRestMs = 5'000;
   constexpr int kTheoJumpCents = 4;
   constexpr int kFadeRestMs = 750;
+  constexpr int kLongshotThreshold = 35;
+  constexpr int kLongshotEdge = 2;
   constexpr int kFlowWindowSeconds = 120;
   constexpr double kFlowRatioThreshold = 1.5;
   constexpr int kFlowMinVolume = 10;
@@ -75,7 +77,9 @@ TEST(ConfigTest, LoadsAllFields) {
         {"maker_fee_rate", kMakerFee},
         {"min_rest_ms", kMinRestMs},
         {"theo_jump_cents", kTheoJumpCents},
-        {"fade_rest_ms", kFadeRestMs}}},
+        {"fade_rest_ms", kFadeRestMs},
+        {"longshot_price_threshold_cents", kLongshotThreshold},
+        {"longshot_edge_cents", kLongshotEdge}}},
       {"flow",
        {{"window_seconds", kFlowWindowSeconds},
         {"imbalance_ratio_threshold", kFlowRatioThreshold},
@@ -112,6 +116,8 @@ TEST(ConfigTest, LoadsAllFields) {
   EXPECT_EQ(config.quoter.min_rest_ms, kMinRestMs);
   EXPECT_EQ(config.quoter.theo_jump_cents, kTheoJumpCents);
   EXPECT_EQ(config.quoter.fade_rest_ms, kFadeRestMs);
+  EXPECT_EQ(config.quoter.longshot_price_threshold_cents, kLongshotThreshold);
+  EXPECT_EQ(config.quoter.longshot_edge_cents, kLongshotEdge);
   EXPECT_EQ(config.flow.window_seconds, kFlowWindowSeconds);
   EXPECT_DOUBLE_EQ(config.flow.imbalance_ratio_threshold, kFlowRatioThreshold);
   EXPECT_EQ(config.flow.min_flow_volume, kFlowMinVolume);
