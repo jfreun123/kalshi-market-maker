@@ -120,11 +120,13 @@ game. Fixes ship one PR each, TDD, per CLAUDE.md.
 13. [x] **41. `spdlog::flush_every(3s)` — PR #52.** *(was:)* `spdlog::flush_every(3s)` (S, ops).** Info-level lines buffer up
     to ~4KB on quiet sessions (flush_on is warn+) — `tail -f` lags minutes
     behind. Found in run 2.
-14. [ ] **46. Clock-skew guard (S — found 2026-07-03 evening).** The Mac
-    drifted 12m40s and every signed request 401'd (`header_timestamp_expired`)
-    — clock drift silently kills all authenticated trading. At startup (and
-    periodically) compare local time against the server `Date` header; refuse
-    to trade / alert beyond a few seconds of skew.
+14. [x] **46. Clock-skew guard (S — found 2026-07-03 evening).** *Done —
+    `clock_skew.{hpp,cpp}` parses the server `Date` header;
+    `RestClient::measure_clock_skew` (works even on 401 responses); startup
+    refuses to trade beyond 5s skew and the reconcile cadence sets/clears a
+    new `kClockSkew` halt, so a mid-session drift halts quoting and recovery
+    is automatic once the clock resyncs.* Original finding: the Mac drifted
+    12m40s and every signed request 401'd (`header_timestamp_expired`).
 15. [ ] **47. REST fill backfill on WS reconnect (M — from D10, run 5).**
     Fills are only consumed via WS; 3.09 contracts filled during a mid-session
     disconnect were never recorded, and the 2-min reconcile correctly halted
