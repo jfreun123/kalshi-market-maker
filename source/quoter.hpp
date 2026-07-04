@@ -56,6 +56,10 @@ struct QuoterConfig {
   // is shaded by extra cents of edge; the favorite side quotes normally.
   static constexpr int kDefaultLongshotThresholdCents = 40;
   static constexpr int kDefaultLongshotEdgeCents = 1;
+  // EMA smoothing of the micro-price fair-value anchor (item 21a / D13): raw
+  // micro flaps +/-3c sub-second on in-play books and every flap passed the
+  // theo-jump gate — smooth the belief, not just the action. 1.0 = unsmoothed.
+  static constexpr double kDefaultFvEmaAlpha = 0.2;
 
   int target_spread_cents = kDefaultTargetSpreadCents;
   int reprice_threshold_cents = kDefaultRepriceThresholdCents;
@@ -67,6 +71,7 @@ struct QuoterConfig {
   int fade_rest_ms = kDefaultFadeRestMs;
   int longshot_price_threshold_cents = kDefaultLongshotThresholdCents;
   int longshot_edge_cents = kDefaultLongshotEdgeCents;
+  double fv_ema_alpha = kDefaultFvEmaAlpha;
   // Price toward the favorite-longshot-debiased view instead of the raw mid.
   // Off by default (HeuristicModel is the safe baseline); β per Bürgi et al.
   bool use_view_based_pricing = false;
@@ -127,6 +132,8 @@ private:
     int quoted_ask_cents{0}; // stored as YES ask price (not the NO order price)
     std::chrono::steady_clock::time_point bid_placed_at;
     std::chrono::steady_clock::time_point ask_placed_at;
+    bool bid_fade_pending{false};
+    bool ask_fade_pending{false};
   };
 
   // Returns {bid_cents, ask_cents} with bid ∈ [1,98] and ask ∈ [2,99].
@@ -150,6 +157,7 @@ private:
   const FlowImbalanceGuard *flow_guard_{nullptr};
   Clock clock_;
   double inventory_b_contracts_;
+  std::unordered_map<std::string, double> fv_ema_;
   AnalyticsLogger *analytics_{nullptr};
   std::unordered_map<std::string, OwnQuote> own_quotes_;
   LocalOrderbook scratch_book_;

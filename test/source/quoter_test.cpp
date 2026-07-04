@@ -76,6 +76,8 @@ constexpr auto kJustUnderFadeRest =
     std::chrono::milliseconds{kalshi::QuoterConfig::kDefaultFadeRestMs - 1};
 constexpr int kYesBid54 = 51;
 constexpr int kNoBid54 = 43;
+constexpr int kYesBid49 = 47;
+constexpr int kNoBid49 = 49;
 constexpr int kYesBid47 = 45;
 constexpr int kNoBid47 = 51;
 constexpr int kYesBid57 = 55;
@@ -392,7 +394,8 @@ TEST_F(QuoterTest, QuoteNotReplacedWithinRepriceThreshold) {
 
 TEST_F(QuoterTest, QuoteReplacedWhenExceedingRepriceThreshold) {
   // First update (mid=52): bid=50, ask=54.
-  // Second update (mid=55): bid=53, ask=57; diff=3 > 1 → cancel + replace both.
+  // Second update (mid=54): bid=52, ask=56; diff=2 > 1 (and below the fade
+  // trigger) → plain cancel + replace on both sides.
   auto transport_ptr = std::make_unique<FakeTransport>();
   FakeTransport &transport = *transport_ptr;
   transport.enqueue(
@@ -416,12 +419,14 @@ TEST_F(QuoterTest, QuoteReplacedWhenExceedingRepriceThreshold) {
   kalshi::RiskManager risk_mgr{kalshi::RiskLimits{}};
   auto clock_now = std::make_shared<std::chrono::steady_clock::time_point>(
       std::chrono::steady_clock::now());
-  kalshi::Quoter quoter{kalshi::QuoterConfig{}, order_mgr, risk_mgr, nullptr,
+  kalshi::QuoterConfig unsmoothed;
+  unsmoothed.fv_ema_alpha = 1.0;
+  kalshi::Quoter quoter{unsmoothed, order_mgr, risk_mgr, nullptr,
                         [clock_now] { return *clock_now; }};
 
   quoter.update(kTicker, make_ob(kYesBid52, kNoBid52));
   *clock_now += kMinRestElapsed;
-  quoter.update(kTicker, make_ob(kYesBid55, kNoBid55));
+  quoter.update(kTicker, make_ob(kYesBid54, kNoBid54));
 
   // 2 POSTs + 2 DELETEs + 2 POSTs = 6 total requests.
   EXPECT_EQ(transport.recorded_requests().size(), 6U);
@@ -477,12 +482,14 @@ TEST_F(QuoterTest, RepriceResumesOnceQuoteHasRestedMinRest) {
   kalshi::RiskManager risk_mgr{kalshi::RiskLimits{}};
   auto clock_now = std::make_shared<std::chrono::steady_clock::time_point>(
       std::chrono::steady_clock::now());
-  kalshi::Quoter quoter{kalshi::QuoterConfig{}, order_mgr, risk_mgr, nullptr,
+  kalshi::QuoterConfig unsmoothed;
+  unsmoothed.fv_ema_alpha = 1.0;
+  kalshi::Quoter quoter{unsmoothed, order_mgr, risk_mgr, nullptr,
                         [clock_now] { return *clock_now; }};
 
   quoter.update(kTicker, make_ob(kYesBid52, kNoBid52));
   *clock_now += kMinRestElapsed;
-  quoter.update(kTicker, make_ob(kYesBid55, kNoBid55));
+  quoter.update(kTicker, make_ob(kYesBid54, kNoBid54));
 
   EXPECT_EQ(transport.recorded_requests().size(), 6U)
       << "after resting min_rest_ms the quote must reprice as before";
@@ -669,13 +676,17 @@ TEST_F(QuoterTest, SelfCrossGuardSkipsBidWhenItWouldCrossOwnAsk) {
   kalshi::RiskManager risk_mgr{kalshi::RiskLimits{}};
   auto clock_now = std::make_shared<std::chrono::steady_clock::time_point>(
       std::chrono::steady_clock::now());
-  kalshi::Quoter quoter{kalshi::QuoterConfig{}, order_mgr, risk_mgr, nullptr,
+  kalshi::QuoterConfig unsmoothed;
+  unsmoothed.fv_ema_alpha = 1.0;
+  kalshi::Quoter quoter{unsmoothed, order_mgr, risk_mgr, nullptr,
                         [clock_now] { return *clock_now; }};
 
   quoter.update(kTicker, make_ob(kYesBid52, kNoBid52)); // bid=50, ask=54
   *clock_now += kMinRestElapsed;
   quoter.update(kTicker,
                 make_ob(kYesBid70, kNoBid70)); // desired bid=68 crosses ask
+  *clock_now += kFadeRestElapsed;
+  quoter.update(kTicker, make_ob(kYesBid70, kNoBid70)); // confirm ask fade
 
   // POST bid + POST ask + DELETE bid + DELETE ask + POST ask = 5
   EXPECT_EQ(transport.recorded_requests().size(), 5U);
@@ -910,16 +921,20 @@ TEST_F(QuoterTest, BidFadesOnAdverseTheoDropDespiteMinRest) {
   kalshi::RiskManager risk_mgr{kalshi::RiskLimits{}};
   auto clock_now = std::make_shared<std::chrono::steady_clock::time_point>(
       std::chrono::steady_clock::now());
-  kalshi::Quoter quoter{kalshi::QuoterConfig{}, order_mgr, risk_mgr, nullptr,
+  kalshi::QuoterConfig unsmoothed;
+  unsmoothed.fv_ema_alpha = 1.0;
+  kalshi::Quoter quoter{unsmoothed, order_mgr, risk_mgr, nullptr,
                         [clock_now] { return *clock_now; }};
 
   quoter.update(kTicker, make_ob(kYesBid52, kNoBid52));
   *clock_now += kFadeRestElapsed;
   quoter.update(kTicker, make_ob(kYesBid47, kNoBid47));
+  *clock_now += kFadeRestElapsed;
+  quoter.update(kTicker, make_ob(kYesBid47, kNoBid47));
 
   EXPECT_EQ(transport.recorded_requests().size(), 4U)
-      << "the toxic bid must fade out-of-cycle; the safe ask must keep "
-         "resting under min_rest_ms";
+      << "the toxic bid must fade once the jump persists two updates; the "
+         "safe ask must keep resting under min_rest_ms";
   const std::string &replaced_bid = transport.recorded_requests().at(3).body;
   EXPECT_NE(replaced_bid.find("\"side\":\"bid\""), std::string::npos);
 }
@@ -943,16 +958,20 @@ TEST_F(QuoterTest, AskFadesOnAdverseTheoRiseDespiteMinRest) {
   kalshi::RiskManager risk_mgr{kalshi::RiskLimits{}};
   auto clock_now = std::make_shared<std::chrono::steady_clock::time_point>(
       std::chrono::steady_clock::now());
-  kalshi::Quoter quoter{kalshi::QuoterConfig{}, order_mgr, risk_mgr, nullptr,
+  kalshi::QuoterConfig unsmoothed;
+  unsmoothed.fv_ema_alpha = 1.0;
+  kalshi::Quoter quoter{unsmoothed, order_mgr, risk_mgr, nullptr,
                         [clock_now] { return *clock_now; }};
 
   quoter.update(kTicker, make_ob(kYesBid52, kNoBid52));
   *clock_now += kFadeRestElapsed;
   quoter.update(kTicker, make_ob(kYesBid57, kNoBid57));
+  *clock_now += kFadeRestElapsed;
+  quoter.update(kTicker, make_ob(kYesBid57, kNoBid57));
 
   EXPECT_EQ(transport.recorded_requests().size(), 4U)
-      << "the toxic ask must fade out-of-cycle; the safe bid must keep "
-         "resting under min_rest_ms";
+      << "the toxic ask must fade once the jump persists two updates; the "
+         "safe bid must keep resting under min_rest_ms";
   const std::string &replaced_ask = transport.recorded_requests().at(3).body;
   EXPECT_NE(replaced_ask.find("\"side\":\"ask\""), std::string::npos);
 }
@@ -972,10 +991,13 @@ TEST_F(QuoterTest, AdverseTheoJumpStillHeldUnderFadeRestFloor) {
   kalshi::RiskManager risk_mgr{kalshi::RiskLimits{}};
   auto clock_now = std::make_shared<std::chrono::steady_clock::time_point>(
       std::chrono::steady_clock::now());
-  kalshi::Quoter quoter{kalshi::QuoterConfig{}, order_mgr, risk_mgr, nullptr,
+  kalshi::QuoterConfig unsmoothed;
+  unsmoothed.fv_ema_alpha = 1.0;
+  kalshi::Quoter quoter{unsmoothed, order_mgr, risk_mgr, nullptr,
                         [clock_now] { return *clock_now; }};
 
   quoter.update(kTicker, make_ob(kYesBid52, kNoBid52));
+  quoter.update(kTicker, make_ob(kYesBid47, kNoBid47));
   *clock_now += kJustUnderFadeRest;
   quoter.update(kTicker, make_ob(kYesBid47, kNoBid47));
 
@@ -1108,4 +1130,104 @@ TEST_F(QuoterTest, MidRangeQuotesNotShadedByLongshotFloor) {
   EXPECT_NE(bid_body.find(std::string(kBidPriceMid52)), std::string::npos);
   const std::string &ask_body = transport.recorded_requests().at(1).body;
   EXPECT_NE(ask_body.find(std::string(kAskPriceMid52)), std::string::npos);
+}
+
+TEST_F(QuoterTest, EmaSmoothsFlappingMicroPriceBelowFadeTrigger) {
+  auto transport_ptr = std::make_unique<FakeTransport>();
+  FakeTransport &transport = *transport_ptr;
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId1, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId2, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  kalshi::RestClient rest{kalshi::Auth{kApiKey, kPemPrivateKey},
+                          std::move(transport_ptr), kBaseUrl};
+  kalshi::OrderManager order_mgr{rest};
+  kalshi::RiskManager risk_mgr{kalshi::RiskLimits{}};
+  auto clock_now = std::make_shared<std::chrono::steady_clock::time_point>(
+      std::chrono::steady_clock::now());
+  kalshi::Quoter quoter{kalshi::QuoterConfig{}, order_mgr, risk_mgr, nullptr,
+                        [clock_now] { return *clock_now; }};
+
+  quoter.update(kTicker, make_ob(kYesBid52, kNoBid52));
+  for (int flap = 0; flap < 6; ++flap) {
+    *clock_now += kFadeRestElapsed;
+    quoter.update(kTicker, make_ob(kYesBid55, kNoBid55));
+    *clock_now += kFadeRestElapsed;
+    quoter.update(kTicker, make_ob(kYesBid49, kNoBid49));
+  }
+
+  EXPECT_EQ(transport.recorded_requests().size(), 2U)
+      << "a +/-3c flapping micro-price must be smoothed below the fade "
+         "trigger — the D13 oscillator";
+}
+
+TEST_F(QuoterTest, EmaConvergesOnSustainedMoveAndStillFades) {
+  auto transport_ptr = std::make_unique<FakeTransport>();
+  FakeTransport &transport = *transport_ptr;
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId1, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId2, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  transport.enqueue({kHttpOk, "{}"});
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId3, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  transport.enqueue({kHttpOk, "{}"});
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId4, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  kalshi::RestClient rest{kalshi::Auth{kApiKey, kPemPrivateKey},
+                          std::move(transport_ptr), kBaseUrl};
+  kalshi::OrderManager order_mgr{rest};
+  kalshi::RiskManager risk_mgr{kalshi::RiskLimits{}};
+  auto clock_now = std::make_shared<std::chrono::steady_clock::time_point>(
+      std::chrono::steady_clock::now());
+  kalshi::Quoter quoter{kalshi::QuoterConfig{}, order_mgr, risk_mgr, nullptr,
+                        [clock_now] { return *clock_now; }};
+
+  quoter.update(kTicker, make_ob(kYesBid52, kNoBid52));
+  for (int tick = 0; tick < 8; ++tick) {
+    *clock_now += kFadeRestElapsed;
+    quoter.update(kTicker, make_ob(kYesBid47, kNoBid47));
+  }
+
+  EXPECT_GE(transport.recorded_requests().size(), 4U)
+      << "a sustained 5c drop must converge through the EMA and fade the "
+         "toxic bid";
+}
+
+TEST_F(QuoterTest, EmaResetsWithResetQuotes) {
+  auto transport_ptr = std::make_unique<FakeTransport>();
+  FakeTransport &transport = *transport_ptr;
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId1, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId2, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId3, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId4, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  kalshi::RestClient rest{kalshi::Auth{kApiKey, kPemPrivateKey},
+                          std::move(transport_ptr), kBaseUrl};
+  kalshi::OrderManager order_mgr{rest};
+  kalshi::RiskManager risk_mgr{kalshi::RiskLimits{}};
+  kalshi::Quoter quoter{kalshi::QuoterConfig{}, order_mgr, risk_mgr};
+
+  quoter.update(kTicker, make_ob(kYesBid52, kNoBid52));
+  quoter.reset_quotes();
+  quoter.update(kTicker, make_ob(kYesBid70, kNoBid70));
+
+  ASSERT_EQ(transport.recorded_requests().size(), 4U);
+  const std::string &fresh_bid = transport.recorded_requests().at(2).body;
+  EXPECT_NE(fresh_bid.find(R"("price":"0.6800")"), std::string::npos)
+      << "after reset the EMA must not drag the new session's fair value "
+         "toward the old market level";
 }
