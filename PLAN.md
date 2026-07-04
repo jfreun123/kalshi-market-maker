@@ -211,6 +211,25 @@ until the package lands.
     drift halts are recoverable.* Original finding: 3.09 contracts filled
     during a mid-session disconnect were never recorded and the halt was
     permanent.
+15b. [ ] **48. Re-quote path independent of book deltas (P1 — found run 6,
+    2026-07-04).** Quotes are only placed inside `Quoter::update()`, which
+    runs on WS deltas (plus the one startup seed). If the seed placement
+    fails (run 6: exchange-wide 503s) — or a side is dropped for any
+    transient reason — a market with a quiet book is **quoteless for the
+    entire session**: nothing retries. Fix: on the periodic poll cadence
+    (e.g., each status tick), for every tracked market with a live book and
+    missing resting quotes, call `quoter.update()` with the current
+    `LocalOrderbook`. Cheap, idempotent (reprice threshold/rest-time already
+    guard churn), and turns any transient placement failure into a ≤60s gap
+    instead of a dead session.
+15c. [ ] **49. Scanner: liveness filter (P2 — found run 6).** The scanner
+    ranks on `vol_24h`, which is stale by up to a day: on a holiday morning
+    it picked three markets whose books never ticked once in 8+ minutes
+    (golf outrights 14 days from close, `book_age_s=435`). Require recent
+    activity — e.g., last trade / book update within N minutes (via
+    `/markets/trades` or a short WS sample) — or prefer events starting
+    soon. Complements item 36's volume-cap caveat and the D8 scanner
+    follow-up.
 16. [ ] **45. Decision-oriented quote logging (S).** Today's logs say *what*
     (place/cancel); they should say *why*: per placement log fair value, mid,
     visible inside, inventory + skew, spread components (base/imbalance/fee),
@@ -311,6 +330,25 @@ R4 constraints-vs-guards · R7 message docs + rate-limit review ·
   quoting → crossed/degenerate visible-book flicker → **item 43** (sanity
   guard). Quoter hot path benchmarked and ~2× faster (PR #51):
   256–315 ns/update steady-state.
+
+### 2026-07-04 — run 6 (first run of the wave-2 quoter): demo order placement down
+
+- Attempted the first live validation of theo-fade + LMSR skew + longshot
+  floor (items 33/25/29). **No quoting data: every order create returned
+  `HTTP 503 service_unavailable (service: exchange)`** — on all 3 scanned
+  markets, across a restart, and confirmed exchange-wide by the conformance
+  suite's own market pick (`CreateOrderResponseParsesRestsAndCancels` 503s).
+  Reads, WS snapshots/deltas, and `/exchange/status` (`trading_active:
+  true`!) all healthy — demo order entry was down on the July 4 holiday.
+  Re-run the 20-minute validation session when placement recovers.
+- **D11 → item 48:** failed seed + quiet book = quoteless session (no retry
+  path outside WS deltas).
+- **D12 → item 49:** scanner picked dormant markets (vol_24h is yesterday's
+  number; holiday morning books never ticked).
+- Ops notes: Mac clock synced (+0.09s, `sntp`); first informal L0 datapoint —
+  unauthenticated `GET /markets` from the Mac ≈ **140ms**; status-endpoint
+  `trading_active` does NOT imply order entry is up (a placement probe is the
+  only honest preflight).
 
 ### 2026-07-03 evening — runs 4–5 (integration preview: PRs #51-#54 + #52)
 
