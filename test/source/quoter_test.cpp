@@ -242,6 +242,37 @@ TEST_F(QuoterTest, NoOrdersPlacedWhenRiskHalted) {
   EXPECT_TRUE(transport.recorded_requests().empty());
 }
 
+TEST_F(QuoterTest, CrossedVisibleBookKeepsRestingQuotes) {
+  // Run-3 anomaly (finding, item 43): during fast sweeps the book flickers
+  // crossed (best ask below best bid); pricing off it drags the quote to
+  // garbage (yes@28 in a 46-52 market). A crossed visible book means the
+  // data is mid-transition — keep the resting quotes and wait.
+  constexpr int kCrossedYesBid = 52;
+  constexpr int kCrossedNoBid = 60;
+
+  auto transport_ptr = std::make_unique<FakeTransport>();
+  FakeTransport &transport = *transport_ptr;
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId1, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId2, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  kalshi::RestClient rest{kalshi::Auth{kApiKey, kPemPrivateKey},
+                          std::move(transport_ptr), kBaseUrl};
+  kalshi::OrderManager order_mgr{rest};
+  kalshi::RiskManager risk_mgr{kalshi::RiskLimits{}};
+  kalshi::Quoter quoter{kalshi::QuoterConfig{}, order_mgr, risk_mgr};
+
+  quoter.update(kTicker, make_ob(kYesBid52, kNoBid52));
+  ASSERT_EQ(transport.recorded_requests().size(), 2U);
+
+  quoter.update(kTicker, make_ob(kCrossedYesBid, kCrossedNoBid));
+
+  EXPECT_EQ(transport.recorded_requests().size(), 2U)
+      << "crossed book (bid 52 >= ask 40) must not trigger cancel/replace";
+}
+
 TEST_F(QuoterTest, BidRoundsDownAtFractionalFairValue) {
   // yes 51@4 / no 45@6 -> best ask 55 (size 6): micro = (51*6 + 55*4)/10 =
   // 52.6. Raw bid = 50.6: rounding to nearest would quote 51, giving away
