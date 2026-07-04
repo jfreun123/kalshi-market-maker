@@ -58,8 +58,6 @@ AppConfig load_config(const std::filesystem::path &path) {
     const auto &quoter_json = json_data.at("quoter");
     config.quoter.target_spread_cents = quoter_json.value(
         "target_spread_cents", QuoterConfig::kDefaultTargetSpreadCents);
-    config.quoter.skew_per_contract_cents = quoter_json.value(
-        "skew_per_contract_cents", QuoterConfig::kDefaultSkewPerContractCents);
     config.quoter.reprice_threshold_cents = quoter_json.value(
         "reprice_threshold_cents", QuoterConfig::kDefaultRepriceThresholdCents);
     config.quoter.quote_size =
