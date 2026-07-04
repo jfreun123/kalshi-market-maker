@@ -463,8 +463,8 @@ Order RestClient::place_order(std::string_view ticker, Side side,
   const auto avg_str = json_data.value("average_fill_price", std::string{});
   if (!avg_str.empty()) {
     const int avg_yes_cents = parse_dollars_to_cents(avg_str);
-    avg_fill_cents = (side == Side::Yes) ? avg_yes_cents
-                                         : complement_price(avg_yes_cents);
+    avg_fill_cents =
+        (side == Side::Yes) ? avg_yes_cents : complement_price(avg_yes_cents);
   }
 
   return Order{

@@ -57,6 +57,11 @@ public:
                 Quantity qty);
   // Record a fill, refresh per-market risk, and notify the PnL listener.
   void on_fill(const Fill &fill);
+
+  // Optional analytics tap: when set, every recorded fill emits a fill event
+  // enriched with the book mid and post-fill inventory (PLAN item 31). Must
+  // outlive the session; nullptr disables.
+  void set_analytics(AnalyticsLogger *analytics);
   // Record a shutdown-flatten execution so its realized PnL reaches the
   // OrderManager and the persisted carry (the WS feed is already down when the
   // flatten runs, so no fill message will ever arrive for it).
@@ -117,6 +122,7 @@ private:
   RiskManager &risk_mgr_;
   Quoter &quoter_;
   FlowImbalanceGuard *flow_guard_{nullptr};
+  AnalyticsLogger *analytics_{nullptr};
   Clock clock_;
   std::chrono::milliseconds error_cooldown_{kDefaultErrorCooldown};
   std::unordered_map<std::string, std::chrono::steady_clock::time_point>
