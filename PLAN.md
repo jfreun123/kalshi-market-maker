@@ -51,10 +51,24 @@ mechanics in leverage order, then delete the defenses:
   baseline — same script, same stages.
 - [ ] **L1 = item 37. Deploy near the matching engine (S, ops).** ~300ms REST
   round trips from the Mac become ~3–5ms from a us-east VM — ~100×, zero code,
-  dollars/month. Steps: (a) run the L0-instrumented session from the VM and
-  compare stage-by-stage vs. the Mac baseline; (b) compare cross/reject rates
-  and markout; (c) fold the host into Phase 32 supervision (launchd/systemd,
-  logs, alerts).
+  dollars/month. Steps: (a) region probe first — measure RTT to
+  `demo-api.kalshi.co` (and prod) from us-east-1 AND us-east-2 and let the
+  numbers pick (Kalshi is AWS-hosted US East; third parties claim us-east-2 /
+  Ohio, unverified); (b) run the L0-instrumented session from the winning
+  region and compare stage-by-stage vs. the Mac baseline; (c) compare
+  cross/reject rates and markout; (d) fold the host into Phase 32 supervision
+  (launchd/systemd, logs, alerts).
+  **Host decision (2026-07-04): small EC2 in Kalshi's own region (t4g.small
+  ~$12/mo is ample for a 2-thread, ~300ns-decision bot), NOT a third-party
+  "trading VPS".** Evaluated tradoxvps.com: $39–249/mo for Chicago placement
+  with a self-benchmarked "~10ms" claim and gaming-CPU specs that are
+  irrelevant to a network-bound bot — and their own copy concedes that
+  beating ~10ms "requires an instance physically inside AWS us-east-2",
+  which is exactly what we rent directly for a fraction of the price.
+  Placement beats hardware. Same finding re-affirms the item-11 gate: FIX
+  saves per-order milliseconds that only matter once in-region with amend
+  (L2) landed, and needs Kalshi-side access — judge it from L0 deltas then,
+  not from VPS marketing.
 - [ ] **L2 = item 44. Amend + Decrease Order V2 (M).** Replace cancel+replace
   in the reprice branch with a single atomic amend: one round trip (not two),
   cheaper in tokens, no quote-less window, no post-only-cross re-entry risk,
