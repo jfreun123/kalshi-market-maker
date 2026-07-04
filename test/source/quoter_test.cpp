@@ -64,6 +64,11 @@ constexpr std::string_view kBidPriceOddFloored = R"("price":"0.5000")";
 // default spread 4 (half 2) widens to half 4 → bid 48 ("0.4800").
 constexpr double kMakerFeeRate = 0.07;
 
+constexpr auto kJustUnderMinRest =
+    std::chrono::milliseconds{kalshi::QuoterConfig::kDefaultMinRestMs - 1};
+constexpr auto kMinRestElapsed =
+    std::chrono::milliseconds{kalshi::QuoterConfig::kDefaultMinRestMs};
+
 constexpr kalshi::Quantity kObLevelQty = kalshi::Quantity::from_contracts(100);
 constexpr int kFillPrice = 52;
 constexpr long long kTs1Ns = 1'000'000LL;
@@ -395,13 +400,77 @@ TEST_F(QuoterTest, QuoteReplacedWhenExceedingRepriceThreshold) {
                           std::move(transport_ptr), kBaseUrl};
   kalshi::OrderManager order_mgr{rest};
   kalshi::RiskManager risk_mgr{kalshi::RiskLimits{}};
-  kalshi::Quoter quoter{kalshi::QuoterConfig{}, order_mgr, risk_mgr};
+  auto clock_now = std::make_shared<std::chrono::steady_clock::time_point>(
+      std::chrono::steady_clock::now());
+  kalshi::Quoter quoter{kalshi::QuoterConfig{}, order_mgr, risk_mgr, nullptr,
+                        [clock_now] { return *clock_now; }};
 
   quoter.update(kTicker, make_ob(kYesBid52, kNoBid52));
+  *clock_now += kMinRestElapsed;
   quoter.update(kTicker, make_ob(kYesBid55, kNoBid55));
 
   // 2 POSTs + 2 DELETEs + 2 POSTs = 6 total requests.
   EXPECT_EQ(transport.recorded_requests().size(), 6U);
+}
+
+TEST_F(QuoterTest, RepriceSuppressedWhileQuoteYoungerThanMinRest) {
+  auto transport_ptr = std::make_unique<FakeTransport>();
+  FakeTransport &transport = *transport_ptr;
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId1, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId2, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  kalshi::RestClient rest{kalshi::Auth{kApiKey, kPemPrivateKey},
+                          std::move(transport_ptr), kBaseUrl};
+  kalshi::OrderManager order_mgr{rest};
+  kalshi::RiskManager risk_mgr{kalshi::RiskLimits{}};
+  auto clock_now = std::make_shared<std::chrono::steady_clock::time_point>(
+      std::chrono::steady_clock::now());
+  kalshi::Quoter quoter{kalshi::QuoterConfig{}, order_mgr, risk_mgr, nullptr,
+                        [clock_now] { return *clock_now; }};
+
+  quoter.update(kTicker, make_ob(kYesBid52, kNoBid52));
+  *clock_now += kJustUnderMinRest;
+  quoter.update(kTicker, make_ob(kYesBid55, kNoBid55));
+
+  EXPECT_EQ(transport.recorded_requests().size(), 2U)
+      << "a 3c move must not cancel a quote that has rested < min_rest_ms";
+}
+
+TEST_F(QuoterTest, RepriceResumesOnceQuoteHasRestedMinRest) {
+  auto transport_ptr = std::make_unique<FakeTransport>();
+  FakeTransport &transport = *transport_ptr;
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId1, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId2, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  transport.enqueue({kHttpOk, "{}"});
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId3, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  transport.enqueue({kHttpOk, "{}"});
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId4, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  kalshi::RestClient rest{kalshi::Auth{kApiKey, kPemPrivateKey},
+                          std::move(transport_ptr), kBaseUrl};
+  kalshi::OrderManager order_mgr{rest};
+  kalshi::RiskManager risk_mgr{kalshi::RiskLimits{}};
+  auto clock_now = std::make_shared<std::chrono::steady_clock::time_point>(
+      std::chrono::steady_clock::now());
+  kalshi::Quoter quoter{kalshi::QuoterConfig{}, order_mgr, risk_mgr, nullptr,
+                        [clock_now] { return *clock_now; }};
+
+  quoter.update(kTicker, make_ob(kYesBid52, kNoBid52));
+  *clock_now += kMinRestElapsed;
+  quoter.update(kTicker, make_ob(kYesBid55, kNoBid55));
+
+  EXPECT_EQ(transport.recorded_requests().size(), 6U)
+      << "after resting min_rest_ms the quote must reprice as before";
 }
 
 TEST_F(QuoterTest, RepriceIgnoresOwnRestingQuotesEchoedInBook) {
@@ -437,7 +506,10 @@ TEST_F(QuoterTest, RepriceIgnoresOwnRestingQuotesEchoedInBook) {
                           std::move(transport_ptr), kBaseUrl};
   kalshi::OrderManager order_mgr{rest};
   kalshi::RiskManager risk_mgr{kalshi::RiskLimits{}};
-  kalshi::Quoter quoter{kalshi::QuoterConfig{}, order_mgr, risk_mgr};
+  auto clock_now = std::make_shared<std::chrono::steady_clock::time_point>(
+      std::chrono::steady_clock::now());
+  kalshi::Quoter quoter{kalshi::QuoterConfig{}, order_mgr, risk_mgr, nullptr,
+                        [clock_now] { return *clock_now; }};
 
   kalshi::Orderbook thin;
   thin.ticker = kTicker;
@@ -448,6 +520,7 @@ TEST_F(QuoterTest, RepriceIgnoresOwnRestingQuotesEchoedInBook) {
   quoter.update(kTicker, book);
   ASSERT_EQ(transport.recorded_requests().size(), 2U);
 
+  *clock_now += kMinRestElapsed;
   record_position_fill(order_mgr, kOrderId2, kalshi::Side::No,
                        kalshi::QuoterConfig::kDefaultQuoteSize);
   quoter.forget_order(kTicker, kOrderId2);
@@ -588,9 +661,13 @@ TEST_F(QuoterTest, SelfCrossGuardSkipsBidWhenItWouldCrossOwnAsk) {
                           std::move(transport_ptr), kBaseUrl};
   kalshi::OrderManager order_mgr{rest};
   kalshi::RiskManager risk_mgr{kalshi::RiskLimits{}};
-  kalshi::Quoter quoter{kalshi::QuoterConfig{}, order_mgr, risk_mgr};
+  auto clock_now = std::make_shared<std::chrono::steady_clock::time_point>(
+      std::chrono::steady_clock::now());
+  kalshi::Quoter quoter{kalshi::QuoterConfig{}, order_mgr, risk_mgr, nullptr,
+                        [clock_now] { return *clock_now; }};
 
   quoter.update(kTicker, make_ob(kYesBid52, kNoBid52)); // bid=50, ask=54
+  *clock_now += kMinRestElapsed;
   quoter.update(kTicker,
                 make_ob(kYesBid70, kNoBid70)); // desired bid=68 crosses ask
 

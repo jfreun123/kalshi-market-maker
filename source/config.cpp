@@ -74,6 +74,8 @@ AppConfig load_config(const std::filesystem::path &path) {
         quoter_json.value("view_debias_beta", ViewBasedModel::kDefaultBeta);
     config.quoter.maker_fee_rate =
         quoter_json.value("maker_fee_rate", QuoterConfig{}.maker_fee_rate);
+    config.quoter.min_rest_ms =
+        quoter_json.value("min_rest_ms", QuoterConfig::kDefaultMinRestMs);
   }
 
   // The imbalance guard should engage once roughly one full quote of one-sided

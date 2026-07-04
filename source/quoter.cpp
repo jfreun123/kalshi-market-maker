@@ -23,15 +23,24 @@ constexpr int kHalfSpreadMin = 1;
 constexpr double kContractMaxCents = 100.0;
 
 Quoter::Quoter(QuoterConfig config, IOrderManager &order_mgr,
-               RiskManager &risk_mgr, const FlowImbalanceGuard *flow_guard)
+               RiskManager &risk_mgr, const FlowImbalanceGuard *flow_guard,
+               Clock clock)
     : Quoter(config, FairValueEngine{std::make_unique<HeuristicModel>()},
-             order_mgr, risk_mgr, flow_guard) {}
+             order_mgr, risk_mgr, flow_guard, std::move(clock)) {}
 
 Quoter::Quoter(QuoterConfig config, FairValueEngine fv_engine,
                IOrderManager &order_mgr, RiskManager &risk_mgr,
-               const FlowImbalanceGuard *flow_guard)
+               const FlowImbalanceGuard *flow_guard, Clock clock)
     : config_{config}, fv_engine_{std::move(fv_engine)}, order_mgr_{order_mgr},
-      risk_mgr_{risk_mgr}, flow_guard_{flow_guard} {}
+      risk_mgr_{risk_mgr}, flow_guard_{flow_guard},
+      clock_{clock ? std::move(clock)
+                   : Clock{[] { return std::chrono::steady_clock::now(); }}} {}
+
+bool Quoter::resting_too_young(
+    std::chrono::steady_clock::time_point placed_at,
+    std::chrono::steady_clock::time_point now) const {
+  return now - placed_at < std::chrono::milliseconds{config_.min_rest_ms};
+}
 
 std::pair<int, int> Quoter::compute_quotes(double fv_cents, int half_spread,
                                            double inventory_skew_cents) {
@@ -66,7 +75,8 @@ std::optional<int> passive_ask(int desired_ask, int market_bid_cents) {
 } // namespace
 
 void Quoter::refresh_bid(const std::string &ticker, OwnQuote &own,
-                         int desired_bid) {
+                         int desired_bid,
+                         std::chrono::steady_clock::time_point now) {
   if (own.bid_order_id.empty()) {
     // Self-cross guard: don't place bid if it would match our own resting ask.
     if (!own.ask_order_id.empty() && desired_bid >= own.quoted_ask_cents) {
@@ -80,8 +90,16 @@ void Quoter::refresh_bid(const std::string &ticker, OwnQuote &own,
         order_mgr_.place(ticker, Side::Yes, desired_bid, config_.quote_size);
     own.bid_order_id = order.id;
     own.quoted_bid_cents = desired_bid;
+    own.bid_placed_at = now;
   } else if (std::abs(own.quoted_bid_cents - desired_bid) >
              config_.reprice_threshold_cents) {
+    if (resting_too_young(own.bid_placed_at, now)) {
+      get_logger()->debug(
+          "reprice suppressed ticker={} side=bid quoted={} desired={} — "
+          "resting under min_rest_ms",
+          ticker, own.quoted_bid_cents, desired_bid);
+      return;
+    }
     if (!release_order(own.bid_order_id)) {
       return;
     }
@@ -102,7 +120,8 @@ void Quoter::refresh_bid(const std::string &ticker, OwnQuote &own,
 }
 
 void Quoter::refresh_ask(const std::string &ticker, OwnQuote &own,
-                         int desired_ask) {
+                         int desired_ask,
+                         std::chrono::steady_clock::time_point now) {
   const int no_price = complement_price(desired_ask);
   if (own.ask_order_id.empty()) {
     // Self-cross guard: don't place ask if it would match our own resting bid.
@@ -117,8 +136,16 @@ void Quoter::refresh_ask(const std::string &ticker, OwnQuote &own,
         order_mgr_.place(ticker, Side::No, no_price, config_.quote_size);
     own.ask_order_id = order.id;
     own.quoted_ask_cents = desired_ask;
+    own.ask_placed_at = now;
   } else if (std::abs(own.quoted_ask_cents - desired_ask) >
              config_.reprice_threshold_cents) {
+    if (resting_too_young(own.ask_placed_at, now)) {
+      get_logger()->debug(
+          "reprice suppressed ticker={} side=ask quoted={} desired={} — "
+          "resting under min_rest_ms",
+          ticker, own.quoted_ask_cents, desired_ask);
+      return;
+    }
     if (!release_order(own.ask_order_id)) {
       return;
     }
@@ -212,11 +239,12 @@ void Quoter::update(std::string_view ticker, const LocalOrderbook &book) {
          desired_ask.value_or(-1), inventory, imbalanced});
   }
 
+  const std::chrono::steady_clock::time_point now = clock_();
   if (desired_bid.has_value()) {
-    refresh_bid(ticker_str, own, *desired_bid);
+    refresh_bid(ticker_str, own, *desired_bid, now);
   }
   if (desired_ask.has_value()) {
-    refresh_ask(ticker_str, own, *desired_ask);
+    refresh_ask(ticker_str, own, *desired_ask, now);
   }
 }
 
