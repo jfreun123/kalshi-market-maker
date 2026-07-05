@@ -150,6 +150,43 @@
     ~±10c, not the band edge; the position cap remains the hard stop.
     Regression: SingleFillNeverQuotesAGuaranteedLossExit.*
 
+22. [ ] **58 — scanner startup efficiency (external review, 2026-07-04).**
+    Startup scans ~50k markets for ~28s before quoting. Query
+    `status=open` server-side, cap pagination, and/or cache market metadata
+    between runs with incremental refresh. Not latency-critical yet;
+    becomes waste on the VM and on every rotation re-scan.
+23. [ ] **59 — short-horizon markout (external review).** Add 500ms / 1s /
+    5s horizons to `analyze_fills.py` alongside 30s/5min — the fast
+    horizons separate "quoting too aggressive" (instant reversion) from
+    genuine adverse selection (slow drift). Also aggregate edge by
+    inventory level and add avg-entry/mark/edge to the per-fill status log
+    (folds into item 45).
+
+24. [ ] **60 — regression calibration (Jacob, 2026-07-04).** Two tiers:
+    (a) **Drift estimator — build first, needs no fill history**:
+    significance-gated rolling regression (slope + t-stat) of the smoothed
+    mid over the last N minutes, fit on the quote-event stream we already
+    log every tick. Fires on structural trends (mention-market staircase),
+    silent on random-walk chop. Uses, both defensive: scale the flow lean
+    (`lean = clamp(k·slope·horizon, ±max)`, replacing the fixed 1c —
+    Avellaneda-Stoikov with a drift term) and **penalize |slope| in the
+    scanner** — a significantly trending book is where makers bleed
+    (run 14's residual −$0.20); prefer two-sided chop, where spread pays.
+    (b) **Fill-history models — gated on ~500 accumulated fills**: toxicity
+    regression (post-fill markout on flow ratio, book imbalance, inventory,
+    spread → per-fill required-edge floor, replacing literature constants);
+    learned micro-price (future mid on mid/micro/imbalance blend); logistic
+    fill-probability (unblocks 42b queue-value and 28 Kelly sizing). Every
+    soak session's analytics JSONL is the training set.
+
+**Selection principle (Jacob, 2026-07-04): profitable on every market we
+CHOOSE, then scale.** Not every market can be made profitably — trending
+books, dead books, and 1c-spread deep books all bleed makers. Scaling (Gate
+2) multiplies per-market results, so the bar is: only quote markets where
+measured expected edge is positive (liveness ✓, spread band ✓, drift penalty
+= item 60a, toxicity floor = 60b), and exit any market whose live attribution
+turns negative (rotation already provides the mechanism).
+
 **Situational** (apply when relevant): 26 √-time size taper · 27 closing-day
 longshot guard · 28 quarter-Kelly sizing (gate on 31) · 30 per-category debias
 β · 34 sum-to-one monitor · 36 scanner volume-cap.
@@ -187,6 +224,20 @@ refactors (R1–R4, R7) never block the gates.
 - Demo quirks: order entry can 503 exchange-wide while `/exchange/status`
   says active; fills can be fractional; laptop sleep mid-session is safe but
   wastes the session — soak runs belong on the L1 VM.
+
+## External review reconciliation (2026-07-04, run-13 log)
+
+An independent log review rated run 13 **8/10** ("behaving like a passive
+liquidity provider; next phase is inventory management and measuring edge").
+Reconciliation: its top findings — inventory grows unbounded, no reduction
+logic, no realized spread capture — were fixed the same night (#85 wind-down,
+#86 skew-per-fill cap, #87 flow lean + 2×-quote-size inventory brake), and
+its "missing metrics" largely exist in the analytics JSONL + attribution/
+markout scripts (invisible to a log-only review; item 45 will surface them
+in the human log). Adopted as new items: 58 (startup scan efficiency), 59
+(short-horizon markout + edge-by-inventory). Its "NO bid too aggressive"
+hypothesis is contradicted by measured entry edge (+0.5–2c per fill,
+1/35 picked off) — the leak was accumulation, not per-fill pricing.
 
 ## Working agreements
 
