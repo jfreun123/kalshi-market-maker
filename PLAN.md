@@ -105,6 +105,16 @@
     placement. Sequence after L3 (async dispatch) so batching composes with
     the non-blocking order path.
 
+18. [ ] **55 — demo conformance suite in CI (Jacob, 2026-07-04).** Run the
+    live `demo_conformance_test` in CI (nightly schedule + manual dispatch,
+    not per-PR): needs demo creds as GitHub Actions secrets (`KALSHI_DEMO_
+    API_KEY` + PEM written to a runner temp file, `KALSHI_DEMO_CONFIG`
+    generated in the job). Non-required/allowed-to-fail job — it places real
+    demo orders and 5 of 12 tests legitimately self-skip when no suitable
+    market exists at run time; a red nightly means schema drift or demo
+    outage, both worth an alert. Local status 2026-07-04: 7 pass / 5
+    conditional-skip / 0 fail, ~110s.
+
 **Situational** (apply when relevant): 26 √-time size taper · 27 closing-day
 longshot guard · 28 quarter-Kelly sizing (gate on 31) · 30 per-category debias
 β · 34 sum-to-one monitor · 36 scanner volume-cap.
