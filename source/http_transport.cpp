@@ -65,6 +65,7 @@ void configure(httplib::Client &client) {
 
 template <typename PerformFn>
 HttpResponse timed(std::string_view method, const std::string &path,
+                   const HttpTransport::LatencyObserver &observer,
                    PerformFn &&perform) {
   const auto start = std::chrono::steady_clock::now();
   httplib::Result result = std::forward<PerformFn>(perform)();
@@ -74,6 +75,9 @@ HttpResponse timed(std::string_view method, const std::string &path,
   const int status = result ? result->status : -1;
   get_logger()->debug("http {} {} status={} rtt={}ms", method, path, status,
                       elapsed_ms);
+  if (observer) {
+    observer(method, path, status, elapsed_ms);
+  }
   return make_response(result);
 }
 
@@ -82,6 +86,7 @@ HttpResponse timed(std::string_view method, const std::string &path,
 struct HttpTransport::Impl {
   std::mutex mutex;
   std::map<std::string, httplib::Client> clients;
+  LatencyObserver latency_observer;
 
   httplib::Client &client_for(const std::string &base) {
     auto iter = clients.find(base);
@@ -94,6 +99,10 @@ struct HttpTransport::Impl {
 };
 
 HttpTransport::HttpTransport() : impl_{std::make_unique<Impl>()} {}
+
+void HttpTransport::set_latency_observer(LatencyObserver observer) {
+  impl_->latency_observer = std::move(observer);
+}
 HttpTransport::~HttpTransport() = default;
 
 HttpResponse
@@ -103,7 +112,8 @@ HttpTransport::get(std::string_view url,
   auto httplib_headers = to_httplib_headers(headers);
   const std::lock_guard<std::mutex> lock{impl_->mutex};
   httplib::Client &client = impl_->client_for(base);
-  return timed("GET", path, [&] { return client.Get(path, httplib_headers); });
+  return timed("GET", path, impl_->latency_observer,
+               [&] { return client.Get(path, httplib_headers); });
 }
 
 HttpResponse
@@ -114,7 +124,7 @@ HttpTransport::post(std::string_view url,
   auto httplib_headers = to_httplib_headers(headers);
   const std::lock_guard<std::mutex> lock{impl_->mutex};
   httplib::Client &client = impl_->client_for(base);
-  return timed("POST", path, [&] {
+  return timed("POST", path, impl_->latency_observer, [&] {
     return client.Post(path, httplib_headers, std::string(body),
                        "application/json");
   });
@@ -127,7 +137,7 @@ HttpTransport::delete_(std::string_view url,
   auto httplib_headers = to_httplib_headers(headers);
   const std::lock_guard<std::mutex> lock{impl_->mutex};
   httplib::Client &client = impl_->client_for(base);
-  return timed("DELETE", path,
+  return timed("DELETE", path, impl_->latency_observer,
                [&] { return client.Delete(path, httplib_headers); });
 }
 

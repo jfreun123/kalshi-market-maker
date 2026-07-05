@@ -61,4 +61,17 @@ void AnalyticsLogger::fill(const Fill &fill_event, double mid_cents,
   sink_(event.dump());
 }
 
+void AnalyticsLogger::http_latency(std::string_view method,
+                                   std::string_view path, int status_code,
+                                   long long rtt_ms) {
+  if (!sink_) {
+    return;
+  }
+  const nlohmann::json event = {
+      {"type", "http"}, {"ts_ms", epoch_ms(clock_())}, {"method", method},
+      {"path", path},   {"status", status_code},       {"rtt_ms", rtt_ms},
+  };
+  sink_(event.dump());
+}
+
 } // namespace kalshi
