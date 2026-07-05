@@ -3,6 +3,7 @@
 #include "http_transport.hpp"
 #include "orderbook.hpp"
 #include "rest_client.hpp"
+#include "ticker_scanner.hpp"
 #include "types.hpp"
 #include "websocket_client.hpp"
 
@@ -95,10 +96,24 @@ protected:
         /*max_reconnects=*/0, std::chrono::milliseconds{0}};
   }
 
-  [[nodiscard]] std::string first_target_ticker() const {
-    return creds_.config.target_tickers.empty()
-               ? std::string{}
-               : creds_.config.target_tickers.front();
+  // A market must always exist on the demo exchange (Jacob, 2026-07-04):
+  // prefer a scanner pick (live, quotable book), fall back to any open
+  // market, and FAIL — never skip — if neither yields one.
+  [[nodiscard]] std::string first_target_ticker() {
+    if (!creds_.config.target_tickers.empty()) {
+      return creds_.config.target_tickers.front();
+    }
+    auto rest = make_rest();
+    kalshi::TickerScanner scanner{rest, creds_.config.scanner};
+    const auto picks = scanner.scan(1);
+    if (!picks.empty()) {
+      return picks.front().ticker;
+    }
+    const auto markets = rest.get_markets();
+    if (!markets.empty()) {
+      return markets.front().ticker;
+    }
+    return {};
   }
 
   DemoCreds creds_;
@@ -125,9 +140,8 @@ TEST_F(DemoConformanceTest, GetMarketsParses) {
 
 TEST_F(DemoConformanceTest, GetOrderbookParsesIntoSaneBbo) {
   const std::string ticker = first_target_ticker();
-  if (ticker.empty()) {
-    GTEST_SKIP() << "demo config has no target_tickers to query";
-  }
+  ASSERT_FALSE(ticker.empty())
+      << "no market found on the demo exchange — there must always be one";
   auto rest = make_rest();
   const auto book = rest.get_orderbook(ticker);
 
@@ -204,9 +218,8 @@ TEST_F(DemoConformanceTest, GetIncentiveProgramsParses) {
 
 TEST_F(DemoConformanceTest, CreateOrderResponseParsesRestsAndCancels) {
   const std::string ticker = first_target_ticker();
-  if (ticker.empty()) {
-    GTEST_SKIP() << "demo config has no target_tickers to trade";
-  }
+  ASSERT_FALSE(ticker.empty())
+      << "no market found on the demo exchange — there must always be one";
   auto rest = make_rest();
 
   constexpr int kDeepPassiveBidCents = 1;
@@ -242,9 +255,8 @@ TEST_F(DemoConformanceTest, CreateOrderResponseParsesRestsAndCancels) {
 
 TEST_F(DemoConformanceTest, WebSocketOrderbookSnapshotParses) {
   const std::string ticker = first_target_ticker();
-  if (ticker.empty()) {
-    GTEST_SKIP() << "demo config has no target_tickers to subscribe";
-  }
+  ASSERT_FALSE(ticker.empty())
+      << "no market found on the demo exchange — there must always be one";
 
   auto websocket = make_ws();
 
@@ -273,9 +285,8 @@ TEST_F(DemoConformanceTest, WebSocketOrderbookSnapshotParses) {
 
 TEST_F(DemoConformanceTest, WebSocketDeltaAppliesAndPricesStayValid) {
   const std::string ticker = first_target_ticker();
-  if (ticker.empty()) {
-    GTEST_SKIP() << "demo config has no target_tickers to subscribe";
-  }
+  ASSERT_FALSE(ticker.empty())
+      << "no market found on the demo exchange — there must always be one";
 
   auto rest = make_rest();
   auto websocket = make_ws();
@@ -352,9 +363,8 @@ TEST_F(DemoConformanceTest, WebSocketDeltaAppliesAndPricesStayValid) {
 
 TEST_F(DemoConformanceTest, PlaceNoSideOrderRestsAndCancels) {
   const std::string ticker = first_target_ticker();
-  if (ticker.empty()) {
-    GTEST_SKIP() << "demo config has no target_tickers to trade";
-  }
+  ASSERT_FALSE(ticker.empty())
+      << "no market found on the demo exchange — there must always be one";
   auto rest = make_rest();
 
   constexpr int kDeepPassiveNoBidCents = 1;
@@ -393,13 +403,13 @@ TEST_F(DemoConformanceTest, GetMarketsFilteredByEventParses) {
   const std::string &sample = all_markets.front().ticker;
   const auto last_dash = sample.rfind('-');
   if (last_dash == std::string::npos || last_dash == 0) {
-    GTEST_SKIP() << "cannot derive an event ticker from market " << sample;
+    FAIL() << "cannot derive an event ticker from market " << sample;
   }
   const std::string event_ticker = sample.substr(0, last_dash);
 
   const auto filtered = rest.get_markets(event_ticker);
   if (filtered.empty()) {
-    GTEST_SKIP() << "event filter " << event_ticker << " returned no markets";
+    FAIL() << "event filter " << event_ticker << " returned no markets";
   }
   for (const auto &market : filtered) {
     EXPECT_EQ(market.ticker.rfind(event_ticker, 0), 0U)
