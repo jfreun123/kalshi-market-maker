@@ -70,11 +70,24 @@
 13. [ ] **42b — queue-value reprice rule**: only reprice when
     `|fv − quoted| · fill_prob` beats the queue value abandoned (needs 31
     fill-prob data).
-14. [ ] **49 — scanner liveness filter**: vol_24h is stale; require recent
-    trades/book activity so holiday-morning dormant markets don't get picked.
-15. [ ] **45 — decision-oriented quote logging** (the "why" per placement:
+14. [ ] **53 — cancel ALL orders at startup + confirmed shutdown flatten
+    (P0, Jacob's call 2026-07-04).** Run 8's Mac-sleep shutdown died
+    mid-flatten with the network down; two orders survived, run 9's startup
+    left them ("untracked ticker → leave in place"), and the stale ask was
+    picked off for −$0.70 during the Wiesberger surge. Fix: (a) startup
+    cancels **every resting order on the account**, tracked or not — single
+    operator, no other sessions to respect; (b) shutdown flatten verifies
+    each cancel and retries with backoff instead of fire-and-forget.
+15. [ ] **49 — scanner liveness filter**: vol_24h is stale; require recent
+    trades/book activity so holiday-morning dormant markets don't get picked
+    — and the flip side: a 1c-spread 22k-deep book (BMW golf) is correctly
+    excluded (no premium left; our niche is under-served mid-range books).
+16. [ ] **52 — in-session market rotation**: every N minutes re-scan; drop
+    markets that went dead (flat + no orders only), adopt current top picks.
+    Sessions today sat on finished games while live flow was elsewhere.
+17. [ ] **45 — decision-oriented quote logging** (the "why" per placement:
     spread components, reprice reason; latency counters fold into L0).
-16. [ ] **23 — ceil-per-order maker-fee model** (mostly inert while demo maker
+18. [ ] **23 — ceil-per-order maker-fee model** (mostly inert while demo maker
     fills are free); **3 — passive clamp vs fresher BBO** (D1 residual;
     largely solved by L1+L2).
 
@@ -109,7 +122,10 @@ refactors (R1–R4, R7) never block the gates.
   −0.46c@5min** (n=11) vs −2.4c run-3 baseline; PnL −$0.23; found D13 fade
   oscillator + D14 rest-clock bug → both fixed (PR #69), not yet validated
   live (item 1).
-- **Lifetime demo ledger: −$3.36.**
+- **Run 9** (~20 min, calm books): 4 places / 4 confirmed cancels / 1 fill;
+  zero fades — quiet-book discipline holds. Day's markout unchanged:
+  +1.35c@30s / −0.46c@5min (n=11). In-play D13 validation still pending.
+- **Lifetime demo ledger: ≈ −$4.06** (run 8 −$0, run 9 zombie −$0.70).
 - Demo quirks: order entry can 503 exchange-wide while `/exchange/status`
   says `trading_active` (July 4 outage); fills can be fractional contracts.
 
