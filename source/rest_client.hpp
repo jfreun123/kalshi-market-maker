@@ -57,12 +57,13 @@ public:
   // Used to bias scanner ranking toward markets that pay for resting size.
   std::vector<IncentiveProgram> get_incentive_programs();
 
-  // Most recent public trade time for a market (GET /markets/trades?limit=1).
-  // Empty when the market has never traded or the response is unparseable —
-  // callers treat unknown as fresh (fail-open). Used by the scanner's
-  // liveness filter (item 49): vol_24h says yesterday, this says now.
-  std::optional<std::chrono::system_clock::time_point>
-  get_last_trade_time(std::string_view ticker);
+  // Most recent public trade times for a market, newest first (GET
+  // /markets/trades?limit=N). An empty vector means the market has definitively
+  // never traded; nullopt means the probe failed (callers fail open). Feeds
+  // the scanner's liveness + flow-rate admission (items 49/61): vol_24h says
+  // yesterday, this says now.
+  std::optional<std::vector<std::chrono::system_clock::time_point>>
+  get_recent_trade_times(std::string_view ticker, int limit);
 
   // Fetches fills from the exchange (paginated), oldest cutoff controlled by
   // min_ts_seconds (0 = no cutoff). Used to backfill fills that arrived while

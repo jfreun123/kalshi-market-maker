@@ -547,7 +547,10 @@ TEST_F(TickerScannerTest, StaleMarketDroppedByLivenessFilter) {
        R"({"cursor":"","trades":[{"created_time":"2026-06-20T23:45:00Z",)"
        R"("ticker":"KXFED-A","trade_id":"t-fresh"}]})"});
 
-  kalshi::TickerScanner scanner{client};
+  kalshi::ScannerConfig staleness_only;
+  staleness_only.min_trades_per_hour = 0;
+  staleness_only.min_spread_cents = 0;
+  kalshi::TickerScanner scanner{client, staleness_only};
   auto results = scanner.scan(kScanTopN, kTestNow);
 
   ASSERT_EQ(results.size(), 1U)
@@ -561,10 +564,114 @@ TEST_F(TickerScannerTest, LivenessFilterDisabledKeepsStaleMarkets) {
       {kHttpOk, make_markets_response({kMarketGoodA, kMarketGoodB})});
   transport->enqueue({kHttpOk, R"({"incentive_programs":[],"cursor":""})"});
 
-  kalshi::ScannerConfig no_liveness;
-  no_liveness.max_stale_trade_minutes = 0;
-  kalshi::TickerScanner scanner{client, no_liveness};
+  kalshi::ScannerConfig no_admission;
+  no_admission.max_stale_trade_minutes = 0;
+  no_admission.min_trades_per_hour = 0;
+  no_admission.min_spread_cents = 0;
+  kalshi::TickerScanner scanner{client, no_admission};
   auto results = scanner.scan(kScanTopN, kTestNow);
 
   EXPECT_EQ(results.size(), 2U);
+}
+
+TEST_F(TickerScannerTest, SparseFlowMarketDropped) {
+  auto [client, transport] = make_client_with_transport();
+  transport->enqueue(
+      {kHttpOk, make_markets_response({kMarketGoodA, kMarketGoodB})});
+  transport->enqueue({kHttpOk, R"({"incentive_programs":[],"cursor":""})"});
+  transport->enqueue(
+      {kHttpOk,
+       R"({"cursor":"","trades":[{"created_time":"2026-06-20T23:50:00Z",)"
+       R"("ticker":"KXCPI-B","trade_id":"b1"},)"
+       R"({"created_time":"2026-06-20T23:30:00Z",)"
+       R"("ticker":"KXCPI-B","trade_id":"b2"}]})"});
+  transport->enqueue(
+      {kHttpOk,
+       R"({"cursor":"","trades":[{"created_time":"2026-06-20T23:50:00Z",)"
+       R"("ticker":"KXFED-A","trade_id":"a1"},)"
+       R"({"created_time":"2026-06-20T21:00:00Z",)"
+       R"("ticker":"KXFED-A","trade_id":"a2"}]})"});
+
+  kalshi::ScannerConfig flow_only;
+  flow_only.max_stale_trade_minutes = 0;
+  flow_only.min_spread_cents = 0;
+  flow_only.min_trades_per_hour = 2;
+  kalshi::TickerScanner scanner{client, flow_only};
+  auto results = scanner.scan(kScanTopN, kTestNow);
+
+  ASSERT_EQ(results.size(), 1U)
+      << "a market with fewer than min_trades_per_hour recent trades must be "
+         "dropped";
+  EXPECT_EQ(results.front().ticker, "KXCPI-B");
+}
+
+TEST_F(TickerScannerTest, NeverTradedMarketDroppedWhenFlowFilterActive) {
+  auto [client, transport] = make_client_with_transport();
+  transport->enqueue(
+      {kHttpOk, make_markets_response({kMarketGoodA, kMarketGoodB})});
+  transport->enqueue({kHttpOk, R"({"incentive_programs":[],"cursor":""})"});
+  transport->enqueue({kHttpOk, R"({"cursor":"","trades":[]})"});
+  transport->enqueue(
+      {kHttpOk,
+       R"({"cursor":"","trades":[{"created_time":"2026-06-20T23:50:00Z",)"
+       R"("ticker":"KXFED-A","trade_id":"a1"}]})"});
+
+  kalshi::ScannerConfig flow_only;
+  flow_only.max_stale_trade_minutes = 0;
+  flow_only.min_spread_cents = 0;
+  flow_only.min_trades_per_hour = 1;
+  kalshi::TickerScanner scanner{client, flow_only};
+  auto results = scanner.scan(kScanTopN, kTestNow);
+
+  ASSERT_EQ(results.size(), 1U)
+      << "a parsed-but-empty trade tape is a definitive drop, not fail-open";
+  EXPECT_EQ(results.front().ticker, "KXFED-A");
+}
+
+TEST_F(TickerScannerTest, TightLiveBookDropped) {
+  auto [client, transport] = make_client_with_transport();
+  transport->enqueue(
+      {kHttpOk, make_markets_response({kMarketGoodA, kMarketGoodB})});
+  transport->enqueue({kHttpOk, R"({"incentive_programs":[],"cursor":""})"});
+  transport->enqueue(
+      {kHttpOk,
+       R"({"orderbook_fp":{"yes_dollars":[["0.2000","500.00"]],)"
+       R"("no_dollars":[["0.7900","400.00"]]}})"});
+  transport->enqueue(
+      {kHttpOk,
+       R"({"orderbook_fp":{"yes_dollars":[["0.2000","500.00"]],)"
+       R"("no_dollars":[["0.7400","400.00"]]}})"});
+
+  kalshi::ScannerConfig book_only;
+  book_only.max_stale_trade_minutes = 0;
+  book_only.min_trades_per_hour = 0;
+  kalshi::TickerScanner scanner{client, book_only};
+  auto results = scanner.scan(kScanTopN, kTestNow);
+
+  ASSERT_EQ(results.size(), 1U)
+      << "a live book tighter than min_spread_cents must be dropped";
+  EXPECT_EQ(results.front().ticker, "KXFED-A");
+}
+
+TEST_F(TickerScannerTest, OneSidedLiveBookAdmitted) {
+  auto [client, transport] = make_client_with_transport();
+  transport->enqueue(
+      {kHttpOk, make_markets_response({kMarketGoodA, kMarketGoodB})});
+  transport->enqueue({kHttpOk, R"({"incentive_programs":[],"cursor":""})"});
+  transport->enqueue(
+      {kHttpOk, R"({"orderbook_fp":{"yes_dollars":[["0.2000","500.00"]],)"
+                R"("no_dollars":[]}})"});
+  transport->enqueue(
+      {kHttpOk,
+       R"({"orderbook_fp":{"yes_dollars":[["0.2000","500.00"]],)"
+       R"("no_dollars":[["0.7400","400.00"]]}})"});
+
+  kalshi::ScannerConfig book_only;
+  book_only.max_stale_trade_minutes = 0;
+  book_only.min_trades_per_hour = 0;
+  kalshi::TickerScanner scanner{client, book_only};
+  auto results = scanner.scan(kScanTopN, kTestNow);
+
+  EXPECT_EQ(results.size(), 2U)
+      << "an empty book side means room to quote, not a tight book";
 }

@@ -181,6 +181,20 @@
     fill-probability (unblocks 42b queue-value and 28 Kelly sizing). Every
     soak session's analytics JSONL is the training set.
 
+27. [x] **61 — sparse/tight-book admission (run 15, 2026-07-05).** Run 15
+    made $0: the scanner picked a market with zero trades during the window
+    (nearest public trade ~70 min after shutdown) and a penny-wide inside
+    (our 4c-edge ask rested 5c behind; a 24c competitor print would take any
+    flow first). volume_24h credited yesterday's event burst. *Done — the
+    scanner's finalist probe now (a) requires ≥ `min_trades_per_hour`
+    (default 6) public trades within the past hour — and a parsed-but-empty
+    trade tape is a definitive drop, no longer fail-open — and (b) fetches
+    the LIVE orderbook and drops candidates whose visible spread is tighter
+    than `min_spread_cents` (scan-time market data can lie). Probe errors
+    still fail open. Covers startup selection and rotation (both call
+    `scan()`).* Ops half, not code: sessions must overlap live slates —
+    quiet-morning runs produce $0 by construction.
+
 **Selection principle (Jacob, 2026-07-04): profitable on every market we
 CHOOSE, then scale.** Not every market can be made profitably — trending
 books, dead books, and 1c-spread deep books all bleed makers. Scaling (Gate

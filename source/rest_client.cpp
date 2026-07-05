@@ -585,23 +585,25 @@ std::vector<Order> RestClient::get_open_orders() {
   return orders;
 }
 
-std::optional<std::chrono::system_clock::time_point>
-RestClient::get_last_trade_time(std::string_view ticker) {
+std::optional<std::vector<std::chrono::system_clock::time_point>>
+RestClient::get_recent_trade_times(std::string_view ticker, int limit) {
   const std::string path = path_prefix_ + "/markets/trades";
-  const std::string url =
-      base_url_ + "/markets/trades?limit=1&ticker=" + std::string{ticker};
+  const std::string url = base_url_ +
+                          "/markets/trades?limit=" + std::to_string(limit) +
+                          "&ticker=" + std::string{ticker};
   try {
     auto headers = auth_.sign("GET", path);
     auto resp = transport_->get(url, headers);
     check_response(resp);
     auto json_data = nlohmann::json::parse(resp.body);
-    const auto &trades = json_data.at("trades");
-    if (trades.empty()) {
-      return std::nullopt;
+    std::vector<std::chrono::system_clock::time_point> trade_times;
+    for (const auto &trade : json_data.at("trades")) {
+      trade_times.push_back(
+          parse_iso8601(trade.at("created_time").get<std::string>()));
     }
-    return parse_iso8601(trades.front().at("created_time").get<std::string>());
+    return trade_times;
   } catch (const std::exception &ex) {
-    get_logger()->debug("last-trade probe failed ticker={}: {}", ticker,
+    get_logger()->debug("recent-trades probe failed ticker={}: {}", ticker,
                         ex.what());
     return std::nullopt;
   }
