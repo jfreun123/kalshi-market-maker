@@ -81,7 +81,8 @@ TEST(ConfigTest, LoadsAllFields) {
         {"fade_rest_ms", kFadeRestMs},
         {"longshot_price_threshold_cents", kLongshotThreshold},
         {"longshot_edge_cents", kLongshotEdge},
-        {"fv_ema_alpha", kFvEmaAlpha}}},
+        {"fv_ema_alpha", kFvEmaAlpha},
+        {"winddown_seconds", 30}}},
       {"flow",
        {{"window_seconds", kFlowWindowSeconds},
         {"imbalance_ratio_threshold", kFlowRatioThreshold},
@@ -121,6 +122,7 @@ TEST(ConfigTest, LoadsAllFields) {
   EXPECT_EQ(config.quoter.longshot_price_threshold_cents, kLongshotThreshold);
   EXPECT_EQ(config.quoter.longshot_edge_cents, kLongshotEdge);
   EXPECT_DOUBLE_EQ(config.quoter.fv_ema_alpha, kFvEmaAlpha);
+  EXPECT_EQ(config.quoter.winddown_seconds, 30);
   EXPECT_EQ(config.flow.window_seconds, kFlowWindowSeconds);
   EXPECT_DOUBLE_EQ(config.flow.imbalance_ratio_threshold, kFlowRatioThreshold);
   EXPECT_EQ(config.flow.min_flow_volume, kFlowMinVolume);

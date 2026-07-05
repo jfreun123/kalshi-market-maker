@@ -113,8 +113,13 @@
     outage, both worth an alert. Local status 2026-07-04: 7 pass / 5
     conditional-skip / 0 fail, ~110s.
 
-19. [ ] **56 — passive wind-down before session end (found by run-12
-    attribution).** The session-end flatten is a TAKER order: it pays the
+19. [x] **56 — passive wind-down before session end (found by run-12
+    attribution).** *Done — on shutdown the quoter goes reduce-only (only the
+    inventory-reducing side quotes; the accumulating side is cancelled; flat
+    markets place nothing) and works the position out as a MAKER for up to
+    `quoter.winddown_seconds` (45; 0 = old behavior) while the feed stays
+    live; only the remainder is taker-flattened. Turns the exit from paying
+    the spread into earning it.* Original finding: The session-end flatten is a TAKER order: it pays the
     spread plus any drift, and on short sessions it systematically gives
     back the maker edge (run 12: entries earned +$0.015, the flatten gave
     back ~−$0.045 → net −$0.03; zero pick-offs, zero holding drift — the

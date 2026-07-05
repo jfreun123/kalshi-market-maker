@@ -60,6 +60,9 @@ struct QuoterConfig {
   // micro flaps +/-3c sub-second on in-play books and every flap passed the
   // theo-jump gate — smooth the belief, not just the action. 1.0 = unsmoothed.
   static constexpr double kDefaultFvEmaAlpha = 0.2;
+  // Passive wind-down window at shutdown (item 56): exit as a maker for up
+  // to this long before force-flattening the remainder. 0 = old behavior.
+  static constexpr int kDefaultWinddownSeconds = 45;
 
   int target_spread_cents = kDefaultTargetSpreadCents;
   int reprice_threshold_cents = kDefaultRepriceThresholdCents;
@@ -72,6 +75,7 @@ struct QuoterConfig {
   int longshot_price_threshold_cents = kDefaultLongshotThresholdCents;
   int longshot_edge_cents = kDefaultLongshotEdgeCents;
   double fv_ema_alpha = kDefaultFvEmaAlpha;
+  int winddown_seconds = kDefaultWinddownSeconds;
   // Price toward the favorite-longshot-debiased view instead of the raw mid.
   // Off by default (HeuristicModel is the safe baseline); β per Bürgi et al.
   bool use_view_based_pricing = false;
@@ -104,6 +108,11 @@ public:
          const FlowImbalanceGuard *flow_guard = nullptr, Clock clock = {});
 
   void update(std::string_view ticker, const LocalOrderbook &book);
+
+  // Wind-down mode (item 56): quote only the side that reduces inventory —
+  // exit as a maker instead of paying the taker flatten at session end. The
+  // accumulating side is cancelled; a flat market places nothing.
+  void set_reduce_only(bool reduce_only);
 
   // Optional analytics tap: when set, every update() emits a quote-decision
   // event (PLAN item 31). Must outlive the Quoter; nullptr disables.
@@ -159,6 +168,7 @@ private:
   double inventory_b_contracts_;
   std::unordered_map<std::string, double> fv_ema_;
   AnalyticsLogger *analytics_{nullptr};
+  bool reduce_only_{false};
   std::unordered_map<std::string, OwnQuote> own_quotes_;
   LocalOrderbook scratch_book_;
 };

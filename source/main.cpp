@@ -508,6 +508,35 @@ int main(int argc, char *argv[]) {
       }
     }
 
+    // Passive wind-down (item 56): exit as a maker before the taker flatten.
+    // The feed stays up; the quoter goes reduce-only and works the inventory
+    // out at maker prices until flat or the window expires.
+    const int winddown_s = app_config.quoter.winddown_seconds;
+    if (paper_ptr == nullptr && winddown_s > 0) {
+      log->info("wind-down: reduce-only for up to {}s", winddown_s);
+      {
+        const std::lock_guard<std::mutex> lock{engine_mtx};
+        quoter.set_reduce_only(true);
+      }
+      const auto deadline =
+          std::chrono::steady_clock::now() + std::chrono::seconds{winddown_s};
+      while (std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(kPollInterval);
+        const std::lock_guard<std::mutex> lock{engine_mtx};
+        bool all_flat = true;
+        for (const auto &ticker : session.tickers()) {
+          if (!order_mgr.net_position(ticker).is_zero()) {
+            all_flat = false;
+            break;
+          }
+        }
+        if (all_flat) {
+          log->info("wind-down: flat — exiting early");
+          break;
+        }
+      }
+    }
+
     if (paper_ptr != nullptr) {
       log->info("paper mode: simulated fills={}", paper_ptr->fills().size());
     }

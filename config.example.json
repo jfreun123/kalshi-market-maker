@@ -18,7 +18,8 @@
     "fade_rest_ms": 500,
     "longshot_price_threshold_cents": 40,
     "longshot_edge_cents": 1,
-    "fv_ema_alpha": 0.2
+    "fv_ema_alpha": 0.2,
+    "winddown_seconds": 45
   },
   "flow": {
     "window_seconds": 300,
