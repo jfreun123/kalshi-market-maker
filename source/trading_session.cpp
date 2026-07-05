@@ -6,7 +6,6 @@
 #include "portfolio.hpp"
 
 #include <algorithm>
-#include <cmath>
 #include <exception>
 #include <utility>
 
