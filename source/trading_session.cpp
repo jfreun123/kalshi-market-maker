@@ -231,17 +231,7 @@ void TradingSession::enforce_quote_safety() {
 void TradingSession::cancel_preexisting_orders(
     const std::vector<Order> &resting_orders) {
   int cancelled = 0;
-  int left_untracked = 0;
   for (const auto &order : resting_orders) {
-    const bool tracked = std::find(tickers_.begin(), tickers_.end(),
-                                   order.market_ticker) != tickers_.end();
-    if (!tracked) {
-      get_logger()->warn(
-          "startup: resting order on untracked ticker={} id={} left in place",
-          order.market_ticker, order.id);
-      ++left_untracked;
-      continue;
-    }
     try {
       get_logger()->warn(
           "startup: cancelling pre-existing order ticker={} id={}",
@@ -253,11 +243,9 @@ void TradingSession::cancel_preexisting_orders(
                           order.id, ex.what());
     }
   }
-  if (cancelled > 0 || left_untracked > 0) {
+  if (cancelled > 0) {
     get_logger()->info(
-        "startup: cancelled {} orphan order(s) on tracked tickers; left {} on "
-        "untracked tickers",
-        cancelled, left_untracked);
+        "startup: cancelled {} pre-existing order(s) account-wide", cancelled);
   }
 }
 
