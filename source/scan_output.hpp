@@ -23,13 +23,5 @@ write_scan_results(const std::filesystem::path &path,
                    const std::vector<MarketScore> &results,
                    std::chrono::system_clock::time_point scanned_at);
 
-// Produces a ready-to-run trade config at output_path: a verbatim copy of the
-// base config (preserving credentials and all sections) with target_tickers
-// replaced by the supplied list. Returns false if the base cannot be read or
-// the output cannot be written.
-[[nodiscard]] bool
-write_trade_config(const std::filesystem::path &base_config_path,
-                   const std::filesystem::path &output_path,
-                   const std::vector<std::string> &tickers);
 
 } // namespace kalshi

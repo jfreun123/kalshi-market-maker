@@ -197,7 +197,7 @@ int main(int argc, char *argv[]) {
   try {
     const auto cli = kalshi::parse_args(
         std::span<char *>(argv, static_cast<std::size_t>(argc)));
-    const kalshi::AppConfig app_config = kalshi::load_config(cli.config_path);
+    kalshi::AppConfig app_config = kalshi::load_config(cli.config_path);
 
     setup_logger(std::filesystem::path{app_config.log_dir}, cli.verbose);
     auto log = kalshi::get_logger();
@@ -239,7 +239,7 @@ int main(int argc, char *argv[]) {
                             app_config.base_url};
 
     if (cli.scan_mode) {
-      return run_scan_mode(rest, app_config.scanner, cli.config_path, log);
+      return kalshi::run_scan_mode(rest, app_config.scanner, log);
     }
 
     if (cli.reconcile_mode) {
@@ -257,9 +257,21 @@ int main(int argc, char *argv[]) {
                                       cli.capture_dir, log);
     }
 
+    // Market selection is the session's own job (the rotation loop re-scans
+    // anyway); config target_tickers survives only as a manual override.
     if (app_config.target_tickers.empty()) {
-      log->critical(
-          "target_tickers is empty — add tickers to config or use --scan");
+      log->info("selecting top {} live market(s) at startup",
+                app_config.scanner.trade_top_n);
+      kalshi::TickerScanner startup_scanner{rest, app_config.scanner};
+      for (const auto &pick :
+           startup_scanner.scan(app_config.scanner.trade_top_n)) {
+        app_config.target_tickers.push_back(pick.ticker);
+        log->info("selected ticker={} score={:.3f}", pick.ticker, pick.score);
+      }
+    }
+    if (app_config.target_tickers.empty()) {
+      log->critical("scanner found no tradable live markets — try later or "
+                    "pin target_tickers in config");
       return 1;
     }
 

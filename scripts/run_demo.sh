@@ -23,8 +23,7 @@ if [[ "$CLEAN" -eq 1 ]]; then
   echo "run_demo: logs archived to logs/archive/$stamp"
 fi
 
-./build/source/kalshi_mm --scan config-demo.json
-./build/source/kalshi_mm config-demo.trade.json &
+./build/source/kalshi_mm config-demo.json &
 BOT_PID=$!
 trap 'kill -INT "$BOT_PID" 2>/dev/null || true' INT TERM
 (sleep $((MINUTES * 60)) && kill -INT "$BOT_PID" 2>/dev/null) &
