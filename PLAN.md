@@ -113,6 +113,21 @@
     outage, both worth an alert. Local status 2026-07-04: 7 pass / 5
     conditional-skip / 0 fail, ~110s.
 
+19. [ ] **56 — passive wind-down before session end (found by run-12
+    attribution).** The session-end flatten is a TAKER order: it pays the
+    spread plus any drift, and on short sessions it systematically gives
+    back the maker edge (run 12: entries earned +$0.015, the flatten gave
+    back ~−$0.045 → net −$0.03; zero pick-offs, zero holding drift — the
+    exit was the entire loss). Fix: in the final N minutes, stop opening and
+    quote-out inventory passively (one-sided maker quotes at/inside the
+    reservation); flatten only what remains at the bell. Longer sessions
+    dilute the same fixed cost.
+20. [~] **31c — PnL attribution: shipped `scripts/pnl_attribution.py`**
+    (entry_edge / drift / exit_cost split + per-fill quote-age and pre-fill
+    belief drift = the picked-off / latency-loss detector). record_flatten
+    now emits analytics fill events so exits are measurable. Remaining:
+    fees term once maker-fee markets are traded; 31a Brier join unchanged.
+
 **Situational** (apply when relevant): 26 √-time size taper · 27 closing-day
 longshot guard · 28 quarter-Kelly sizing (gate on 31) · 30 per-category debias
 β · 34 sum-to-one monitor · 36 scanner volume-cap.
