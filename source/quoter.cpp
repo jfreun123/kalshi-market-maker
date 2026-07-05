@@ -22,6 +22,11 @@ constexpr int kAskMinCents = 2;
 constexpr int kAskMaxCents = 99;
 constexpr int kHalfSpreadMin = 1;
 constexpr double kContractMaxCents = 100.0;
+// Skew-per-fill cap: one quote-sized fill must shift the reservation by less
+// than the half-spread, or every calm-market round trip locks in a loss
+// (buy 50 -> offer 49). Near 50c the price moves ~25c per log-odds unit, so
+// b >= 25 x quote_size holds a single-fill shift to ~1c.
+constexpr double kMinBPerQuoteLot = 25.0;
 
 Quoter::Quoter(QuoterConfig config, IOrderManager &order_mgr,
                RiskManager &risk_mgr, const FlowImbalanceGuard *flow_guard,
@@ -36,9 +41,10 @@ Quoter::Quoter(QuoterConfig config, FairValueEngine fv_engine,
       risk_mgr_{risk_mgr}, flow_guard_{flow_guard},
       clock_{clock ? std::move(clock)
                    : Clock{[] { return std::chrono::steady_clock::now(); }}},
-      inventory_b_contracts_{
+      inventory_b_contracts_{std::max(
           lmsr_b_from_risk(risk_mgr.limits().max_position_per_market,
-                           risk_mgr.limits().max_quote_price_cents)} {}
+                           risk_mgr.limits().max_quote_price_cents),
+          kMinBPerQuoteLot * config.quote_size)} {}
 
 double lmsr_b_from_risk(int max_position_contracts, int max_quote_price_cents) {
   const double upper = static_cast<double>(max_quote_price_cents);
