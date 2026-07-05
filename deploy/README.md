@@ -9,56 +9,21 @@ This directory provisions a rented Linux box that (a) runs the market maker
 | `kalshi-mm.service` | systemd unit for the trading bot (paper by default) |
 | `claude-rc.service` | systemd unit for Claude Code Remote Control |
 
-## Where to host: AWS us-east-2 (Ohio)
+## Where to host
 
-Kalshi's **matching engine runs in AWS us-east-2 (Ohio)**. The public REST/WS
-hosts (`api.elections.kalshi.com`) sit behind CloudFront, so a `ping` measures
-the nearest CDN edge (~1 ms from anywhere), **not** the engine. The real engine
-round-trip is ~10 ms from Chicago; beating that needs an instance physically
-inside us-east-2.
+Decided (PLAN L1): **plain EC2 `t4g.small` (~$12/mo) inside Kalshi's AWS
+region**, chosen by measuring — probe us-east-1 vs us-east-2 RTT first, not by
+third-party claims. The full walkthrough (region probe, launch, build, secret
+transfer, first-session latency comparison) is
+[docs/AWS_SETUP.md](../docs/AWS_SETUP.md); this directory holds the service
+units it installs. The public hosts sit behind CloudFront, so `ping` measures
+the nearest CDN edge, not the matching engine — only an in-region session
+comparison (order-path RTT via `scripts/latency_report.py`) is a real answer.
 
-**Reality check:** this strategy is *not* latency-bound. Per our research
-(Palumbo: underwriting not market-making; Bürgi-Deng-Whelan: makers earn on a
-hold-to-resolution horizon) and the 10 orders/sec Basic rate limit, the edge is
-adverse-selection avoidance and spread/E_win discipline — not milliseconds.
-So: **put it in us-east-2 to remove latency as a variable cheaply, but do not
-overpay for HFT colocation.**
-
-## Sizing
-
-Driven by the **build**, not the bot. The bot is featherweight (a few WS
-connections + a quoting loop). The C++23 build compiles googletest, IXWebSocket,
-spdlog, and benchmark from source via FetchContent, runs 197 tests, plus
-asan/tsan presets and clang-tidy.
-
-- **Minimum to run + build (slowly):** 2 vCPU / 4 GB / 60 GB SSD
-- **Recommended (comfortable builds):** 2–4 vCPU / 8 GB / 80 GB SSD
-- **OS:** Ubuntu 24.04 LTS (matches CI's `ubuntu-latest`)
-- Use **consistent (non-burstable) CPU** for the live trading box — a burstable
-  `t3`-class instance can throttle on depleted CPU credits at the worst moment.
-
-## Pricing (approximate, mid-2026 USD/month)
-
-Prices move; treat as ballpark. AWS = on-demand; reserved/savings plans cut
-~30–40%. EBS storage on EC2 adds ~$0.08/GB-mo (80 GB ≈ $6.40).
-
-| Provider / region | Specs | ~ $/mo | Notes |
-|---|---|---|---|
-| **Hetzner Cloud — Ashburn VA** (us-east-1) | CPX31: 4 vCPU / 8 GB / 160 GB | **~$16** | Best value. ~12–15 ms extra to Ohio — fine here. |
-| Hetzner Cloud — Ashburn VA | CPX41: 8 vCPU / 16 GB / 240 GB | ~$30 | Roomy builds, still cheap. |
-| **Vultr — Chicago** | 4 vCPU / 8 GB / 160 GB | **~$48** | ~10 ms to Ohio, simple flat rate. |
-| DigitalOcean — NYC | 4 vCPU / 8 GB / 160 GB | ~$48 | Comparable to Vultr. |
-| **AWS Lightsail — us-east-2** | 2 vCPU / 8 GB / 160 GB | **~$44** | Region match, flat rate, simplest AWS. |
-| AWS Lightsail — us-east-2 | 4 vCPU / 16 GB / 320 GB | ~$84 | Lightsail couples CPU+RAM; 4 vCPU forces 16 GB. |
-| AWS EC2 — us-east-2 | `m7i.large` 2 vCPU / 8 GB | ~$74 + storage | Flexible, grows into PrivateLink/FIX later. |
-| AWS EC2 — us-east-2 | `c7i.xlarge` 4 vCPU / 8 GB | ~$124 + storage | Strong consistent CPU; ~$80 reserved. |
-
-**My pick by goal:**
-- **Cheapest that's genuinely fine:** Hetzner Ashburn CPX31 (~$16/mo). The extra
-  ~12 ms to Ohio is irrelevant for this strategy.
-- **Region-matched + simplest:** AWS Lightsail us-east-2 8 GB (~$44/mo).
-- **Production-grade, room to grow:** AWS EC2 us-east-2 `c7i.xlarge` (~$124/mo,
-  cheaper reserved) — only worth it once real money and uptime SLAs matter.
+Sizing is driven by the **build**, not the bot (the bot is a few WS
+connections + a quoting loop; its decision path is sub-µs). A 2 vCPU / 2 GB
+arm64 box builds the tree in ~10–15 min and runs the full test suite; use
+Ubuntu 24.04 LTS to match CI.
 
 ## One box or two?
 

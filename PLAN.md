@@ -1,11 +1,12 @@
 # Kalshi Market Maker — Build Plan
 
-> Lean plan, updated 2026-07-04. Full history (all completed items, resolved
+> Lean plan, updated 2026-07-05. Full history (all completed items, resolved
 > findings D1–D14, runs 1–7 detail):
 > [docs/archive/PLAN-2026-07-04-full.md](docs/archive/PLAN-2026-07-04-full.md)
 > and [docs/archive/PLAN-2026-07-03-full.md](docs/archive/PLAN-2026-07-03-full.md).
 > Research: [docs/papers](docs/papers/README.md) · architecture:
-> [docs/architecture.md](docs/architecture.md) · API ground truth:
+> [docs/architecture.md](docs/architecture.md) · guards catalog:
+> [docs/GUARDS.md](docs/GUARDS.md) · API ground truth:
 > [docs/KALSHI_API_REFERENCE.md](docs/KALSHI_API_REFERENCE.md).
 
 ## Gates (Jacob's calls — do not relitigate)
@@ -75,9 +76,10 @@
     window); and at `inventory_cap_lots` × quote_size (2× = 20) the
     accumulating side stops quoting entirely — the run-13 pattern (30-lot
     pile-up into a trend, drift −$0.42 + exit −$1.05) is now capped at 20
-    with the belief already leaning toward the move. Validate on the next
-    busy session's attribution: drift and exit_cost per contract should
-    shrink.* Original scope: signed IR → bounded offset (Bawa p.8).
+    with the belief already leaning toward the move. Validated — run 14
+    A/B on run 13's market: −$0.78 → −$0.20, peak inventory 30 → 10, drift
+    −$0.42 → −$0.10, exit −$1.05 → −$0.35, entry edge stayed positive
+    (+2.5c/lot).* Original scope: signed IR → bounded offset (Bawa p.8).
 12. [ ] **24 — layered quoting (queue priming)**: 2–3 size layers 1–3c behind
     the inside; queue position is earned by resting before the move.
 13. [ ] **42b — queue-value reprice rule**: only reprice when
@@ -103,24 +105,24 @@
     fills are free); **3 — passive clamp vs fresher BBO** (D1 residual;
     largely solved by L1+L2).
 
-17. [ ] **54 — batch CreateOrders (Jacob, 2026-07-04).** Kalshi V2 supports
+19. [ ] **54 — batch CreateOrders (Jacob, 2026-07-04).** Kalshi V2 supports
     batch create/cancel (token cost per item, batch size scales with tier).
     Batch the session's order placements — seeds and layered quotes (item
     24) especially — into one request: fewer round trips, coherent quote
     placement. Sequence after L3 (async dispatch) so batching composes with
     the non-blocking order path.
 
-18. [ ] **55 — demo conformance suite in CI (Jacob, 2026-07-04).** Run the
+20. [ ] **55 — demo conformance suite in CI (Jacob, 2026-07-04).** Run the
     live `demo_conformance_test` in CI (nightly schedule + manual dispatch,
     not per-PR): needs demo creds as GitHub Actions secrets (`KALSHI_DEMO_
     API_KEY` + PEM written to a runner temp file, `KALSHI_DEMO_CONFIG`
-    generated in the job). Non-required/allowed-to-fail job — it places real
-    demo orders and 5 of 12 tests legitimately self-skip when no suitable
-    market exists at run time; a red nightly means schema drift or demo
-    outage, both worth an alert. Local status 2026-07-04: 7 pass / 5
-    conditional-skip / 0 fail, ~110s.
+    generated in the job). Non-required job — it places real demo orders; a
+    red nightly means schema drift or demo outage, both worth an alert.
+    Skips are failures (Jacob): tests self-find a market (scanner pick →
+    any open market → FAIL); only missing creds may skip. Local status
+    2026-07-04: 12/12 pass live, ~5 min.
 
-19. [x] **56 — passive wind-down before session end (found by run-12
+21. [x] **56 — passive wind-down before session end (found by run-12
     attribution).** *Done — on shutdown the quoter goes reduce-only (only the
     inventory-reducing side quotes; the accumulating side is cancelled; flat
     markets place nothing) and works the position out as a MAKER for up to
@@ -134,13 +136,13 @@
     quote-out inventory passively (one-sided maker quotes at/inside the
     reservation); flatten only what remains at the bell. Longer sessions
     dilute the same fixed cost.
-20. [~] **31c — PnL attribution: shipped `scripts/pnl_attribution.py`**
+22. [~] **31c — PnL attribution: shipped `scripts/pnl_attribution.py`**
     (entry_edge / drift / exit_cost split + per-fill quote-age and pre-fill
     belief drift = the picked-off / latency-loss detector). record_flatten
     now emits analytics fill events so exits are measurable. Remaining:
     fees term once maker-fee markets are traded; 31a Brier join unchanged.
 
-21. [x] **57 — skew-per-fill cap (Jacob's catch, 2026-07-04).** *Done — with
+23. [x] **57 — skew-per-fill cap (Jacob's catch, 2026-07-04).** *Done — with
     b anchored only to max_position (~45.5), ONE quote-sized fill shifted the
     reservation ~5.5c past the 2c half-spread: buy 50 → offer 49, a locked-in
     loss on every calm round trip. b is now floored at 25×quote_size (=250),
@@ -150,19 +152,19 @@
     ~±10c, not the band edge; the position cap remains the hard stop.
     Regression: SingleFillNeverQuotesAGuaranteedLossExit.*
 
-22. [ ] **58 — scanner startup efficiency (external review, 2026-07-04).**
+24. [ ] **58 — scanner startup efficiency (external review, 2026-07-04).**
     Startup scans ~50k markets for ~28s before quoting. Query
     `status=open` server-side, cap pagination, and/or cache market metadata
     between runs with incremental refresh. Not latency-critical yet;
     becomes waste on the VM and on every rotation re-scan.
-23. [ ] **59 — short-horizon markout (external review).** Add 500ms / 1s /
+25. [ ] **59 — short-horizon markout (external review).** Add 500ms / 1s /
     5s horizons to `analyze_fills.py` alongside 30s/5min — the fast
     horizons separate "quoting too aggressive" (instant reversion) from
     genuine adverse selection (slow drift). Also aggregate edge by
     inventory level and add avg-entry/mark/edge to the per-fill status log
     (folds into item 45).
 
-24. [ ] **60 — regression calibration (Jacob, 2026-07-04).** Two tiers:
+26. [ ] **60 — regression calibration (Jacob, 2026-07-04).** Two tiers:
     (a) **Drift estimator — build first, needs no fill history**:
     significance-gated rolling regression (slope + t-stat) of the smoothed
     mid over the last N minutes, fit on the quote-event stream we already
@@ -202,25 +204,35 @@ north-star), `Session` concept — detail in the archive and
 [ADR-007](docs/adr/007-process-per-strategy-and-aggregator.md). P3 structural
 refactors (R1–R4, R7) never block the gates.
 
-## State of play (2026-07-04, end of day)
+## State of play (2026-07-05)
 
-- **Quoter**: min-rest + adverse fade (two-tick, EMA-smoothed fv α=0.2) +
-  LMSR inventory skew + longshot floor + maker-favor rounding + crossed-book
-  guard + own-quote subtraction. Validated: markout **+1.35c@30s /
-  −0.46c@5min** (n=11, run 7) vs −2.4c old-quoter baseline; calm books
-  produce zero churn (runs 8–10). In-play validation of the D13/D14 fixes
-  still pending (item 1).
+- **Quoter** (full catalog + provenance: [docs/GUARDS.md](docs/GUARDS.md)):
+  EMA fv + min-rest + adverse fade + LMSR skew (25×quote_size floor) +
+  longshot floor + flow lean + inventory brake + wind-down + maker-favor
+  rounding + crossed-book guard + own-quote subtraction. Validated: run 12
+  in-play (0 fades, atomic amends); run 14 A/B vs run 13 on the same
+  trending market: −$0.78 → −$0.20, peak inventory 30 → 10.
+- **Loss taxonomy settled (runs 13/14)**: per-fill pricing earns (+0.5–2.5c
+  entry edge); latency is a non-issue at demo speeds (1/45 picked off);
+  exit machinery built. The remaining leak is quoting structurally trending
+  markets — attacked by item 60a (drift estimator) + the selection
+  principle.
 - **Flow**: startup scans and selects its own live markets (top
   `trade_top_n`, default 1); liveness-filtered; rotated every 5 min;
-  account-wide order hygiene at both ends of the session.
+  account-wide order hygiene at both ends of the session. Run 15
+  (2026-07-05, first on fully-merged main): clean but zero fills on a quiet
+  Saturday-morning book; scanner again picked a mention-family (trending)
+  market — 60a's scanner penalty is the fix.
 - **Measurement**: analytics JSONL (quotes, fills, http RTT) →
-  `analyze_fills.py` (markout) + `latency_report.py` (L0 baseline above).
+  `analyze_fills.py` (markout) + `pnl_attribution.py` (entry/drift/exit +
+  picked-off) + `latency_report.py` (L0 baseline above).
 - **Codebase**: cleanup pass 1+2 done — dead modules removed
   (`adverse_selection`, `write_trade_config`), `main.cpp` 810→~520 lines
   (mode runners in `app_modes.{hpp,cpp}`, tested), 1,233-line quoter test
-  split into pricing + reprice suites.
-- **Lifetime demo ledger ≈ −$4.06.** PnL now needs fills-in-volume: run
-  sessions during live slates; the machinery debate is settled.
+  split into pricing + reprice suites. Suite 456 tests green.
+- **Demo carry ledger −$4.38** (`pnl_state.json`, 2026-07-05). PnL needs
+  fills-in-volume: run sessions during live slates; the machinery debate is
+  settled.
 - Demo quirks: order entry can 503 exchange-wide while `/exchange/status`
   says active; fills can be fractional; laptop sleep mid-session is safe but
   wastes the session — soak runs belong on the L1 VM.

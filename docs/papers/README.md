@@ -7,7 +7,9 @@ this file (gitignored — binaries/copyrighted; keep locally). Cite these from
 
 Notes re-verified against the PDFs on 2026-07-03 (page-ref'd; several earlier
 claims corrected — see the ⚠ marks). Bot-improvement items extracted from this
-pass live in `PLAN.md` under *Strategy roadmap — papers re-read*.
+pass live in the archived full plan
+(`docs/archive/PLAN-2026-07-04-full.md`); surviving items carry their numbers
+into the lean `PLAN.md`.
 
 | File | Paper | Type |
 |---|---|---|

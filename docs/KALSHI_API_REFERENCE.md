@@ -2,13 +2,27 @@
 
 > Compiled from https://docs.kalshi.com and **re-verified against the live docs on 2026-07-02**. Covers the Predictions (event-contract) Trade API: REST, WebSocket, and FIX pointers. Raw specs for codegen: `https://docs.kalshi.com/openapi.yaml` (REST) and `https://docs.kalshi.com/asyncapi.yaml` (WebSocket). Machine-readable page index: `https://docs.kalshi.com/llms.txt`.
 
-## Conformance notes for our implementation (2026-07-02 audit)
+## Conformance notes for our implementation (2026-07-02 audit — all resolved)
 
-Discrepancies found between our C++ code and the verified live API. Fix separately from this doc:
+Discrepancies found in the 2026-07-02 audit, since fixed and validated against
+live demo (order placement works across runs 7–15; conformance suite 12/12):
 
-1. **🔴 `place_order` reads the wrong response field.** `rest_client.cpp` (`place_order`, ~line 357) reads `fill_count_fp` from the Create Order V2 response, but that endpoint returns **`fill_count`** (fixed-point string, **no `_fp` suffix**; likewise `remaining_count`). `at("fill_count_fp")` throws `json::out_of_range` on a real response — every live order placement breaks. Our tests pass only because `paper_transport.cpp` emits the same wrong name. **Careful:** this is endpoint-specific — the **Get Orders** order resource (used by `parse_order`, ~line 179) genuinely *does* use `initial_count_fp`/`fill_count_fp`/`remaining_count_fp` (verified), so that call is **correct**; only the create-order response path is wrong. See §5/§6. **Highest priority — live order path.**
-2. **🟠 We send `use_yes_price: true` on `orderbook_delta` subscribe.** That parameter is **not in the current channel docs** (§8.4). If the server ignores it, fine; if it honors it, NO-side levels arrive on the yes scale and our `complement()` (`1 − price`) inverts the ask. Verify the NO-side price scale against a live demo capture; drop the flag unless a capture requires it.
-3. **🟢 Validated, no change needed.** Auth signing (salt = digest length, §2), `fee_cost` = total-dollars-per-fill (§8.5, matches the fee-PnL work), `outcome_side` fill dispatch (§4.3), REST orderbook `orderbook_fp`/bids-only (§4.4), delta-as-signed-increment (§8.4).
+1. **✅ Fixed — `place_order` response field.** The Create Order V2 response
+   uses **`fill_count`** (fixed-point string, no `_fp` suffix); the Get Orders
+   resource uses `initial_count_fp`/`fill_count_fp`/`remaining_count_fp`.
+   `rest_client.cpp` now reads the correct name per endpoint.
+2. **✅ Fixed — `use_yes_price` dropped.** No longer sent on `orderbook_delta`
+   subscribe (not in the channel docs, §8.4).
+3. **🟢 Validated, no change needed.** Auth signing (salt = digest length, §2),
+   `fee_cost` = total-dollars-per-fill (§8.5), `outcome_side` fill dispatch
+   (§4.3), REST orderbook `orderbook_fp`/bids-only (§4.4),
+   delta-as-signed-increment (§8.4).
+4. **Amend/decrease semantics pinned live (2026-07-04, demo).** Amend =
+   `POST .../orders/{id}/amend` with a **full order body including ticker**;
+   per the official docs the response **may carry a new `order_id`** (demo
+   returns the same id — track the returned id either way). Decrease keeps
+   the order id = keeps queue priority. Pinned by the
+   `AmendAndDecreaseSemanticsPinned` conformance test.
 
 ---
 
