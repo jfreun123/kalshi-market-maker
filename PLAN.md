@@ -135,6 +135,16 @@
     now emits analytics fill events so exits are measurable. Remaining:
     fees term once maker-fee markets are traded; 31a Brier join unchanged.
 
+21. [x] **57 — skew-per-fill cap (Jacob's catch, 2026-07-04).** *Done — with
+    b anchored only to max_position (~45.5), ONE quote-sized fill shifted the
+    reservation ~5.5c past the 2c half-spread: buy 50 → offer 49, a locked-in
+    loss on every calm round trip. b is now floored at 25×quote_size (=250),
+    holding a single-fill shift to ~1c at mid: buy 50 → offer 53, next bid 49
+    (the gradual directional widening) — skew biases flow, never quotes a
+    guaranteed loss. Trade-off: at max_position the reservation reaches
+    ~±10c, not the band edge; the position cap remains the hard stop.
+    Regression: SingleFillNeverQuotesAGuaranteedLossExit.*
+
 **Situational** (apply when relevant): 26 √-time size taper · 27 closing-day
 longshot guard · 28 quarter-Kelly sizing (gate on 31) · 30 per-category debias
 β · 34 sum-to-one monitor · 36 scanner volume-cap.
