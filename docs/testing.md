@@ -36,7 +36,9 @@ Record real API responses into `test/fixtures/`, then assert our parsers handle 
 
 ## Integration Tests (full-stack replay)
 
-`test/integration/replay_session_test.cpp` replays a captured/synthetic session through the **real production wiring** — `WebSocketClient` parser → `TradingSession` → Quoter / OrderManager (over `PaperTransport`) / RiskManager / Portfolio — and asserts end-to-end invariants (valid BBO, fills applied, quotes placed, risk not spuriously halted, portfolio computable). It is **hermetic** (checked-in fixtures, no network) and **gated** behind `KALSHI_INTEGRATION_TESTS` (default **ON**). The networked demo conformance tests (`test/integration/demo_conformance_test.cpp`) have their own off-by-default option, `KALSHI_DEMO_TESTS`; they skip cleanly when no demo config is available (set `KALSHI_DEMO_CONFIG` to point at one).
+`test/integration/replay_session_test.cpp` replays a captured/synthetic session through the **real production wiring** — `WebSocketClient` parser → `TradingSession` → Quoter / OrderManager (over `PaperTransport`) / RiskManager / Portfolio — and asserts end-to-end invariants (valid BBO, fills applied, quotes placed, risk not spuriously halted, portfolio computable). It is **hermetic** (checked-in fixtures, no network) and **gated** behind `KALSHI_INTEGRATION_TESTS` (default **ON**).
+
+The networked demo conformance tests (`test/integration/demo_conformance_test.cpp`, option `KALSHI_DEMO_TESTS`, default OFF) place real orders against the demo exchange to pin live API semantics (order lifecycle, amend/decrease, fills, positions). They **self-find a market** (scanner pick → any open market) and **fail rather than skip** if none is usable — the only permitted skip is a missing demo config (`KALSHI_DEMO_CONFIG`, default `config-demo.json`). Full suite ≈ 5 minutes against demo.
 
 ```bash
 cmake --preset=dev && cmake --build --preset=dev

@@ -54,12 +54,13 @@ is falsified; revisit strategy, not parameters.
 
 ## 4. Prerequisites before a window can start
 
-- [ ] Item 31 analytics landed (per-fill markout, effective spread, PnL
-      attribution) — without it §2 is unmeasurable.
-- [ ] Item 43 sanity guard + item 42 hysteresis landed (behavior row).
-- [ ] Phase 32 minimum: unattended session supervision + alerts, so 30 hours
-      is practical.
-- [ ] `pnl_state.json` carry verified across restarts (shipped, PR #45).
+- [x] Item 31b/31c analytics landed (per-fill markout via `analyze_fills.py`,
+      PnL attribution via `pnl_attribution.py`); 31a Brier join still open
+      but not required to measure §2.
+- [x] Item 42a reprice hysteresis + rest timers landed (behavior row).
+- [ ] Phase 32 minimum: unattended session supervision + alerts on the L1
+      host, so 30 hours is practical.
+- [x] `pnl_state.json` carry verified across restarts (shipped, PR #45).
 
 ## 5. Already satisfied (validated live 2026-07-03)
 

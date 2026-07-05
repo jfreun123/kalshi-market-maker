@@ -82,5 +82,6 @@ by the demo conformance tests (built with `-DKALSHI_DEMO_TESTS=ON`) to locate a
 demo-environment config file; it defaults to `config-demo.json` in the repo
 root.
 
-Config files containing real credentials (`config.json`, `config-demo.json`,
-generated `*.trade.json`) are gitignored; never commit them.
+Config files containing real credentials (`config.json`, `config-demo.json`)
+are gitignored; never commit them. Demo credentials and key material live
+outside the repo in `/Users/jacobfreund/kalshi-demo-key/`.

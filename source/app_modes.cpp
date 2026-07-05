@@ -20,9 +20,6 @@ namespace kalshi {
 
 constexpr auto kScanResultsPath = "scan_results.json";
 
-// Derives the generated trade-config path from the base config path by
-// inserting ".trade" before the extension: config.json -> config.trade.json,
-// config.demo.json -> config.demo.trade.json.
 int run_scan_mode(kalshi::RestClient &rest,
                   const kalshi::ScannerConfig &scanner_config,
                   std::shared_ptr<spdlog::logger> &log) {
