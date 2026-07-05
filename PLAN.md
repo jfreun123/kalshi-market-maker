@@ -25,15 +25,13 @@
 
 ## Now (ordered)
 
-1. [~] **Validate the D13/D14 fixes live** — needs an in-play book. Run 8
-   (2026-07-04 14:21, ~7 active min, 4 markets): 8 seeds placed cleanly, then
-   **zero cancels / zero fades / zero fills** — books were calm, so this
-   proves no false-positive fades but not behavior under in-play fire; no
-   markout data. Bonus resilience datapoint: the Mac slept mid-session
-   (29-min log gap); on wake the bot cancelled all 8 quotes, flattened, and
-   reconcile is in sync — a laptop sleep is now a safe failure. PASS criteria
-   for the real test: single-digit fades, ≤24 order-moves/min, markout
-   ≥ +1.35c@30s (`scripts/analyze_fills.py logs/analytics_*.jsonl`).
+1. [x] **Validate the D13/D14 fixes live.** *PASSED — run 12 (2026-07-04
+   21:15, 5 min, self-selected in-play MLB PHI@KC): **0 fades, 0 fade-pends,
+   ~1.3 order-moves/min** (vs 133 fades / 42 moves/min in run 7 pre-fix) on a
+   live in-play book; 3 maker fills, markout@30s 0.00c (n=3, within the
+   ≥−0.5c bound); repricing tracked the game via 4 atomic amends (L2 live);
+   clean flatten −$0.03. The startup market self-selection picked the live
+   game unaided.*
 2. [x] **L0 — latency baseline.** *Done — per-request RTT flows into the
    analytics JSONL (`type:"http"`); `scripts/latency_report.py` prints
    p50/p95/max per endpoint. Mac baseline (2026-07-04): order-path ~294ms,
