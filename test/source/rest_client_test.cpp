@@ -778,3 +778,54 @@ TEST_F(RestClientTest, GetLastTradeTimeEmptyOnMalformedResponse) {
 
   EXPECT_FALSE(client.get_last_trade_time("KXT").has_value());
 }
+
+TEST_F(RestClientTest, AmendOrderReturnsResultingOrderId) {
+  auto transport = std::make_unique<FakeTransport>();
+  FakeTransport *const transport_raw = transport.get();
+  transport_raw->enqueue(
+      {kHttpOk,
+       R"({"order_id":"3b23c1c7-new","remaining_count":"8.00",)"
+       R"("fill_count":"0.00","ts_ms":1715793690123})"});
+  auto client = make_client(std::move(transport));
+
+  const auto new_id = client.amend_order(
+      "old-id", "KXT", kalshi::Side::Yes, 57,
+      kalshi::Quantity::from_contracts(8));
+
+  ASSERT_TRUE(new_id.has_value());
+  EXPECT_EQ(*new_id, "3b23c1c7-new");
+  const auto &req = transport_raw->last_request();
+  EXPECT_NE(req.url.find("/portfolio/events/orders/old-id/amend"),
+            std::string::npos);
+  EXPECT_NE(req.body.find(R"("price":"0.5700")"), std::string::npos);
+  EXPECT_NE(req.body.find(R"("side":"bid")"), std::string::npos);
+}
+
+TEST_F(RestClientTest, AmendOrderEmptyOnRejection) {
+  auto transport = std::make_unique<FakeTransport>();
+  FakeTransport *const transport_raw = transport.get();
+  transport_raw->enqueue({kHttpNotFound, R"({"error":{"code":"not_found"}})"});
+  auto client = make_client(std::move(transport));
+
+  EXPECT_FALSE(client
+                   .amend_order("old-id", "KXT", kalshi::Side::Yes, 57,
+                                kalshi::Quantity::from_contracts(8))
+                   .has_value());
+}
+
+TEST_F(RestClientTest, DecreaseOrderReturnsRemainingCount) {
+  auto transport = std::make_unique<FakeTransport>();
+  FakeTransport *const transport_raw = transport.get();
+  transport_raw->enqueue(
+      {kHttpOk,
+       R"({"order_id":"oid","remaining_count":"1.00","ts_ms":1})"});
+  auto client = make_client(std::move(transport));
+
+  const auto remaining =
+      client.decrease_order("oid", kalshi::Quantity::from_contracts(1));
+
+  ASSERT_TRUE(remaining.has_value());
+  EXPECT_EQ(*remaining, kalshi::Quantity::from_contracts(1));
+  EXPECT_NE(transport_raw->last_request().url.find("/decrease"),
+            std::string::npos);
+}

@@ -32,6 +32,21 @@ public:
   Order flatten(std::string_view ticker, Quantity net_position);
 
   bool cancel_order(std::string_view order_id);
+
+  // Amend a resting order in place (V2): one atomic call replaces the
+  // cancel+replace pair — no quote-less window. Priority is assumed lost on
+  // a price change (pinned by the demo conformance suite).
+  // Returns the resulting order id on success — the official docs show the
+  // response may carry a NEW order_id (the demo returns the same one); track
+  // whatever comes back.
+  std::optional<std::string> amend_order(std::string_view order_id,
+                                         std::string_view ticker, Side side,
+                                         int new_price_cents, Quantity count);
+
+  // Shrink a resting order without touching its queue priority (V2).
+  // Returns the remaining count on success.
+  std::optional<Quantity> decrease_order(std::string_view order_id,
+                                         Quantity reduce_to);
   std::vector<Order> get_open_orders();
 
   // Fetches all market positions from the exchange (paginated). This is the

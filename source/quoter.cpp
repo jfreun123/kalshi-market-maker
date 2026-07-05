@@ -147,12 +147,27 @@ void Quoter::refresh_bid(const std::string &ticker, OwnQuote &own,
           "jumped against the resting bid",
           ticker, own.quoted_bid_cents, desired_bid);
     }
+    // Self-cross guard first: an amend that crosses our own ask must fall
+    // back to a plain cancel (no re-entry).
+    const bool would_cross =
+        !own.ask_order_id.empty() && desired_bid >= own.quoted_ask_cents;
+    if (!would_cross && risk_mgr_.check_order(ticker, Side::Yes, desired_bid,
+                                              config_.quote_size)) {
+      if (const auto amended_id = order_mgr_.amend(
+              own.bid_order_id, ticker, Side::Yes, desired_bid,
+              Quantity::from_contracts(config_.quote_size))) {
+        own.bid_order_id = *amended_id;
+        own.quoted_bid_cents = desired_bid;
+        own.bid_placed_at = now;
+        return;
+      }
+    }
     if (!release_order(own.bid_order_id)) {
       return;
     }
     own.bid_order_id.clear();
     // Self-cross guard: after cancelling, don't re-enter if new bid ≥ ask.
-    if (!own.ask_order_id.empty() && desired_bid >= own.quoted_ask_cents) {
+    if (would_cross) {
       return;
     }
     if (!risk_mgr_.check_order(ticker, Side::Yes, desired_bid,
@@ -216,12 +231,25 @@ void Quoter::refresh_ask(const std::string &ticker, OwnQuote &own,
           "jumped against the resting ask",
           ticker, own.quoted_ask_cents, desired_ask);
     }
+    const bool would_cross =
+        !own.bid_order_id.empty() && desired_ask <= own.quoted_bid_cents;
+    if (!would_cross && risk_mgr_.check_order(ticker, Side::No, no_price,
+                                              config_.quote_size)) {
+      if (const auto amended_id = order_mgr_.amend(
+              own.ask_order_id, ticker, Side::No, no_price,
+              Quantity::from_contracts(config_.quote_size))) {
+        own.ask_order_id = *amended_id;
+        own.quoted_ask_cents = desired_ask;
+        own.ask_placed_at = now;
+        return;
+      }
+    }
     if (!release_order(own.ask_order_id)) {
       return;
     }
     own.ask_order_id.clear();
     // Self-cross guard: after cancelling, don't re-enter if new ask ≤ bid.
-    if (!own.bid_order_id.empty() && desired_ask <= own.quoted_bid_cents) {
+    if (would_cross) {
       return;
     }
     if (!risk_mgr_.check_order(ticker, Side::No, no_price,

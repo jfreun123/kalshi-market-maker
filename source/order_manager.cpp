@@ -69,6 +69,26 @@ std::string OrderManager::fill_key(const Fill &fill) {
          std::to_string(fill.timestamp.time_since_epoch().count());
 }
 
+std::optional<std::string> OrderManager::amend(std::string_view order_id,
+                                               std::string_view ticker,
+                                               Side side, int new_price_cents,
+                                               Quantity count) {
+  const auto new_id =
+      rest_client_.amend_order(order_id, ticker, side, new_price_cents, count);
+  if (!new_id.has_value()) {
+    return std::nullopt;
+  }
+  auto order_it = open_orders_.find(std::string{order_id});
+  if (order_it != open_orders_.end()) {
+    Order amended = order_it->second;
+    amended.id = *new_id;
+    amended.price_cents = new_price_cents;
+    open_orders_.erase(order_it);
+    open_orders_[*new_id] = std::move(amended);
+  }
+  return new_id;
+}
+
 bool OrderManager::record_fill(const Fill &fill) {
   ensure(is_valid_price(fill.price_cents), "fill price outside [1,99]");
   ensure(fill.quantity.is_positive(), "fill quantity must be positive");

@@ -152,6 +152,33 @@ TEST_F(DemoConformanceTest, GetOpenOrdersParses) {
   EXPECT_NO_THROW((void)rest.get_open_orders());
 }
 
+TEST_F(DemoConformanceTest, AmendAndDecreaseSemanticsPinned) {
+  auto rest = make_rest();
+  const auto markets = rest.get_markets();
+  ASSERT_FALSE(markets.empty());
+  const auto &ticker = markets.front().ticker;
+  constexpr int kFarPrice = 2;
+  constexpr int kAmendPrice = 3;
+
+  const auto order = rest.place_order(ticker, kalshi::Side::Yes, kFarPrice,
+                                      kalshi::Quantity::from_contracts(2),
+                                      kalshi::OrderType::Limit);
+  ASSERT_FALSE(order.id.empty());
+
+  const auto amended_id =
+      rest.amend_order(order.id, ticker, kalshi::Side::Yes, kAmendPrice,
+                       kalshi::Quantity::from_contracts(2));
+  ASSERT_TRUE(amended_id.has_value()) << "amend must succeed on a far order";
+
+  const auto remaining =
+      rest.decrease_order(*amended_id, kalshi::Quantity::from_contracts(1));
+  ASSERT_TRUE(remaining.has_value());
+  EXPECT_EQ(*remaining, kalshi::Quantity::from_contracts(1))
+      << "decrease keeps the order (same id) at reduced size";
+
+  EXPECT_TRUE(rest.cancel_order(*amended_id));
+}
+
 TEST_F(DemoConformanceTest, GetFillsParsesWithSaneFields) {
   auto rest = make_rest();
   std::vector<kalshi::Fill> fills;

@@ -510,6 +510,65 @@ bool RestClient::cancel_order(std::string_view order_id) {
          resp.status_code <= kHttpSuccessMax;
 }
 
+std::optional<std::string>
+RestClient::amend_order(std::string_view order_id, std::string_view ticker,
+                        Side side, int new_price_cents, Quantity count) {
+  const std::string id_str{order_id};
+  const std::string path =
+      path_prefix_ + "/portfolio/events/orders/" + id_str + "/amend";
+  const std::string url =
+      base_url_ + "/portfolio/events/orders/" + id_str + "/amend";
+  auto headers = auth_.sign("POST", path);
+  headers["Content-Type"] = "application/json";
+
+  const std::string v2_side = (side == Side::Yes) ? "bid" : "ask";
+  const int yes_price_cents =
+      (side == Side::Yes) ? new_price_cents : (kPriceBasis - new_price_cents);
+  nlohmann::json body_json;
+  body_json["ticker"] = ticker;
+  body_json["side"] = v2_side;
+  body_json["price"] = format_dollars(yes_price_cents);
+  body_json["count"] = count.to_fp_string();
+  body_json["time_in_force"] = "good_till_canceled";
+  body_json["self_trade_prevention_type"] = "taker_at_cross";
+  body_json["post_only"] = true;
+
+  std::this_thread::sleep_for(write_limiter_.acquire(kPlaceOrderCost));
+  auto resp = transport_->post(url, headers, body_json.dump());
+  try {
+    check_response(resp);
+    auto json_data = nlohmann::json::parse(resp.body);
+    return json_data.value("order_id", id_str);
+  } catch (const std::exception &ex) {
+    get_logger()->warn("amend failed order_id={}: {}", order_id, ex.what());
+    return std::nullopt;
+  }
+}
+
+std::optional<Quantity> RestClient::decrease_order(std::string_view order_id,
+                                                   Quantity reduce_to) {
+  const std::string id_str{order_id};
+  const std::string path =
+      path_prefix_ + "/portfolio/events/orders/" + id_str + "/decrease";
+  const std::string url =
+      base_url_ + "/portfolio/events/orders/" + id_str + "/decrease";
+  auto headers = auth_.sign("POST", path);
+  headers["Content-Type"] = "application/json";
+  nlohmann::json body_json;
+  body_json["reduce_to"] = reduce_to.to_fp_string();
+
+  std::this_thread::sleep_for(write_limiter_.acquire(kCancelOrderCost));
+  auto resp = transport_->post(url, headers, body_json.dump());
+  try {
+    check_response(resp);
+    auto json_data = nlohmann::json::parse(resp.body);
+    return parse_fp_count(json_data.at("remaining_count").get<std::string>());
+  } catch (const std::exception &ex) {
+    get_logger()->warn("decrease failed order_id={}: {}", order_id, ex.what());
+    return std::nullopt;
+  }
+}
+
 std::vector<Order> RestClient::get_open_orders() {
   std::string path = path_prefix_ + "/portfolio/orders";
   std::string url = base_url_ + "/portfolio/orders?status=resting";

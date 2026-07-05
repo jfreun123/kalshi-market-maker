@@ -4,6 +4,7 @@
 #include "types.hpp"
 
 #include <deque>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -39,6 +40,10 @@ public:
   virtual Order place(std::string_view ticker, Side side, int price_cents,
                       int quantity) = 0;
   virtual bool cancel(std::string_view order_id) = 0;
+  virtual std::optional<std::string> amend(std::string_view order_id,
+                                           std::string_view ticker, Side side,
+                                           int new_price_cents,
+                                           Quantity count) = 0;
   virtual void cancel_all(std::string_view ticker) = 0;
   virtual bool record_fill(const Fill &fill) = 0;
 
@@ -85,6 +90,10 @@ public:
   Order place(std::string_view ticker, Side side, int price_cents,
               int quantity) override;
   bool cancel(std::string_view order_id) override;
+  std::optional<std::string> amend(std::string_view order_id,
+                                   std::string_view ticker, Side side,
+                                   int new_price_cents,
+                                   Quantity count) override;
   void cancel_all(std::string_view ticker) override;
   bool record_fill(const Fill &fill) override;
 

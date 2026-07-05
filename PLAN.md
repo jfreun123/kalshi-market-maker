@@ -41,7 +41,15 @@
 3. [ ] **L1 — EC2 in Kalshi's region** (t4g.small ~$12/mo; NOT a trading-VPS
    product). Probe us-east-1 vs us-east-2 RTT first; rerun the L0 session
    from the winner; fold host into Phase 32 supervision.
-4. [ ] **L2 = item 44 — Amend + Decrease Order V2.** One atomic call replaces
+4. [x] **L2 = item 44 — Amend + Decrease Order V2.** *Done — semantics
+   pinned live (amend = POST .../orders/{id}/amend with a full order body,
+   response may carry a new order_id per official docs, demo returns the
+   same; decrease = .../decrease keeps the id = keeps priority). The quoter
+   reprice branch now issues ONE atomic amend instead of cancel+replace
+   (fallback to cancel+replace on amend rejection; self-cross still cancels).
+   Halves reprice round-trips and removes the quote-less window — the D9
+   echo root. `decrease_order` is available for the flow guard's future
+   size response (item 32/24).* Original scope: One atomic call replaces
    cancel+replace (no quote-less window, likely no book echo = the D9 root).
    Pin semantics first via demo-conformance tests: amend price → priority
    lost, no dead-level echo; decrease size → priority kept. Decrease gives
@@ -89,6 +97,13 @@
 18. [ ] **23 — ceil-per-order maker-fee model** (mostly inert while demo maker
     fills are free); **3 — passive clamp vs fresher BBO** (D1 residual;
     largely solved by L1+L2).
+
+17. [ ] **54 — batch CreateOrders (Jacob, 2026-07-04).** Kalshi V2 supports
+    batch create/cancel (token cost per item, batch size scales with tier).
+    Batch the session's order placements — seeds and layered quotes (item
+    24) especially — into one request: fewer round trips, coherent quote
+    placement. Sequence after L3 (async dispatch) so batching composes with
+    the non-blocking order path.
 
 **Situational** (apply when relevant): 26 √-time size taper · 27 closing-day
 longshot guard · 28 quarter-Kelly sizing (gate on 31) · 30 per-category debias

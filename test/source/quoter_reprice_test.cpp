@@ -38,15 +38,9 @@ TEST_F(QuoterTest, QuoteReplacedWhenExceedingRepriceThreshold) {
   transport.enqueue(
       {kHttpOk,
        order_json(kOrderId2, kalshi::QuoterConfig::kDefaultQuoteSize)});
-  // Second update sequence: DELETE bid1, POST bid2, DELETE ask1, POST ask2.
-  transport.enqueue({kHttpOk, "{}"}); // DELETE bid1 — cancel_order ignores body
-  transport.enqueue(
-      {kHttpOk,
-       order_json(kOrderId3, kalshi::QuoterConfig::kDefaultQuoteSize)});
-  transport.enqueue({kHttpOk, "{}"}); // DELETE ask1 — cancel_order ignores body
-  transport.enqueue(
-      {kHttpOk,
-       order_json(kOrderId4, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  // Second update: one atomic amend per side (no cancel+replace pair).
+  transport.enqueue({kHttpOk, amend_json(kOrderId1)});
+  transport.enqueue({kHttpOk, amend_json(kOrderId2)});
   kalshi::RestClient rest{kalshi::Auth{kApiKey, kPemPrivateKey},
                           std::move(transport_ptr), kBaseUrl};
   kalshi::OrderManager order_mgr{rest};
@@ -62,8 +56,10 @@ TEST_F(QuoterTest, QuoteReplacedWhenExceedingRepriceThreshold) {
   *clock_now += kMinRestElapsed;
   quoter.update(kTicker, make_ob(kYesBid54, kNoBid54));
 
-  // 2 POSTs + 2 DELETEs + 2 POSTs = 6 total requests.
-  EXPECT_EQ(transport.recorded_requests().size(), 6U);
+  // 2 POSTs (place) + 2 POSTs (amend) = 4 total requests.
+  EXPECT_EQ(transport.recorded_requests().size(), 4U);
+  EXPECT_NE(transport.recorded_requests().at(2).url.find("/amend"),
+            std::string::npos);
 }
 
 TEST_F(QuoterTest, RepriceSuppressedWhileQuoteYoungerThanMinRest) {
@@ -102,14 +98,8 @@ TEST_F(QuoterTest, RepriceResumesOnceQuoteHasRestedMinRest) {
   transport.enqueue(
       {kHttpOk,
        order_json(kOrderId2, kalshi::QuoterConfig::kDefaultQuoteSize)});
-  transport.enqueue({kHttpOk, "{}"});
-  transport.enqueue(
-      {kHttpOk,
-       order_json(kOrderId3, kalshi::QuoterConfig::kDefaultQuoteSize)});
-  transport.enqueue({kHttpOk, "{}"});
-  transport.enqueue(
-      {kHttpOk,
-       order_json(kOrderId4, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  transport.enqueue({kHttpOk, amend_json(kOrderId1)});
+  transport.enqueue({kHttpOk, amend_json(kOrderId2)});
   kalshi::RestClient rest{kalshi::Auth{kApiKey, kPemPrivateKey},
                           std::move(transport_ptr), kBaseUrl};
   kalshi::OrderManager order_mgr{rest};
@@ -125,8 +115,8 @@ TEST_F(QuoterTest, RepriceResumesOnceQuoteHasRestedMinRest) {
   *clock_now += kMinRestElapsed;
   quoter.update(kTicker, make_ob(kYesBid54, kNoBid54));
 
-  EXPECT_EQ(transport.recorded_requests().size(), 6U)
-      << "after resting min_rest_ms the quote must reprice as before";
+  EXPECT_EQ(transport.recorded_requests().size(), 4U)
+      << "after resting min_rest_ms the quote must reprice (via amend)";
 }
 
 TEST_F(QuoterTest, RepriceIgnoresOwnRestingQuotesEchoedInBook) {
@@ -237,16 +227,11 @@ TEST_F(QuoterTest, SelfCrossGuardSkipsBidWhenItWouldCrossOwnAsk) {
   transport.enqueue(
       {kHttpOk,
        order_json(kOrderId2, kalshi::QuoterConfig::kDefaultQuoteSize)});
-  // Reprice: DELETE bid order-001.
+  // Reprice: DELETE bid order-001 (would cross own ask — no amend, no
+  // re-entry). Ask reprice: one amend.
   transport.enqueue(
       {kHttpOk, R"({"order_id":"order-001","reduced_by":"5.00","ts_ms":0})"});
-  // Bid suppressed — no POST bid here.
-  // Ask reprice: DELETE ask order-002, POST ask order-003.
-  transport.enqueue(
-      {kHttpOk, R"({"order_id":"order-002","reduced_by":"5.00","ts_ms":0})"});
-  transport.enqueue(
-      {kHttpOk,
-       order_json(kOrderId3, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  transport.enqueue({kHttpOk, amend_json(kOrderId2)});
   kalshi::RestClient rest{kalshi::Auth{kApiKey, kPemPrivateKey},
                           std::move(transport_ptr), kBaseUrl};
   kalshi::OrderManager order_mgr{rest};
@@ -265,11 +250,12 @@ TEST_F(QuoterTest, SelfCrossGuardSkipsBidWhenItWouldCrossOwnAsk) {
   *clock_now += kFadeRestElapsed;
   quoter.update(kTicker, make_ob(kYesBid70, kNoBid70)); // confirm ask fade
 
-  // POST bid + POST ask + DELETE bid + DELETE ask + POST ask = 5
-  EXPECT_EQ(transport.recorded_requests().size(), 5U);
-  // The last POST should be an ask (side=ask), not a bid.
+  // POST bid + POST ask + DELETE bid + amend ask = 4
+  EXPECT_EQ(transport.recorded_requests().size(), 4U);
   const std::string &last_body = transport.recorded_requests().back().body;
   EXPECT_NE(last_body.find("\"side\":\"ask\""), std::string::npos);
+  EXPECT_NE(transport.recorded_requests().back().url.find("/amend"),
+            std::string::npos);
 }
 
 TEST_F(QuoterTest, BidFadesOnAdverseTheoDropDespiteMinRest) {
@@ -281,10 +267,7 @@ TEST_F(QuoterTest, BidFadesOnAdverseTheoDropDespiteMinRest) {
   transport.enqueue(
       {kHttpOk,
        order_json(kOrderId2, kalshi::QuoterConfig::kDefaultQuoteSize)});
-  transport.enqueue({kHttpOk, "{}"});
-  transport.enqueue(
-      {kHttpOk,
-       order_json(kOrderId3, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  transport.enqueue({kHttpOk, amend_json(kOrderId3)});
   kalshi::RestClient rest{kalshi::Auth{kApiKey, kPemPrivateKey},
                           std::move(transport_ptr), kBaseUrl};
   kalshi::OrderManager order_mgr{rest};
@@ -302,11 +285,11 @@ TEST_F(QuoterTest, BidFadesOnAdverseTheoDropDespiteMinRest) {
   *clock_now += kFadeRestElapsed;
   quoter.update(kTicker, make_ob(kYesBid47, kNoBid47));
 
-  EXPECT_EQ(transport.recorded_requests().size(), 4U)
-      << "the toxic bid must fade once the jump persists two updates; the "
-         "safe ask must keep resting under min_rest_ms";
-  const std::string &replaced_bid = transport.recorded_requests().at(3).body;
-  EXPECT_NE(replaced_bid.find("\"side\":\"bid\""), std::string::npos);
+  EXPECT_EQ(transport.recorded_requests().size(), 3U)
+      << "the toxic bid must fade via one amend; the safe ask must keep "
+         "resting under min_rest_ms";
+  const std::string &amended_bid = transport.recorded_requests().at(2).body;
+  EXPECT_NE(amended_bid.find("\"side\":\"bid\""), std::string::npos);
 }
 
 TEST_F(QuoterTest, AskFadesOnAdverseTheoRiseDespiteMinRest) {
@@ -318,10 +301,7 @@ TEST_F(QuoterTest, AskFadesOnAdverseTheoRiseDespiteMinRest) {
   transport.enqueue(
       {kHttpOk,
        order_json(kOrderId2, kalshi::QuoterConfig::kDefaultQuoteSize)});
-  transport.enqueue({kHttpOk, "{}"});
-  transport.enqueue(
-      {kHttpOk,
-       order_json(kOrderId3, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  transport.enqueue({kHttpOk, amend_json(kOrderId3)});
   kalshi::RestClient rest{kalshi::Auth{kApiKey, kPemPrivateKey},
                           std::move(transport_ptr), kBaseUrl};
   kalshi::OrderManager order_mgr{rest};
@@ -339,11 +319,11 @@ TEST_F(QuoterTest, AskFadesOnAdverseTheoRiseDespiteMinRest) {
   *clock_now += kFadeRestElapsed;
   quoter.update(kTicker, make_ob(kYesBid57, kNoBid57));
 
-  EXPECT_EQ(transport.recorded_requests().size(), 4U)
-      << "the toxic ask must fade once the jump persists two updates; the "
-         "safe bid must keep resting under min_rest_ms";
-  const std::string &replaced_ask = transport.recorded_requests().at(3).body;
-  EXPECT_NE(replaced_ask.find("\"side\":\"ask\""), std::string::npos);
+  EXPECT_EQ(transport.recorded_requests().size(), 3U)
+      << "the toxic ask must fade via one amend; the safe bid must keep "
+         "resting under min_rest_ms";
+  const std::string &amended_ask = transport.recorded_requests().at(2).body;
+  EXPECT_NE(amended_ask.find("\"side\":\"ask\""), std::string::npos);
 }
 
 TEST_F(QuoterTest, AdverseTheoJumpStillHeldUnderFadeRestFloor) {
