@@ -233,9 +233,36 @@ TEST_F(QuoterTest, LongPositionShiftsBidDown) {
             std::string::npos);
 }
 
+TEST_F(QuoterTest, LongInventoryUnwindAskQuotesAtReservation) {
+  auto transport_ptr = std::make_unique<FakeTransport>();
+  FakeTransport &transport = *transport_ptr;
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId1, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId2, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  kalshi::RestClient rest{kalshi::Auth{kApiKey, kPemPrivateKey},
+                          std::move(transport_ptr), kBaseUrl};
+  kalshi::OrderManager order_mgr{rest};
+  record_position_fill(order_mgr, kOrderId1, kalshi::Side::Yes,
+                       kInventoryPosition);
+
+  kalshi::RiskManager risk_mgr{kalshi::RiskLimits{}};
+  kalshi::Quoter quoter{kalshi::QuoterConfig{}, order_mgr, risk_mgr};
+
+  quoter.update(kTicker, make_ob(kYesBid52, kNoBid52));
+
+  const std::string &ask_body = transport.recorded_requests().at(1).body;
+  EXPECT_NE(ask_body.find("\"side\":\"ask\""), std::string::npos);
+  EXPECT_NE(ask_body.find(std::string(kAskPriceMid52Long20)),
+            std::string::npos)
+      << "the inventory-reducing side must quote at the reservation price — "
+         "closing risk pays up to fair value instead of demanding fresh edge";
+}
+
 TEST_F(QuoterTest, ShortPositionShiftsBidUp) {
-  // pos=-20: inv_skew=-1.0 → bid = round(52-2+1) = 51, ask = round(52+2+1)
-  // = 55.
+  // pos=-15: res ≈ 53.5; the unwind bid quotes at floor(res) = 53.
   auto transport_ptr = std::make_unique<FakeTransport>();
   FakeTransport &transport = *transport_ptr;
   transport.enqueue(

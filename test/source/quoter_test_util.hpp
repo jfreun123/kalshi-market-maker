@@ -50,9 +50,11 @@ constexpr std::string_view kBidPriceMid52 = R"("price":"0.5000")";
 constexpr std::string_view kAskPriceMid52 =
     R"("price":"0.5400")"; // YES=100-46=54
 constexpr std::string_view kBidPriceMid52Long20 =
-    R"("price":"0.4800")"; // b floored at 25×quote_size=250: q=20 → fv ≈ 50.0
+    R"("price":"0.4800")"; // b floored at 25×quote_size=250: q=15 → res ≈ 50.5
+constexpr std::string_view kAskPriceMid52Long20 =
+    R"("price":"0.5200")"; // unwind ask ceil(res 50.5)=51, passive-clamped to 52
 constexpr std::string_view kBidPriceMid52Short20 =
-    R"("price":"0.5100")"; // q=−20 → fv ≈ 54.0 → bid 51 (inside passive cap)
+    R"("price":"0.5200")"; // q=−15: unwind bid floor(res 53.5)=53 → clamp 52
 constexpr std::string_view kBidPriceExtremeClamp = R"("price":"0.0100")";
 constexpr std::string_view kAskPriceExtremeClamp = R"("price":"0.5200")";
 // Flow imbalance: default spread 4 → half 2 → bid 50; +2 imbalance → half 3 →

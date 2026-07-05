@@ -66,6 +66,12 @@ struct QuoterConfig {
   // Directional flow lean (item 32): while flow is imbalanced, shift fair
   // value toward the takers' side by this much — believe persistent flow.
   static constexpr double kDefaultFlowLeanCents = 1.0;
+  // Asymmetric unwind pricing (item 64): with inventory on, the reducing side
+  // quotes at the reservation price plus only this much edge — closing risk
+  // pays up to fair value; only opening risk charges the full half-spread.
+  // Round trips complete at the first counter-flow instead of waiting out a
+  // spread that double-charges.
+  static constexpr double kDefaultUnwindEdgeCents = 0.0;
   // Inventory brake: at this many multiples of quote_size, the accumulating
   // side stops quoting entirely (run: a 30-lot pile-up vs 10-lot quotes).
   static constexpr int kDefaultInventoryCapLots = 2;
@@ -84,6 +90,7 @@ struct QuoterConfig {
   int winddown_seconds = kDefaultWinddownSeconds;
   double flow_lean_cents = kDefaultFlowLeanCents;
   int inventory_cap_lots = kDefaultInventoryCapLots;
+  double unwind_edge_cents = kDefaultUnwindEdgeCents;
   // Price toward the favorite-longshot-debiased view instead of the raw mid.
   // Off by default (HeuristicModel is the safe baseline); β per Bürgi et al.
   bool use_view_based_pricing = false;

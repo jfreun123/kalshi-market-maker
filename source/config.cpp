@@ -91,6 +91,8 @@ AppConfig load_config(const std::filesystem::path &path) {
         "flow_lean_cents", QuoterConfig::kDefaultFlowLeanCents);
     config.quoter.inventory_cap_lots = quoter_json.value(
         "inventory_cap_lots", QuoterConfig::kDefaultInventoryCapLots);
+    config.quoter.unwind_edge_cents = quoter_json.value(
+        "unwind_edge_cents", QuoterConfig::kDefaultUnwindEdgeCents);
   }
 
   // The imbalance guard should engage once roughly one full quote of one-sided

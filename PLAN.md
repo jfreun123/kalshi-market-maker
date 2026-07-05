@@ -212,6 +212,19 @@
     gates all must pass before score matters at all; a 0.957 volume score
     cannot buy admission.
 
+30. [x] **64 — asymmetric unwind pricing (Jacob, 2026-07-05: "collect true
+    spread, stay balanced, no inventory").** Run 18 exposed it: after 10
+    one-sided fills our belief rose to ~81.5, yet the buy-back bid rested at
+    78–79 — the quoter charged a full half-spread to CLOSE a position, so
+    inventory sat until the taker flatten paid 83 (the whole −$0.10). *Done —
+    with inventory on, the reducing side quotes at the reservation price plus
+    only `unwind_edge_cents` (default 0), passive-clamped to 1c inside the
+    market; the increasing side keeps full spread + skew + lean. Opening
+    risk charges premium; closing risk pays up to fair value. Round trips
+    complete at the first counter-flow; spread capture = the opening side's
+    edge, banked per loop instead of hoped for. Wind-down inherits this
+    automatically (reduce side now rests at reservation, not res−half).*
+
 **Selection principle (Jacob, 2026-07-04): profitable on every market we
 CHOOSE, then scale.** Not every market can be made profitably — trending
 books, dead books, and 1c-spread deep books all bleed makers. Scaling (Gate
