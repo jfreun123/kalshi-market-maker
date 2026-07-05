@@ -88,5 +88,3 @@ TEST(ScanOutputTest, WriteScanResultsCreatesReadableFile) {
   EXPECT_EQ(json.at("count").get<int>(), 2);
   std::filesystem::remove(path);
 }
-
-

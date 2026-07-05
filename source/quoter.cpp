@@ -153,9 +153,9 @@ void Quoter::refresh_bid(const std::string &ticker, OwnQuote &own,
         !own.ask_order_id.empty() && desired_bid >= own.quoted_ask_cents;
     if (!would_cross && risk_mgr_.check_order(ticker, Side::Yes, desired_bid,
                                               config_.quote_size)) {
-      if (const auto amended_id = order_mgr_.amend(
-              own.bid_order_id, ticker, Side::Yes, desired_bid,
-              Quantity::from_contracts(config_.quote_size))) {
+      if (const auto amended_id =
+              order_mgr_.amend(own.bid_order_id, ticker, Side::Yes, desired_bid,
+                               Quantity::from_contracts(config_.quote_size))) {
         own.bid_order_id = *amended_id;
         own.quoted_bid_cents = desired_bid;
         own.bid_placed_at = now;
@@ -233,11 +233,11 @@ void Quoter::refresh_ask(const std::string &ticker, OwnQuote &own,
     }
     const bool would_cross =
         !own.bid_order_id.empty() && desired_ask <= own.quoted_bid_cents;
-    if (!would_cross && risk_mgr_.check_order(ticker, Side::No, no_price,
-                                              config_.quote_size)) {
-      if (const auto amended_id = order_mgr_.amend(
-              own.ask_order_id, ticker, Side::No, no_price,
-              Quantity::from_contracts(config_.quote_size))) {
+    if (!would_cross &&
+        risk_mgr_.check_order(ticker, Side::No, no_price, config_.quote_size)) {
+      if (const auto amended_id =
+              order_mgr_.amend(own.ask_order_id, ticker, Side::No, no_price,
+                               Quantity::from_contracts(config_.quote_size))) {
         own.ask_order_id = *amended_id;
         own.quoted_ask_cents = desired_ask;
         own.ask_placed_at = now;

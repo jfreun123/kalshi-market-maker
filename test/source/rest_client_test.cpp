@@ -783,14 +783,12 @@ TEST_F(RestClientTest, AmendOrderReturnsResultingOrderId) {
   auto transport = std::make_unique<FakeTransport>();
   FakeTransport *const transport_raw = transport.get();
   transport_raw->enqueue(
-      {kHttpOk,
-       R"({"order_id":"3b23c1c7-new","remaining_count":"8.00",)"
-       R"("fill_count":"0.00","ts_ms":1715793690123})"});
+      {kHttpOk, R"({"order_id":"3b23c1c7-new","remaining_count":"8.00",)"
+                R"("fill_count":"0.00","ts_ms":1715793690123})"});
   auto client = make_client(std::move(transport));
 
-  const auto new_id = client.amend_order(
-      "old-id", "KXT", kalshi::Side::Yes, 57,
-      kalshi::Quantity::from_contracts(8));
+  const auto new_id = client.amend_order("old-id", "KXT", kalshi::Side::Yes, 57,
+                                         kalshi::Quantity::from_contracts(8));
 
   ASSERT_TRUE(new_id.has_value());
   EXPECT_EQ(*new_id, "3b23c1c7-new");
@@ -817,8 +815,7 @@ TEST_F(RestClientTest, DecreaseOrderReturnsRemainingCount) {
   auto transport = std::make_unique<FakeTransport>();
   FakeTransport *const transport_raw = transport.get();
   transport_raw->enqueue(
-      {kHttpOk,
-       R"({"order_id":"oid","remaining_count":"1.00","ts_ms":1})"});
+      {kHttpOk, R"({"order_id":"oid","remaining_count":"1.00","ts_ms":1})"});
   auto client = make_client(std::move(transport));
 
   const auto remaining =

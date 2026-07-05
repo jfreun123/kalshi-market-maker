@@ -23,5 +23,4 @@ write_scan_results(const std::filesystem::path &path,
                    const std::vector<MarketScore> &results,
                    std::chrono::system_clock::time_point scanned_at);
 
-
 } // namespace kalshi
