@@ -49,6 +49,7 @@
     "max_days_to_close": 90.0,
     "max_stale_trade_minutes": 30,
     "rotation_minutes": 5,
+    "min_trades_per_hour": 6,
     "trade_top_n": 5
   }
 }

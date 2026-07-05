@@ -84,6 +84,8 @@ once the fill-probability model exists (item 42b).
 | Fill backfill on WS reconnect | No fills lost in the disconnect gap | structural |
 | Exchange order flags | post_only, taker_at_cross STP, cancel_order_on_pause | structural |
 | Liveness filter + rotation | Do not sit on dead markets; swap idle ones out | structural |
+| Flow-rate admission (`min_trades_per_hour=6`) | Finalists need recent public trades — vol_24h credits yesterday's burst (run 15: $0 in a no-trade window) | structural (threshold: placeholder → 60a) |
+| Live-spread admission | Finalists' live book must be wider than `min_spread_cents` — a penny-wide book never fills us at our edge (run 15) | structural |
 
 ## The consolidation plan
 

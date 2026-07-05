@@ -740,43 +740,51 @@ TEST_F(RestClientTest, GetFillsPassesMinTsAndFollowsCursor) {
       std::string::npos);
 }
 
-TEST_F(RestClientTest, GetLastTradeTimeParsesCreatedTime) {
+TEST_F(RestClientTest, GetRecentTradeTimesParsesNewestFirst) {
   auto transport = std::make_unique<FakeTransport>();
   FakeTransport *const transport_raw = transport.get();
   transport_raw->enqueue(
       {kHttpOk,
        R"({"cursor":"c","trades":[{"count_fp":"1.51",)"
        R"("created_time":"2026-07-04T20:42:56.131595Z","taker_side":"yes",)"
-       R"("ticker":"KXT","trade_id":"t1","yes_price_dollars":"0.3700"}]})"});
+       R"("ticker":"KXT","trade_id":"t1","yes_price_dollars":"0.3700"},)"
+       R"({"count_fp":"2.00",)"
+       R"("created_time":"2026-07-04T19:42:56.131595Z","taker_side":"no",)"
+       R"("ticker":"KXT","trade_id":"t2","yes_price_dollars":"0.3600"}]})"});
   auto client = make_client(std::move(transport));
 
-  const auto last_trade = client.get_last_trade_time("KXT");
+  const auto trade_times = client.get_recent_trade_times("KXT", 2);
 
-  ASSERT_TRUE(last_trade.has_value());
+  ASSERT_TRUE(trade_times.has_value());
+  ASSERT_EQ(trade_times->size(), 2U);
+  EXPECT_GT(trade_times->front(), trade_times->back());
   EXPECT_NE(transport_raw->last_request().url.find("ticker=KXT"),
             std::string::npos);
+  EXPECT_NE(transport_raw->last_request().url.find("limit=2"),
+            std::string::npos);
   const auto epoch_seconds = std::chrono::duration_cast<std::chrono::seconds>(
-                                 last_trade->time_since_epoch())
+                                 trade_times->front().time_since_epoch())
                                  .count();
   EXPECT_EQ(epoch_seconds, 1'783'197'776LL);
 }
 
-TEST_F(RestClientTest, GetLastTradeTimeEmptyWhenNeverTraded) {
+TEST_F(RestClientTest, GetRecentTradeTimesEmptyVectorWhenNeverTraded) {
   auto transport = std::make_unique<FakeTransport>();
-  FakeTransport *const transport_raw = transport.get();
-  transport_raw->enqueue({kHttpOk, R"({"cursor":"","trades":[]})"});
+  transport->enqueue({kHttpOk, R"({"cursor":"","trades":[]})"});
   auto client = make_client(std::move(transport));
 
-  EXPECT_FALSE(client.get_last_trade_time("KXT").has_value());
+  const auto trade_times = client.get_recent_trade_times("KXT", 3);
+
+  ASSERT_TRUE(trade_times.has_value());
+  EXPECT_TRUE(trade_times->empty());
 }
 
-TEST_F(RestClientTest, GetLastTradeTimeEmptyOnMalformedResponse) {
+TEST_F(RestClientTest, GetRecentTradeTimesNulloptOnMalformedResponse) {
   auto transport = std::make_unique<FakeTransport>();
-  FakeTransport *const transport_raw = transport.get();
-  transport_raw->enqueue({kHttpOk, "{}"});
+  transport->enqueue({kHttpOk, "{}"});
   auto client = make_client(std::move(transport));
 
-  EXPECT_FALSE(client.get_last_trade_time("KXT").has_value());
+  EXPECT_FALSE(client.get_recent_trade_times("KXT", 3).has_value());
 }
 
 TEST_F(RestClientTest, AmendOrderReturnsResultingOrderId) {

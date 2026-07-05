@@ -32,6 +32,11 @@ struct ScannerConfig {
   // In-session market rotation cadence (item 52): re-scan and swap dead-idle
   // markets for live ones every this many minutes; 0 disables rotation.
   static constexpr int kDefaultRotationMinutes = 5;
+  // Flow-rate admission (item 61): finalists need at least this many public
+  // trades within the past hour — vol_24h credits yesterday's burst, this
+  // demands takers NOW. A parsed-but-empty trade tape is a definitive drop;
+  // probe errors fail open. 0 disables.
+  static constexpr int kDefaultMinTradesPerHour = 6;
 
   int min_price_cents{kDefaultMinPriceCents};
   int max_price_cents{kDefaultMaxPriceCents};
@@ -44,6 +49,7 @@ struct ScannerConfig {
   int trade_top_n{kDefaultTradeTopN};
   int max_stale_trade_minutes{kDefaultMaxStaleTradeMinutes};
   int rotation_minutes{kDefaultRotationMinutes};
+  int min_trades_per_hour{kDefaultMinTradesPerHour};
   // When non-empty, scan fetches each event series separately instead of
   // using the global /markets listing (which returns zero-volume junk).
   std::vector<std::string> event_series{};
@@ -70,6 +76,13 @@ public:
                            std::chrono::system_clock::now()) const;
 
 private:
+  void admit_finalists(std::vector<MarketScore> &candidates, int top_n,
+                       std::chrono::system_clock::time_point now) const;
+  [[nodiscard]] bool
+  passes_flow_admission(const std::string &ticker,
+                        std::chrono::system_clock::time_point now) const;
+  [[nodiscard]] bool passes_book_admission(const std::string &ticker) const;
+
   RestClient &rest_;
   ScannerConfig config_;
 };

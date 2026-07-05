@@ -82,7 +82,9 @@ cp config.example.json config.json
 - `risk` — per-market and portfolio limits (exposure, total-loss, drawdown).
 - `flow` — the imbalance guard's window and trigger ratio.
 - `scanner` — market filters (price band, spread band, 24h volume, days to
-  close, `max_stale_trade_minutes` liveness cutoff).
+  close, `max_stale_trade_minutes` liveness cutoff, `min_trades_per_hour`
+  flow-rate floor); finalists are re-checked against the live orderbook so a
+  penny-wide book never gets adopted.
 
 Config files with real credentials (`config.json`, `config-demo.json`) are
 gitignored. Secrets policy: see `CLAUDE.md`.

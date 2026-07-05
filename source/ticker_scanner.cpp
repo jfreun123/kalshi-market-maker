@@ -1,6 +1,7 @@
 #include "ticker_scanner.hpp"
 
 #include "logger.hpp"
+#include "orderbook.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -166,34 +167,100 @@ TickerScanner::scan(int top_n,
               return lhs.score > rhs.score;
             });
 
-  if (config_.max_stale_trade_minutes > 0) {
-    const auto staleness_cutoff =
-        now - std::chrono::minutes{config_.max_stale_trade_minutes};
-    std::vector<MarketScore> fresh;
-    for (auto &candidate : candidates) {
-      if (static_cast<int>(fresh.size()) >= top_n) {
-        break;
-      }
-      const auto last_trade = rest_.get_last_trade_time(candidate.ticker);
-      if (last_trade.has_value() && *last_trade < staleness_cutoff) {
-        get_logger()->info(
-            "scanner: dropped ticker={} — last trade {}m ago (limit {}m)",
-            candidate.ticker,
-            std::chrono::duration_cast<std::chrono::minutes>(now - *last_trade)
-                .count(),
-            config_.max_stale_trade_minutes);
-        continue;
-      }
-      fresh.push_back(std::move(candidate));
-    }
-    candidates = std::move(fresh);
-  }
+  admit_finalists(candidates, top_n, now);
 
   if (static_cast<int>(candidates.size()) > top_n) {
     candidates.resize(static_cast<std::size_t>(top_n));
   }
 
   return candidates;
+}
+
+void TickerScanner::admit_finalists(
+    std::vector<MarketScore> &candidates, int top_n,
+    std::chrono::system_clock::time_point now) const {
+  const bool check_trades =
+      config_.max_stale_trade_minutes > 0 || config_.min_trades_per_hour > 0;
+  const bool check_book = config_.min_spread_cents > 0;
+  if (!check_trades && !check_book) {
+    return;
+  }
+  std::vector<MarketScore> admitted;
+  for (auto &candidate : candidates) {
+    if (static_cast<int>(admitted.size()) >= top_n) {
+      break;
+    }
+    if (check_trades && !passes_flow_admission(candidate.ticker, now)) {
+      continue;
+    }
+    if (check_book && !passes_book_admission(candidate.ticker)) {
+      continue;
+    }
+    admitted.push_back(std::move(candidate));
+  }
+  candidates = std::move(admitted);
+}
+
+bool TickerScanner::passes_flow_admission(
+    const std::string &ticker,
+    std::chrono::system_clock::time_point now) const {
+  const int probe_limit = std::max(config_.min_trades_per_hour, 1);
+  const auto trade_times = rest_.get_recent_trade_times(ticker, probe_limit);
+  if (!trade_times.has_value()) {
+    return true;
+  }
+  if (trade_times->empty()) {
+    get_logger()->info("scanner: dropped ticker={} — no public trades", ticker);
+    return false;
+  }
+  if (config_.max_stale_trade_minutes > 0) {
+    const auto staleness_cutoff =
+        now - std::chrono::minutes{config_.max_stale_trade_minutes};
+    if (trade_times->front() < staleness_cutoff) {
+      get_logger()->info(
+          "scanner: dropped ticker={} — last trade {}m ago (limit {}m)",
+          ticker,
+          std::chrono::duration_cast<std::chrono::minutes>(
+              now - trade_times->front())
+              .count(),
+          config_.max_stale_trade_minutes);
+      return false;
+    }
+  }
+  if (config_.min_trades_per_hour > 0) {
+    const auto hour_cutoff = now - std::chrono::hours{1};
+    const auto needed = static_cast<std::size_t>(config_.min_trades_per_hour);
+    if (trade_times->size() < needed ||
+        (*trade_times)[needed - 1] < hour_cutoff) {
+      get_logger()->info(
+          "scanner: dropped ticker={} — fewer than {} trades in the last hour",
+          ticker, config_.min_trades_per_hour);
+      return false;
+    }
+  }
+  return true;
+}
+
+bool TickerScanner::passes_book_admission(const std::string &ticker) const {
+  try {
+    LocalOrderbook book;
+    book.apply_snapshot(rest_.get_orderbook(ticker));
+    const auto bid = book.best_bid();
+    const auto ask = book.best_ask();
+    if (bid.has_value() && ask.has_value() &&
+        ask->price_cents - bid->price_cents < config_.min_spread_cents) {
+      get_logger()->info(
+          "scanner: dropped ticker={} — live book spread {}c tighter than {}c",
+          ticker, ask->price_cents - bid->price_cents,
+          config_.min_spread_cents);
+      return false;
+    }
+    return true;
+  } catch (const std::exception &ex) {
+    get_logger()->debug("scanner: book probe failed ticker={}: {}", ticker,
+                        ex.what());
+    return true;
+  }
 }
 
 } // namespace kalshi
