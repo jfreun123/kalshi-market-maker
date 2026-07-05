@@ -24,6 +24,11 @@ struct ScannerConfig {
   // Number of top-ranked tickers written into the generated trade config.
   // PLAN.md notes the Basic rate tier is safe at <=5 concurrent tickers.
   static constexpr int kDefaultTradeTopN = 5;
+  // Liveness filter (item 49): vol_24h is up to a day stale, so a market that
+  // was busy this morning can be dormant now. Ranked candidates whose most
+  // recent public trade is older than this are dropped (0 disables; unknown
+  // last-trade counts as fresh).
+  static constexpr int kDefaultMaxStaleTradeMinutes = 30;
 
   int min_price_cents{kDefaultMinPriceCents};
   int max_price_cents{kDefaultMaxPriceCents};
@@ -34,6 +39,7 @@ struct ScannerConfig {
   double max_days_to_close{kDefaultMaxDaysToClose};
   double incentive_weight{kDefaultIncentiveWeight};
   int trade_top_n{kDefaultTradeTopN};
+  int max_stale_trade_minutes{kDefaultMaxStaleTradeMinutes};
   // When non-empty, scan fetches each event series separately instead of
   // using the global /markets listing (which returns zero-volume junk).
   std::vector<std::string> event_series{};

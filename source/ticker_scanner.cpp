@@ -1,5 +1,7 @@
 #include "ticker_scanner.hpp"
 
+#include "logger.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <string>
@@ -163,6 +165,29 @@ TickerScanner::scan(int top_n,
             [](const MarketScore &lhs, const MarketScore &rhs) {
               return lhs.score > rhs.score;
             });
+
+  if (config_.max_stale_trade_minutes > 0) {
+    const auto staleness_cutoff =
+        now - std::chrono::minutes{config_.max_stale_trade_minutes};
+    std::vector<MarketScore> fresh;
+    for (auto &candidate : candidates) {
+      if (static_cast<int>(fresh.size()) >= top_n) {
+        break;
+      }
+      const auto last_trade = rest_.get_last_trade_time(candidate.ticker);
+      if (last_trade.has_value() && *last_trade < staleness_cutoff) {
+        get_logger()->info(
+            "scanner: dropped ticker={} — last trade {}m ago (limit {}m)",
+            candidate.ticker,
+            std::chrono::duration_cast<std::chrono::minutes>(now - *last_trade)
+                .count(),
+            config_.max_stale_trade_minutes);
+        continue;
+      }
+      fresh.push_back(std::move(candidate));
+    }
+    candidates = std::move(fresh);
+  }
 
   if (static_cast<int>(candidates.size()) > top_n) {
     candidates.resize(static_cast<std::size_t>(top_n));

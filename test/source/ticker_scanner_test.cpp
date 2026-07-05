@@ -532,3 +532,39 @@ TEST_F(TickerScannerTest, ScanDoesNotPenalizeHighProbabilityMarkets) {
   ASSERT_EQ(results.size(), 2U);
   EXPECT_NEAR(results[0].score, results[1].score, 1e-9);
 }
+
+TEST_F(TickerScannerTest, StaleMarketDroppedByLivenessFilter) {
+  auto [client, transport] = make_client_with_transport();
+  transport->enqueue(
+      {kHttpOk, make_markets_response({kMarketGoodA, kMarketGoodB})});
+  transport->enqueue({kHttpOk, R"({"incentive_programs":[],"cursor":""})"});
+  transport->enqueue(
+      {kHttpOk,
+       R"({"cursor":"","trades":[{"created_time":"2026-06-20T21:00:00Z",)"
+       R"("ticker":"KXCPI-B","trade_id":"t-old"}]})"});
+  transport->enqueue(
+      {kHttpOk,
+       R"({"cursor":"","trades":[{"created_time":"2026-06-20T23:45:00Z",)"
+       R"("ticker":"KXFED-A","trade_id":"t-fresh"}]})"});
+
+  kalshi::TickerScanner scanner{client};
+  auto results = scanner.scan(kScanTopN, kTestNow);
+
+  ASSERT_EQ(results.size(), 1U)
+      << "a market whose last trade is 3h old must be dropped";
+  EXPECT_EQ(results.front().ticker, "KXFED-A");
+}
+
+TEST_F(TickerScannerTest, LivenessFilterDisabledKeepsStaleMarkets) {
+  auto [client, transport] = make_client_with_transport();
+  transport->enqueue(
+      {kHttpOk, make_markets_response({kMarketGoodA, kMarketGoodB})});
+  transport->enqueue({kHttpOk, R"({"incentive_programs":[],"cursor":""})"});
+
+  kalshi::ScannerConfig no_liveness;
+  no_liveness.max_stale_trade_minutes = 0;
+  kalshi::TickerScanner scanner{client, no_liveness};
+  auto results = scanner.scan(kScanTopN, kTestNow);
+
+  EXPECT_EQ(results.size(), 2U);
+}
