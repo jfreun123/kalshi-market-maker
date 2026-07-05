@@ -195,6 +195,23 @@
     `scan()`).* Ops half, not code: sessions must overlap live slates —
     quiet-morning runs produce $0 by construction.
 
+28. [x] **62 — expired-event / pinned-tape gate (Jacob's catch, 2026-07-05).**
+    Run 16 re-picked the July-4 rally mention market ON JULY 5 — the event
+    already happened, every outcome real-world determined (Kalshi chart: all
+    pinned ≤1%), yet it passed item 61: demo bots printed 10 trades/hour and
+    the book was 3c+ wide. **No metadata exposes this** — verified live:
+    `expected_expiration_time` = `close_time` = Jul 19 (settlement window),
+    `result` empty, status active, `liquidity_dollars` = \$0 on every demo
+    market, event object has no strike date. The tape is the tell: *every
+    print at exactly 24c for an hour* — trades without price discovery = a
+    determined market where only informed takers remain. *Done — finalists'
+    last-hour prints must span ≥ `min_trade_price_range_cents` (2) and
+    include ≥2 recent prints; reuses the item-61 trades probe (prices now
+    parsed alongside times), zero extra REST calls.* Jacob's rule, adopted:
+    **liquidity is a GATE, not a score input** — flow, spread, and tape
+    gates all must pass before score matters at all; a 0.957 volume score
+    cannot buy admission.
+
 **Selection principle (Jacob, 2026-07-04): profitable on every market we
 CHOOSE, then scale.** Not every market can be made profitably — trending
 books, dead books, and 1c-spread deep books all bleed makers. Scaling (Gate

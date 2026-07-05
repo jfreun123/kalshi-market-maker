@@ -37,6 +37,14 @@ struct ScannerConfig {
   // demands takers NOW. A parsed-but-empty trade tape is a definitive drop;
   // probe errors fail open. 0 disables.
   static constexpr int kDefaultMinTradesPerHour = 6;
+  // Tape-range admission (item 62): the past hour's prints must span at least
+  // this many cents. A tape pinned at one price is a determined market
+  // (expired event, settlement lottery) — trades exist but price discovery is
+  // over, and only informed takers remain. 0 disables.
+  static constexpr int kDefaultMinTradePriceRangeCents = 2;
+  // Prints fetched by the admission probe when the tape-range check alone
+  // needs samples.
+  static constexpr int kDefaultTapeProbeTrades = 8;
 
   int min_price_cents{kDefaultMinPriceCents};
   int max_price_cents{kDefaultMaxPriceCents};
@@ -50,6 +58,7 @@ struct ScannerConfig {
   int max_stale_trade_minutes{kDefaultMaxStaleTradeMinutes};
   int rotation_minutes{kDefaultRotationMinutes};
   int min_trades_per_hour{kDefaultMinTradesPerHour};
+  int min_trade_price_range_cents{kDefaultMinTradePriceRangeCents};
   // When non-empty, scan fetches each event series separately instead of
   // using the global /markets listing (which returns zero-volume junk).
   std::vector<std::string> event_series{};
@@ -81,6 +90,10 @@ private:
   [[nodiscard]] bool
   passes_flow_admission(const std::string &ticker,
                         std::chrono::system_clock::time_point now) const;
+  [[nodiscard]] bool tape_shows_price_discovery(
+      const std::vector<PublicTrade> &trades,
+      std::chrono::system_clock::time_point hour_cutoff,
+      const std::string &ticker) const;
   [[nodiscard]] bool passes_book_admission(const std::string &ticker) const;
 
   RestClient &rest_;
