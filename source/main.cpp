@@ -9,7 +9,6 @@
 #include "http_transport.hpp"
 #include "logger.hpp"
 #include "order_manager.hpp"
-#include "orderbook.hpp"
 #include "paper_transport.hpp"
 #include "portfolio.hpp"
 #include "pricing_model.hpp"
@@ -29,7 +28,6 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
-#include <cmath>
 #include <csignal>
 #include <filesystem>
 #include <fstream>
