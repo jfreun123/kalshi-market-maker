@@ -21,11 +21,7 @@
 
 namespace kalshi {
 
-std::filesystem::path
-trade_config_path_for(const std::filesystem::path &base_config_path);
-
 int run_scan_mode(RestClient &rest, const ScannerConfig &scanner_config,
-                  const std::filesystem::path &config_path,
                   std::shared_ptr<spdlog::logger> &log);
 
 bool reconcile_against_exchange(RestClient &rest,

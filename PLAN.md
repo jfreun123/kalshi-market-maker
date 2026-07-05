@@ -34,10 +34,10 @@
    reconcile is in sync — a laptop sleep is now a safe failure. PASS criteria
    for the real test: single-digit fades, ≤24 order-moves/min, markout
    ≥ +1.35c@30s (`scripts/analyze_fills.py logs/analytics_*.jsonl`).
-2. [ ] **L0 — latency baseline before any infra change.** Surface per-request
-   RTT (already timed at debug in `http_transport.cpp`), ack latency, and
-   delta→decision→request gaps into the analytics JSONL; p50/p95/max report;
-   one baseline session on the Mac, numbers recorded here.
+2. [x] **L0 — latency baseline.** *Done — per-request RTT flows into the
+   analytics JSONL (`type:"http"`); `scripts/latency_report.py` prints
+   p50/p95/max per endpoint. Mac baseline (2026-07-04): order-path ~294ms,
+   orderbook ~76ms, general GETs p50 184ms — the numbers L1 must beat.*
 3. [ ] **L1 — EC2 in Kalshi's region** (t4g.small ~$12/mo; NOT a trading-VPS
    product). Probe us-east-1 vs us-east-2 RTT first; rerun the L0 session
    from the winner; fold host into Phase 32 supervision.
@@ -70,21 +70,20 @@
 13. [ ] **42b — queue-value reprice rule**: only reprice when
     `|fv − quoted| · fill_prob` beats the queue value abandoned (needs 31
     fill-prob data).
-14. [ ] **53 — cancel ALL orders at startup + confirmed shutdown flatten
-    (P0, Jacob's call 2026-07-04).** Run 8's Mac-sleep shutdown died
-    mid-flatten with the network down; two orders survived, run 9's startup
-    left them ("untracked ticker → leave in place"), and the stale ask was
-    picked off for −$0.70 during the Wiesberger surge. Fix: (a) startup
-    cancels **every resting order on the account**, tracked or not — single
-    operator, no other sessions to respect; (b) shutdown flatten verifies
-    each cancel and retries with backoff instead of fire-and-forget.
-15. [ ] **49 — scanner liveness filter**: vol_24h is stale; require recent
-    trades/book activity so holiday-morning dormant markets don't get picked
-    — and the flip side: a 1c-spread 22k-deep book (BMW golf) is correctly
-    excluded (no premium left; our niche is under-served mid-range books).
-16. [ ] **52 — in-session market rotation**: every N minutes re-scan; drop
-    markets that went dead (flat + no orders only), adopt current top picks.
-    Sessions today sat on finished games while live flow was elsewhere.
+14. [x] **53 — order janitorial.** *Done — startup cancels every resting
+    order account-wide; shutdown sweeps `get_open_orders()` with retries
+    until the exchange confirms clean. Validated live same day.*
+15. [x] **49 — scanner liveness filter.** *Done — candidates whose last
+    public trade is older than `max_stale_trade_minutes` (30) are dropped;
+    validated live (picked the one genuinely trading market).*
+16. [x] **52 — in-session market rotation.** *Done — every
+    `rotation_minutes` (5) the session re-scans, drops dead+idle markets
+    (never with a position or resting orders), adopts live picks.
+    Follow-up 2026-07-04: **market selection moved into startup** — the
+    session scans for its own tickers when `target_tickers` is empty (now
+    the default); `--scan` is research-only; the generated
+    `config-demo.trade.json` two-process workflow and `write_trade_config`
+    were removed; `run_demo.sh` is single-process.*
 17. [ ] **45 — decision-oriented quote logging** (the "why" per placement:
     spread components, reprice reason; latency counters fold into L0).
 18. [ ] **23 — ceil-per-order maker-fee model** (mostly inert while demo maker
@@ -106,28 +105,28 @@ north-star), `Session` concept — detail in the archive and
 [ADR-007](docs/adr/007-process-per-strategy-and-aggregator.md). P3 structural
 refactors (R1–R4, R7) never block the gates.
 
-## State of play (2026-07-04)
+## State of play (2026-07-04, end of day)
 
-- **Quoter stack shipped and merged**: min-rest hysteresis + adverse
-  theo-jump fade (two-tick confirmed) + EMA-smoothed fair value (α=0.2) +
-  LMSR log-odds inventory skew (b from risk budget) + longshot edge floor
-  (<40c buys +1c) + maker-favor rounding + crossed-book guard + own-quote
-  subtraction.
-- **Resilience**: REST fill backfill on WS reconnect, recoverable drift
-  halts, idle-market re-quote (30s), orphan cancel on start, clean SIGINT
-  flatten, PnL carry, fill dedup.
-- **Measurement**: analytics JSONL (quote decisions + fills) →
-  `scripts/analyze_fills.py` markout/effective-spread report. Working live.
-- **Run 7** (first wave-2 session, 7 min in-play): markout **+1.35c@30s /
-  −0.46c@5min** (n=11) vs −2.4c run-3 baseline; PnL −$0.23; found D13 fade
-  oscillator + D14 rest-clock bug → both fixed (PR #69), not yet validated
-  live (item 1).
-- **Run 9** (~20 min, calm books): 4 places / 4 confirmed cancels / 1 fill;
-  zero fades — quiet-book discipline holds. Day's markout unchanged:
-  +1.35c@30s / −0.46c@5min (n=11). In-play D13 validation still pending.
-- **Lifetime demo ledger: ≈ −$4.06** (run 8 −$0, run 9 zombie −$0.70).
+- **Quoter**: min-rest + adverse fade (two-tick, EMA-smoothed fv α=0.2) +
+  LMSR inventory skew + longshot floor + maker-favor rounding + crossed-book
+  guard + own-quote subtraction. Validated: markout **+1.35c@30s /
+  −0.46c@5min** (n=11, run 7) vs −2.4c old-quoter baseline; calm books
+  produce zero churn (runs 8–10). In-play validation of the D13/D14 fixes
+  still pending (item 1).
+- **Flow**: startup scans and selects its own live markets (top
+  `trade_top_n`, default 1); liveness-filtered; rotated every 5 min;
+  account-wide order hygiene at both ends of the session.
+- **Measurement**: analytics JSONL (quotes, fills, http RTT) →
+  `analyze_fills.py` (markout) + `latency_report.py` (L0 baseline above).
+- **Codebase**: cleanup pass 1+2 done — dead modules removed
+  (`adverse_selection`, `write_trade_config`), `main.cpp` 810→~520 lines
+  (mode runners in `app_modes.{hpp,cpp}`, tested), 1,233-line quoter test
+  split into pricing + reprice suites.
+- **Lifetime demo ledger ≈ −$4.06.** PnL now needs fills-in-volume: run
+  sessions during live slates; the machinery debate is settled.
 - Demo quirks: order entry can 503 exchange-wide while `/exchange/status`
-  says `trading_active` (July 4 outage); fills can be fractional contracts.
+  says active; fills can be fractional; laptop sleep mid-session is safe but
+  wastes the session — soak runs belong on the L1 VM.
 
 ## Working agreements
 

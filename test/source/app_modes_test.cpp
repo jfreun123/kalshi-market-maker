@@ -42,13 +42,6 @@ public:
   static void SetUpTestSuite() { kPemPrivateKey = generate_rsa_pem(); }
 };
 
-TEST_F(AppModesTest, TradeConfigPathInsertsTradeBeforeExtension) {
-  EXPECT_EQ(kalshi::trade_config_path_for("config.json"),
-            std::filesystem::path{"config.trade.json"});
-  EXPECT_EQ(kalshi::trade_config_path_for("dir/config-demo.json"),
-            std::filesystem::path{"dir/config-demo.trade.json"});
-}
-
 TEST_F(AppModesTest, ReconcileInSyncReturnsTrueAndKeepsQuoting) {
   auto transport = std::make_unique<FakeTransport>();
   FakeTransport *const transport_raw = transport.get();

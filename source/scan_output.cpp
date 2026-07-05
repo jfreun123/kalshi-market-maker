@@ -61,30 +61,4 @@ bool write_scan_results(const std::filesystem::path &path,
   return file.good();
 }
 
-bool write_trade_config(const std::filesystem::path &base_config_path,
-                        const std::filesystem::path &output_path,
-                        const std::vector<std::string> &tickers) {
-  std::ifstream base_file{base_config_path};
-  if (!base_file) {
-    return false;
-  }
-
-  nlohmann::json config;
-  try {
-    config = nlohmann::json::parse(base_file);
-  } catch (const nlohmann::json::parse_error &) {
-    return false;
-  }
-
-  config["target_tickers"] = tickers;
-
-  std::ofstream out_file{output_path};
-  if (!out_file) {
-    return false;
-  }
-  constexpr int kJsonIndent = 2;
-  out_file << config.dump(kJsonIndent);
-  return out_file.good();
-}
-
 } // namespace kalshi

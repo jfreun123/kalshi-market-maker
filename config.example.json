@@ -3,10 +3,7 @@
   "private_key_path": "/path/to/your/kalshi-private-key.pem",
   "base_url": "https://api.elections.kalshi.com/trade-api/v2",
   "ws_url": "wss://api.elections.kalshi.com/trade-api/ws/v2",
-  "target_tickers": [
-    "KXBTCD-25DEC31-B90000",
-    "KXBTCD-25DEC31-B95000"
-  ],
+  "target_tickers": [],
   "quoter": {
     "target_spread_cents": 4,
     "reprice_threshold_cents": 1,
