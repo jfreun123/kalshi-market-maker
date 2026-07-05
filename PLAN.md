@@ -69,8 +69,15 @@
 10. [ ] **51 — panic pull tier (Jacob to confirm)**: on a catastrophic jump
     (≥ `panic_jump_cents`, e.g. 8), cancel the toxic side instantly — no
     confirmation, no rest floor, no re-quote until the book settles.
-11. [ ] **32 — directional flow lean**: signed IR signal → bounded fv offset
-    (±1c), decaying 15–30 min; validate thresholds on item-31 markout.
+11. [x] **32 — directional flow lean + inventory brake.** *Done — while the
+    flow guard is imbalanced, fair value leans `flow_lean_cents` (1c) toward
+    the takers' side (believe persistent flow; decays with the guard's 5-min
+    window); and at `inventory_cap_lots` × quote_size (2× = 20) the
+    accumulating side stops quoting entirely — the run-13 pattern (30-lot
+    pile-up into a trend, drift −$0.42 + exit −$1.05) is now capped at 20
+    with the belief already leaning toward the move. Validate on the next
+    busy session's attribution: drift and exit_cost per contract should
+    shrink.* Original scope: signed IR → bounded offset (Bawa p.8).
 12. [ ] **24 — layered quoting (queue priming)**: 2–3 size layers 1–3c behind
     the inside; queue position is earned by resting before the move.
 13. [ ] **42b — queue-value reprice rule**: only reprice when

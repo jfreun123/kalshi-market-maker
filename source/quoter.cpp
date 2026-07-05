@@ -41,10 +41,10 @@ Quoter::Quoter(QuoterConfig config, FairValueEngine fv_engine,
       risk_mgr_{risk_mgr}, flow_guard_{flow_guard},
       clock_{clock ? std::move(clock)
                    : Clock{[] { return std::chrono::steady_clock::now(); }}},
-      inventory_b_contracts_{std::max(
-          lmsr_b_from_risk(risk_mgr.limits().max_position_per_market,
-                           risk_mgr.limits().max_quote_price_cents),
-          kMinBPerQuoteLot * config.quote_size)} {}
+      inventory_b_contracts_{
+          std::max(lmsr_b_from_risk(risk_mgr.limits().max_position_per_market,
+                                    risk_mgr.limits().max_quote_price_cents),
+                   kMinBPerQuoteLot * config.quote_size)} {}
 
 double lmsr_b_from_risk(int max_position_contracts, int max_quote_price_cents) {
   const double upper = static_cast<double>(max_quote_price_cents);
@@ -329,8 +329,16 @@ void Quoter::update(std::string_view ticker, const LocalOrderbook &book) {
   }
   const int half_spread = base_half_spread + fee_cents;
   const double inventory = order_mgr_.net_position(ticker_str).contracts();
+  double leaned_val = fair_val;
+  if (imbalanced && flow_guard_ != nullptr) {
+    const auto taker_side = flow_guard_->dominant_taker_side(ticker_str);
+    if (taker_side.has_value()) {
+      leaned_val += (*taker_side == Side::Yes) ? config_.flow_lean_cents
+                                               : -config_.flow_lean_cents;
+    }
+  }
   const double reservation_val =
-      lmsr_skewed_fair_value(fair_val, inventory, inventory_b_contracts_);
+      lmsr_skewed_fair_value(leaned_val, inventory, inventory_b_contracts_);
 
   auto [raw_bid, raw_ask] = compute_quotes(reservation_val, half_spread);
   if (raw_bid < config_.longshot_price_threshold_cents) {
@@ -358,8 +366,12 @@ void Quoter::update(std::string_view ticker, const LocalOrderbook &book) {
   }
 
   const std::chrono::steady_clock::time_point now = clock_();
-  const bool suppress_bid = reduce_only_ && inventory >= 0.0;
-  const bool suppress_ask = reduce_only_ && inventory <= 0.0;
+  const double inventory_cap =
+      static_cast<double>(config_.inventory_cap_lots) * config_.quote_size;
+  const bool suppress_bid =
+      (reduce_only_ && inventory >= 0.0) || inventory >= inventory_cap;
+  const bool suppress_ask =
+      (reduce_only_ && inventory <= 0.0) || inventory <= -inventory_cap;
   if (suppress_bid && !own.bid_order_id.empty() &&
       release_order(own.bid_order_id)) {
     own.bid_order_id.clear();

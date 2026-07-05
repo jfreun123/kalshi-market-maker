@@ -63,6 +63,12 @@ struct QuoterConfig {
   // Passive wind-down window at shutdown (item 56): exit as a maker for up
   // to this long before force-flattening the remainder. 0 = old behavior.
   static constexpr int kDefaultWinddownSeconds = 45;
+  // Directional flow lean (item 32): while flow is imbalanced, shift fair
+  // value toward the takers' side by this much — believe persistent flow.
+  static constexpr double kDefaultFlowLeanCents = 1.0;
+  // Inventory brake: at this many multiples of quote_size, the accumulating
+  // side stops quoting entirely (run: a 30-lot pile-up vs 10-lot quotes).
+  static constexpr int kDefaultInventoryCapLots = 2;
 
   int target_spread_cents = kDefaultTargetSpreadCents;
   int reprice_threshold_cents = kDefaultRepriceThresholdCents;
@@ -76,6 +82,8 @@ struct QuoterConfig {
   int longshot_edge_cents = kDefaultLongshotEdgeCents;
   double fv_ema_alpha = kDefaultFvEmaAlpha;
   int winddown_seconds = kDefaultWinddownSeconds;
+  double flow_lean_cents = kDefaultFlowLeanCents;
+  int inventory_cap_lots = kDefaultInventoryCapLots;
   // Price toward the favorite-longshot-debiased view instead of the raw mid.
   // Off by default (HeuristicModel is the safe baseline); β per Bürgi et al.
   bool use_view_based_pricing = false;

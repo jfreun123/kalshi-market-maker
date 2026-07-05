@@ -289,13 +289,10 @@ TEST_F(QuoterTest, AskAlwaysHigherThanBidWithExtremeInventory) {
   kalshi::Quoter quoter{kalshi::QuoterConfig{}, order_mgr, risk_mgr};
   quoter.update(kTicker, make_ob(kYesBid52, kNoBid52));
 
-  ASSERT_EQ(transport.recorded_requests().size(), 2U);
-  // kExpectedBidExtremeClamp = 1 → "0.0100".
-  const std::string &bid_body = transport.recorded_requests().at(0).body;
-  EXPECT_NE(bid_body.find("\"side\":\"bid\""), std::string::npos);
-  EXPECT_NE(bid_body.find(std::string(kBidPriceExtremeClamp)),
-            std::string::npos);
-  const std::string &ask_body = transport.recorded_requests().at(1).body;
+  // Extreme long inventory: the cap suppresses the bid entirely; only the
+  // unwind ask quotes, and it still clears the bid range.
+  ASSERT_EQ(transport.recorded_requests().size(), 1U);
+  const std::string &ask_body = transport.recorded_requests().at(0).body;
   EXPECT_NE(ask_body.find("\"side\":\"ask\""), std::string::npos);
   EXPECT_NE(ask_body.find(std::string(kAskPriceExtremeClamp)),
             std::string::npos);
@@ -596,7 +593,6 @@ TEST_F(QuoterTest, MidRangeQuotesNotShadedByLongshotFloor) {
   EXPECT_NE(ask_body.find(std::string(kAskPriceMid52)), std::string::npos);
 }
 
-
 TEST_F(QuoterTest, SingleFillNeverQuotesAGuaranteedLossExit) {
   auto transport_ptr = std::make_unique<FakeTransport>();
   FakeTransport &transport = *transport_ptr;
@@ -635,4 +631,53 @@ TEST_F(QuoterTest, SingleFillNeverQuotesAGuaranteedLossExit) {
     checked_ask = true;
   }
   EXPECT_TRUE(checked_ask);
+}
+
+TEST_F(QuoterTest, ImbalancedFlowLeansFairValueTowardTakers) {
+  auto transport_ptr = std::make_unique<FakeTransport>();
+  FakeTransport &transport = *transport_ptr;
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId1, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId2, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  kalshi::RestClient rest{kalshi::Auth{kApiKey, kPemPrivateKey},
+                          std::move(transport_ptr), kBaseUrl};
+  kalshi::OrderManager order_mgr{rest};
+  kalshi::RiskManager risk_mgr{kalshi::RiskLimits{}};
+  kalshi::FlowImbalanceGuard guard{kalshi::FlowImbalanceConfig{}};
+  guard.record_fill(kTicker, kalshi::Side::No, kImbalanceYesQty,
+                    std::chrono::system_clock::now());
+  kalshi::Quoter quoter{kalshi::QuoterConfig{}, order_mgr, risk_mgr, &guard};
+
+  quoter.update(kTicker, make_ob(kYesBid52, kNoBid52));
+
+  // We filled NO 30 lots → takers bought YES → lean +1c. Base imbalanced
+  // quote is bid 49 (half 3); with the lean it becomes 50.
+  const std::string &bid_body = transport.recorded_requests().at(0).body;
+  EXPECT_NE(bid_body.find(R"("price":"0.5000")"), std::string::npos)
+      << "persistent one-sided flow must shift the belief toward the flow";
+}
+
+TEST_F(QuoterTest, InventoryCapStopsTheAccumulatingSide) {
+  auto transport_ptr = std::make_unique<FakeTransport>();
+  FakeTransport &transport = *transport_ptr;
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId1, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  kalshi::RestClient rest{kalshi::Auth{kApiKey, kPemPrivateKey},
+                          std::move(transport_ptr), kBaseUrl};
+  kalshi::OrderManager order_mgr{rest};
+  constexpr int kAtCap = 2 * kalshi::QuoterConfig::kDefaultQuoteSize;
+  record_position_fill(order_mgr, kOrderId1, kalshi::Side::Yes, kAtCap);
+  kalshi::RiskManager risk_mgr{kalshi::RiskLimits{}};
+  kalshi::Quoter quoter{kalshi::QuoterConfig{}, order_mgr, risk_mgr};
+
+  quoter.update(kTicker, make_ob(kYesBid52, kNoBid52));
+
+  ASSERT_EQ(transport.recorded_requests().size(), 1U)
+      << "at 2x quote_size long, only the unwind side may quote";
+  EXPECT_NE(transport.recorded_requests().front().body.find("\"side\":\"ask\""),
+            std::string::npos);
 }
