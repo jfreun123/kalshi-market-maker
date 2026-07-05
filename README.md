@@ -83,8 +83,10 @@ cp config.example.json config.json
 - `flow` — the imbalance guard's window and trigger ratio.
 - `scanner` — market filters (price band, spread band, 24h volume, days to
   close, `max_stale_trade_minutes` liveness cutoff, `min_trades_per_hour`
-  flow-rate floor); finalists are re-checked against the live orderbook so a
-  penny-wide book never gets adopted.
+  flow-rate floor, `min_trade_price_range_cents` pinned-tape guard);
+  finalists are re-checked against the live orderbook and recent tape, so a
+  penny-wide book or a determined (expired-event) market never gets adopted.
+  Liquidity gates are hard requirements — score only ranks markets that pass.
 
 Config files with real credentials (`config.json`, `config-demo.json`) are
 gitignored. Secrets policy: see `CLAUDE.md`.

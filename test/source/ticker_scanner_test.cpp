@@ -126,6 +126,19 @@ constexpr std::string_view kMarketTooSoon =
     R"("status":"active","yes_bid_dollars":"0.4800","yes_ask_dollars":"0.5200",)"
     R"("volume_24h_fp":"200000.00","close_time":"2026-06-21T07:00:00Z"})";
 
+// Filtered: ticker-dated 2026-06-19, two days before kTestNow — the event
+// already happened even though close_time (settlement window) is weeks out
+constexpr std::string_view kMarketExpiredEventDate =
+    R"({"ticker":"KXOLD-26JUN19FOO-BAR","title":"Already-played event?","category":"Financials",)"
+    R"("status":"active","yes_bid_dollars":"0.4800","yes_ask_dollars":"0.5200",)"
+    R"("volume_24h_fp":"200000.00","close_time":"2026-07-19T00:00:00Z"})";
+
+// Kept: ticker-dated exactly kTestNow's date (2026-06-21) — event is today
+constexpr std::string_view kMarketTodayEventDate =
+    R"({"ticker":"KXNOW-26JUN211830FOO-BAR","title":"Event happening today?","category":"Financials",)"
+    R"("status":"active","yes_bid_dollars":"0.4800","yes_ask_dollars":"0.5200",)"
+    R"("volume_24h_fp":"200000.00","close_time":"2026-06-26T00:00:00Z"})";
+
 std::string
 make_markets_response(std::initializer_list<std::string_view> markets) {
   std::string body = R"({"markets":[)";
@@ -541,15 +554,16 @@ TEST_F(TickerScannerTest, StaleMarketDroppedByLivenessFilter) {
   transport->enqueue(
       {kHttpOk,
        R"({"cursor":"","trades":[{"created_time":"2026-06-20T21:00:00Z",)"
-       R"("ticker":"KXCPI-B","trade_id":"t-old"}]})"});
+       R"("ticker":"KXCPI-B","trade_id":"t-old","yes_price_dollars":"0.5000"}]})"});
   transport->enqueue(
       {kHttpOk,
        R"({"cursor":"","trades":[{"created_time":"2026-06-20T23:45:00Z",)"
-       R"("ticker":"KXFED-A","trade_id":"t-fresh"}]})"});
+       R"("ticker":"KXFED-A","trade_id":"t-fresh","yes_price_dollars":"0.5000"}]})"});
 
   kalshi::ScannerConfig staleness_only;
   staleness_only.min_trades_per_hour = 0;
   staleness_only.min_spread_cents = 0;
+  staleness_only.min_trade_price_range_cents = 0;
   kalshi::TickerScanner scanner{client, staleness_only};
   auto results = scanner.scan(kScanTopN, kTestNow);
 
@@ -568,6 +582,7 @@ TEST_F(TickerScannerTest, LivenessFilterDisabledKeepsStaleMarkets) {
   no_admission.max_stale_trade_minutes = 0;
   no_admission.min_trades_per_hour = 0;
   no_admission.min_spread_cents = 0;
+  no_admission.min_trade_price_range_cents = 0;
   kalshi::TickerScanner scanner{client, no_admission};
   auto results = scanner.scan(kScanTopN, kTestNow);
 
@@ -582,20 +597,21 @@ TEST_F(TickerScannerTest, SparseFlowMarketDropped) {
   transport->enqueue(
       {kHttpOk,
        R"({"cursor":"","trades":[{"created_time":"2026-06-20T23:50:00Z",)"
-       R"("ticker":"KXCPI-B","trade_id":"b1"},)"
+       R"("ticker":"KXCPI-B","trade_id":"b1","yes_price_dollars":"0.4800"},)"
        R"({"created_time":"2026-06-20T23:30:00Z",)"
-       R"("ticker":"KXCPI-B","trade_id":"b2"}]})"});
+       R"("ticker":"KXCPI-B","trade_id":"b2","yes_price_dollars":"0.5100"}]})"});
   transport->enqueue(
       {kHttpOk,
        R"({"cursor":"","trades":[{"created_time":"2026-06-20T23:50:00Z",)"
-       R"("ticker":"KXFED-A","trade_id":"a1"},)"
+       R"("ticker":"KXFED-A","trade_id":"a1","yes_price_dollars":"0.4800"},)"
        R"({"created_time":"2026-06-20T21:00:00Z",)"
-       R"("ticker":"KXFED-A","trade_id":"a2"}]})"});
+       R"("ticker":"KXFED-A","trade_id":"a2","yes_price_dollars":"0.5100"}]})"});
 
   kalshi::ScannerConfig flow_only;
   flow_only.max_stale_trade_minutes = 0;
   flow_only.min_spread_cents = 0;
   flow_only.min_trades_per_hour = 2;
+  flow_only.min_trade_price_range_cents = 0;
   kalshi::TickerScanner scanner{client, flow_only};
   auto results = scanner.scan(kScanTopN, kTestNow);
 
@@ -614,12 +630,13 @@ TEST_F(TickerScannerTest, NeverTradedMarketDroppedWhenFlowFilterActive) {
   transport->enqueue(
       {kHttpOk,
        R"({"cursor":"","trades":[{"created_time":"2026-06-20T23:50:00Z",)"
-       R"("ticker":"KXFED-A","trade_id":"a1"}]})"});
+       R"("ticker":"KXFED-A","trade_id":"a1","yes_price_dollars":"0.5000"}]})"});
 
   kalshi::ScannerConfig flow_only;
   flow_only.max_stale_trade_minutes = 0;
   flow_only.min_spread_cents = 0;
   flow_only.min_trades_per_hour = 1;
+  flow_only.min_trade_price_range_cents = 0;
   kalshi::TickerScanner scanner{client, flow_only};
   auto results = scanner.scan(kScanTopN, kTestNow);
 
@@ -645,6 +662,7 @@ TEST_F(TickerScannerTest, TightLiveBookDropped) {
   kalshi::ScannerConfig book_only;
   book_only.max_stale_trade_minutes = 0;
   book_only.min_trades_per_hour = 0;
+  book_only.min_trade_price_range_cents = 0;
   kalshi::TickerScanner scanner{client, book_only};
   auto results = scanner.scan(kScanTopN, kTestNow);
 
@@ -669,9 +687,92 @@ TEST_F(TickerScannerTest, OneSidedLiveBookAdmitted) {
   kalshi::ScannerConfig book_only;
   book_only.max_stale_trade_minutes = 0;
   book_only.min_trades_per_hour = 0;
+  book_only.min_trade_price_range_cents = 0;
   kalshi::TickerScanner scanner{client, book_only};
   auto results = scanner.scan(kScanTopN, kTestNow);
 
   EXPECT_EQ(results.size(), 2U)
       << "an empty book side means room to quote, not a tight book";
+}
+
+TEST_F(TickerScannerTest, TickerDatedPastEventDropped) {
+  auto [client, transport] = make_client_with_transport();
+  transport->enqueue(
+      {kHttpOk, make_markets_response({kMarketGoodA, kMarketExpiredEventDate,
+                                       kMarketTodayEventDate})});
+  transport->enqueue({kHttpOk, R"({"incentive_programs":[],"cursor":""})"});
+
+  kalshi::ScannerConfig no_admission;
+  no_admission.max_stale_trade_minutes = 0;
+  no_admission.min_trades_per_hour = 0;
+  no_admission.min_spread_cents = 0;
+  no_admission.min_trade_price_range_cents = 0;
+  kalshi::TickerScanner scanner{client, no_admission};
+  auto results = scanner.scan(kScanTopN, kTestNow);
+
+  ASSERT_EQ(results.size(), 2U)
+      << "a ticker dated before today is an already-decided event";
+  for (const auto &result : results) {
+    EXPECT_NE(result.ticker, "KXOLD-26JUN19FOO-BAR");
+  }
+}
+
+TEST_F(TickerScannerTest, PinnedTapeDropped) {
+  auto [client, transport] = make_client_with_transport();
+  transport->enqueue(
+      {kHttpOk, make_markets_response({kMarketGoodA, kMarketGoodB})});
+  transport->enqueue({kHttpOk, R"({"incentive_programs":[],"cursor":""})"});
+  transport->enqueue(
+      {kHttpOk,
+       R"({"cursor":"","trades":[{"created_time":"2026-06-20T23:50:00Z",)"
+       R"("ticker":"KXCPI-B","trade_id":"b1","yes_price_dollars":"0.2400"},)"
+       R"({"created_time":"2026-06-20T23:40:00Z",)"
+       R"("ticker":"KXCPI-B","trade_id":"b2","yes_price_dollars":"0.2400"}]})"});
+  transport->enqueue(
+      {kHttpOk,
+       R"({"cursor":"","trades":[{"created_time":"2026-06-20T23:50:00Z",)"
+       R"("ticker":"KXFED-A","trade_id":"a1","yes_price_dollars":"0.2400"},)"
+       R"({"created_time":"2026-06-20T23:40:00Z",)"
+       R"("ticker":"KXFED-A","trade_id":"a2","yes_price_dollars":"0.2600"}]})"});
+
+  kalshi::ScannerConfig tape_only;
+  tape_only.max_stale_trade_minutes = 0;
+  tape_only.min_trades_per_hour = 0;
+  tape_only.min_spread_cents = 0;
+  tape_only.min_trade_price_range_cents = 2;
+  kalshi::TickerScanner scanner{client, tape_only};
+  auto results = scanner.scan(kScanTopN, kTestNow);
+
+  ASSERT_EQ(results.size(), 1U)
+      << "a tape pinned at one price is a determined market, not a live one";
+  EXPECT_EQ(results.front().ticker, "KXFED-A");
+}
+
+TEST_F(TickerScannerTest, SingleRecentTradeFailsTapeRangeCheck) {
+  auto [client, transport] = make_client_with_transport();
+  transport->enqueue(
+      {kHttpOk, make_markets_response({kMarketGoodA, kMarketGoodB})});
+  transport->enqueue({kHttpOk, R"({"incentive_programs":[],"cursor":""})"});
+  transport->enqueue(
+      {kHttpOk,
+       R"({"cursor":"","trades":[{"created_time":"2026-06-20T23:50:00Z",)"
+       R"("ticker":"KXCPI-B","trade_id":"b1","yes_price_dollars":"0.2400"}]})"});
+  transport->enqueue(
+      {kHttpOk,
+       R"({"cursor":"","trades":[{"created_time":"2026-06-20T23:50:00Z",)"
+       R"("ticker":"KXFED-A","trade_id":"a1","yes_price_dollars":"0.2400"},)"
+       R"({"created_time":"2026-06-20T23:40:00Z",)"
+       R"("ticker":"KXFED-A","trade_id":"a2","yes_price_dollars":"0.2700"}]})"});
+
+  kalshi::ScannerConfig tape_only;
+  tape_only.max_stale_trade_minutes = 0;
+  tape_only.min_trades_per_hour = 0;
+  tape_only.min_spread_cents = 0;
+  tape_only.min_trade_price_range_cents = 2;
+  kalshi::TickerScanner scanner{client, tape_only};
+  auto results = scanner.scan(kScanTopN, kTestNow);
+
+  ASSERT_EQ(results.size(), 1U)
+      << "fewer than two recent trades cannot demonstrate price discovery";
+  EXPECT_EQ(results.front().ticker, "KXFED-A");
 }

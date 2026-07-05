@@ -112,6 +112,15 @@ struct IncentiveProgram {
   int discount_factor_bps{0};
 };
 
+// ---- PublicTrade ----
+
+// One public print from GET /markets/trades: when it happened and at what
+// YES price. The scanner's admission probes read the recent tape from these.
+struct PublicTrade {
+  std::chrono::system_clock::time_point created_time;
+  int yes_price_cents{0};
+};
+
 // ---- Price helpers ----
 
 constexpr int kMinPriceCents = 1;

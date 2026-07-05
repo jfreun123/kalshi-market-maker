@@ -4,7 +4,9 @@
 #include "orderbook.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <optional>
 #include <string>
 #include <unordered_map>
 
@@ -14,6 +16,68 @@ namespace {
 
 constexpr double kSecondsPerDay = 86400.0;
 constexpr double kCentiCentsPerDollar = 10000.0;
+
+constexpr std::size_t kTickerDateTokenChars = 7;
+constexpr std::array<std::string_view, 12> kTickerMonthTokens = {
+    "JAN", "FEB", "MAR", "APR", "MAY", "JUN",
+    "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"};
+constexpr std::size_t kYearTensIndex = 0;
+constexpr std::size_t kYearOnesIndex = 1;
+constexpr std::size_t kMonthTokenOffset = 2;
+constexpr std::size_t kMonthTokenChars = 3;
+constexpr std::size_t kDayTensIndex = 5;
+constexpr std::size_t kDayOnesIndex = 6;
+constexpr int kTickerBaseYear = 2000;
+constexpr int kYearKeyFactor = 10'000;
+constexpr int kMonthKeyFactor = 100;
+constexpr int kDecimalBase = 10;
+constexpr int kMaxDayOfMonth = 31;
+
+bool is_ascii_digit(char character) {
+  return character >= '0' && character <= '9';
+}
+
+std::optional<int> ticker_event_date_key(std::string_view ticker) {
+  const auto dash = ticker.find('-');
+  if (dash == std::string_view::npos ||
+      ticker.size() < dash + 1 + kTickerDateTokenChars) {
+    return std::nullopt;
+  }
+  const auto token = ticker.substr(dash + 1, kTickerDateTokenChars);
+  if (!is_ascii_digit(token[kYearTensIndex]) ||
+      !is_ascii_digit(token[kYearOnesIndex]) ||
+      !is_ascii_digit(token[kDayTensIndex]) ||
+      !is_ascii_digit(token[kDayOnesIndex])) {
+    return std::nullopt;
+  }
+  const auto month_token = token.substr(kMonthTokenOffset, kMonthTokenChars);
+  const auto *const month_iter =
+      std::ranges::find(kTickerMonthTokens, month_token);
+  if (month_iter == kTickerMonthTokens.end()) {
+    return std::nullopt;
+  }
+  const int month = static_cast<int>(
+                        std::distance(kTickerMonthTokens.begin(), month_iter)) +
+                    1;
+  const int year = kTickerBaseYear +
+                   ((token[kYearTensIndex] - '0') * kDecimalBase) +
+                   (token[kYearOnesIndex] - '0');
+  const int day = ((token[kDayTensIndex] - '0') * kDecimalBase) +
+                  (token[kDayOnesIndex] - '0');
+  if (day < 1 || day > kMaxDayOfMonth) {
+    return std::nullopt;
+  }
+  return (year * kYearKeyFactor) + (month * kMonthKeyFactor) + day;
+}
+
+int utc_date_key(std::chrono::system_clock::time_point now) {
+  const std::chrono::year_month_day date{
+      std::chrono::floor<std::chrono::days>(now)};
+  return (static_cast<int>(date.year()) * kYearKeyFactor) +
+         (static_cast<int>(static_cast<unsigned>(date.month())) *
+          kMonthKeyFactor) +
+         static_cast<int>(static_cast<unsigned>(date.day()));
+}
 
 constexpr double kWeightVolume = 0.70;
 constexpr double kWeightSpread = 0.30;
@@ -104,11 +168,16 @@ TickerScanner::scan(int top_n,
   std::vector<MarketScore> candidates;
   candidates.reserve(markets.size());
 
+  const int today_key = utc_date_key(now);
   for (const auto &market : markets) {
     if (market.status != "active") {
       continue;
     }
     if (market.yes_bid_cents == 0 || market.yes_ask_cents == 0) {
+      continue;
+    }
+    const auto event_date_key = ticker_event_date_key(market.ticker);
+    if (event_date_key.has_value() && *event_date_key < today_key) {
       continue;
     }
 
@@ -179,8 +248,9 @@ TickerScanner::scan(int top_n,
 void TickerScanner::admit_finalists(
     std::vector<MarketScore> &candidates, int top_n,
     std::chrono::system_clock::time_point now) const {
-  const bool check_trades =
-      config_.max_stale_trade_minutes > 0 || config_.min_trades_per_hour > 0;
+  const bool check_trades = config_.max_stale_trade_minutes > 0 ||
+                            config_.min_trades_per_hour > 0 ||
+                            config_.min_trade_price_range_cents > 0;
   const bool check_book = config_.min_spread_cents > 0;
   if (!check_trades && !check_book) {
     return;
@@ -204,39 +274,80 @@ void TickerScanner::admit_finalists(
 bool TickerScanner::passes_flow_admission(
     const std::string &ticker,
     std::chrono::system_clock::time_point now) const {
-  const int probe_limit = std::max(config_.min_trades_per_hour, 1);
-  const auto trade_times = rest_.get_recent_trade_times(ticker, probe_limit);
-  if (!trade_times.has_value()) {
+  const int range_probe = config_.min_trade_price_range_cents > 0
+                              ? ScannerConfig::kDefaultTapeProbeTrades
+                              : 1;
+  const int probe_limit =
+      std::max({config_.min_trades_per_hour, range_probe, 1});
+  const auto trades = rest_.get_recent_trades(ticker, probe_limit);
+  if (!trades.has_value()) {
     return true;
   }
-  if (trade_times->empty()) {
+  if (trades->empty()) {
     get_logger()->info("scanner: dropped ticker={} — no public trades", ticker);
     return false;
   }
   if (config_.max_stale_trade_minutes > 0) {
     const auto staleness_cutoff =
         now - std::chrono::minutes{config_.max_stale_trade_minutes};
-    if (trade_times->front() < staleness_cutoff) {
+    if (trades->front().created_time < staleness_cutoff) {
       get_logger()->info(
           "scanner: dropped ticker={} — last trade {}m ago (limit {}m)",
           ticker,
           std::chrono::duration_cast<std::chrono::minutes>(
-              now - trade_times->front())
+              now - trades->front().created_time)
               .count(),
           config_.max_stale_trade_minutes);
       return false;
     }
   }
+  const auto hour_cutoff = now - std::chrono::hours{1};
   if (config_.min_trades_per_hour > 0) {
-    const auto hour_cutoff = now - std::chrono::hours{1};
     const auto needed = static_cast<std::size_t>(config_.min_trades_per_hour);
-    if (trade_times->size() < needed ||
-        (*trade_times)[needed - 1] < hour_cutoff) {
+    if (trades->size() < needed ||
+        (*trades)[needed - 1].created_time < hour_cutoff) {
       get_logger()->info(
           "scanner: dropped ticker={} — fewer than {} trades in the last hour",
           ticker, config_.min_trades_per_hour);
       return false;
     }
+  }
+  if (config_.min_trade_price_range_cents > 0 &&
+      !tape_shows_price_discovery(*trades, hour_cutoff, ticker)) {
+    return false;
+  }
+  return true;
+}
+
+bool TickerScanner::tape_shows_price_discovery(
+    const std::vector<PublicTrade> &trades,
+    std::chrono::system_clock::time_point hour_cutoff,
+    const std::string &ticker) const {
+  int min_price = kMaxPriceCents + 1;
+  int max_price = 0;
+  int recent_count = 0;
+  for (const auto &trade : trades) {
+    if (trade.created_time < hour_cutoff) {
+      break;
+    }
+    ++recent_count;
+    min_price = std::min(min_price, trade.yes_price_cents);
+    max_price = std::max(max_price, trade.yes_price_cents);
+  }
+  if (recent_count < 2) {
+    get_logger()->info(
+        "scanner: dropped ticker={} — too few recent prints to show price "
+        "discovery",
+        ticker);
+    return false;
+  }
+  const int range = max_price - min_price;
+  if (range < config_.min_trade_price_range_cents) {
+    get_logger()->info(
+        "scanner: dropped ticker={} — tape pinned in a {}c range over the "
+        "last hour (need {}c); likely a determined market",
+        ticker, range, config_.min_trade_price_range_cents);
+    return false;
   }
   return true;
 }

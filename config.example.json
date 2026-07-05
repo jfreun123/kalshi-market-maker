@@ -50,6 +50,7 @@
     "max_stale_trade_minutes": 30,
     "rotation_minutes": 5,
     "min_trades_per_hour": 6,
+    "min_trade_price_range_cents": 2,
     "trade_top_n": 5
   }
 }

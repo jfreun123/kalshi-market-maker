@@ -154,6 +154,9 @@ AppConfig load_config(const std::filesystem::path &path) {
         "rotation_minutes", ScannerConfig::kDefaultRotationMinutes);
     config.scanner.min_trades_per_hour = scanner_json.value(
         "min_trades_per_hour", ScannerConfig::kDefaultMinTradesPerHour);
+    config.scanner.min_trade_price_range_cents =
+        scanner_json.value("min_trade_price_range_cents",
+                           ScannerConfig::kDefaultMinTradePriceRangeCents);
   }
 
   const auto [quotable_min, quotable_max] =
