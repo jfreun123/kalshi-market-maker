@@ -29,6 +29,9 @@ struct ScannerConfig {
   // recent public trade is older than this are dropped (0 disables; unknown
   // last-trade counts as fresh).
   static constexpr int kDefaultMaxStaleTradeMinutes = 30;
+  // In-session market rotation cadence (item 52): re-scan and swap dead-idle
+  // markets for live ones every this many minutes; 0 disables rotation.
+  static constexpr int kDefaultRotationMinutes = 5;
 
   int min_price_cents{kDefaultMinPriceCents};
   int max_price_cents{kDefaultMaxPriceCents};
@@ -40,6 +43,7 @@ struct ScannerConfig {
   double incentive_weight{kDefaultIncentiveWeight};
   int trade_top_n{kDefaultTradeTopN};
   int max_stale_trade_minutes{kDefaultMaxStaleTradeMinutes};
+  int rotation_minutes{kDefaultRotationMinutes};
   // When non-empty, scan fetches each event series separately instead of
   // using the global /markets listing (which returns zero-volume junk).
   std::vector<std::string> event_series{};

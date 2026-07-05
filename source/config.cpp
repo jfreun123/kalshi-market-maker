@@ -144,6 +144,8 @@ AppConfig load_config(const std::filesystem::path &path) {
         "max_days_to_close", ScannerConfig::kDefaultMaxDaysToClose);
     config.scanner.max_stale_trade_minutes = scanner_json.value(
         "max_stale_trade_minutes", ScannerConfig::kDefaultMaxStaleTradeMinutes);
+    config.scanner.rotation_minutes = scanner_json.value(
+        "rotation_minutes", ScannerConfig::kDefaultRotationMinutes);
   }
 
   const auto [quotable_min, quotable_max] =
