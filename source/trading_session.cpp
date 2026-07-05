@@ -131,6 +131,13 @@ void TradingSession::record_flatten(const Order &order) {
   fill.timestamp = order.created_at;
   fill.is_taker = true;
   order_mgr_.record_fill(fill);
+  if (analytics_ != nullptr) {
+    const auto book = ob_map_.find(order.market_ticker);
+    const double mid_cents =
+        (book != ob_map_.end()) ? book->second.mid_price_cents() : 0.0;
+    analytics_->fill(fill, mid_cents,
+                     order_mgr_.net_position(order.market_ticker).contracts());
+  }
 
   const double session_pnl = order_mgr_.realized_pnl(order.market_ticker);
   const double total_pnl =

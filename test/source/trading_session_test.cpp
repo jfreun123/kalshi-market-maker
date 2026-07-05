@@ -537,6 +537,25 @@ TEST_F(TradingSessionTest, DuplicateFillDoesNotDoubleCountInFlowGuard) {
       << "a replayed duplicate fill must not feed the flow guard twice";
 }
 
+TEST_F(TradingSessionTest, FlattenEmitsAnalyticsFillEvent) {
+  std::vector<std::string> lines;
+  kalshi::AnalyticsLogger analytics{
+      [&lines](const std::string &line) { lines.push_back(line); }};
+  session_.set_analytics(&analytics);
+
+  kalshi::Order flatten_order;
+  flatten_order.id = "flatten-1";
+  flatten_order.market_ticker = kTicker;
+  flatten_order.side = kalshi::Side::Yes;
+  flatten_order.price_cents = 42;
+  flatten_order.filled_quantity = kalshi::Quantity::from_contracts(3);
+  session_.record_flatten(flatten_order);
+
+  ASSERT_EQ(lines.size(), 1U);
+  EXPECT_NE(lines.front().find(R"("is_taker":true)"), std::string::npos)
+      << "the flatten exit must be measurable — it is where sessions pay";
+}
+
 TEST_F(TradingSessionTest, FillEmitsAnalyticsEventWithMidAndInventory) {
   constexpr int kAnalyticsFillQty = 7;
   std::vector<std::string> lines;
