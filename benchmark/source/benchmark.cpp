@@ -142,6 +142,11 @@ public:
     return open_orders_.erase(std::string{order_id}) > 0;
   }
   void cancel_all(std::string_view) override { open_orders_.clear(); }
+  std::optional<std::string> amend(std::string_view order_id,
+                                   std::string_view, kalshi::Side, int,
+                                   kalshi::Quantity) override {
+    return std::string{order_id};
+  }
   bool record_fill(const kalshi::Fill &) override { return true; }
   [[nodiscard]] kalshi::Quantity net_position(std::string_view) const override {
     return {};

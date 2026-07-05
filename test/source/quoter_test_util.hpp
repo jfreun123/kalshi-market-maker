@@ -123,6 +123,12 @@ std::string generate_rsa_pem() {
   return pem;
 }
 
+// Official-docs amend response: same or new order_id, remaining/fill counts.
+[[maybe_unused]] std::string amend_json(const std::string &order_id) {
+  return R"({"order_id":")" + order_id +
+         R"(","remaining_count":"10.00","fill_count":"0.00","ts_ms":1715793690123})";
+}
+
 // Builds the V2 minimal response body that RestClient expects for a placed
 // order.
 std::string order_json(const std::string &order_id, int qty) {
