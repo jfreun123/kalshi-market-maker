@@ -237,7 +237,7 @@ TEST_F(TradingSessionTest, OrderbooksAccessorReflectsSnapshot) {
   EXPECT_TRUE(books.at(kTicker).best_ask().has_value());
 }
 
-TEST_F(TradingSessionTest, CancelPreexistingOrdersCancelsTrackedTickerOrphans) {
+TEST_F(TradingSessionTest, CancelPreexistingOrdersCancelsEveryAccountOrder) {
   kalshi::Order tracked_orphan;
   tracked_orphan.id = kOrderId1;
   tracked_orphan.market_ticker = kTicker;
@@ -247,15 +247,17 @@ TEST_F(TradingSessionTest, CancelPreexistingOrdersCancelsTrackedTickerOrphans) {
 
   session_.cancel_preexisting_orders({tracked_orphan, untracked_orphan});
 
-  EXPECT_EQ(count_method(transport_, "DELETE"), 1);
-  bool cancelled_tracked = false;
+  EXPECT_EQ(count_method(transport_, "DELETE"), 2)
+      << "single-operator account: an orphan on an untracked ticker is "
+         "uncontrolled exposure, not someone else's session — cancel it";
+  bool cancelled_untracked = false;
   for (const auto &request : transport_.recorded_requests()) {
     if (request.method == "DELETE" &&
-        request.url.find(kOrderId1) != std::string::npos) {
-      cancelled_tracked = true;
+        request.url.find(kOrderId2) != std::string::npos) {
+      cancelled_untracked = true;
     }
   }
-  EXPECT_TRUE(cancelled_tracked);
+  EXPECT_TRUE(cancelled_untracked);
 }
 
 TEST_F(TradingSessionTest, CancelPreexistingOrdersNoOpWhenNoneResting) {

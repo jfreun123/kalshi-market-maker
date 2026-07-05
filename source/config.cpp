@@ -142,6 +142,8 @@ AppConfig load_config(const std::filesystem::path &path) {
         "min_days_to_close", ScannerConfig::kDefaultMinDaysToClose);
     config.scanner.max_days_to_close = scanner_json.value(
         "max_days_to_close", ScannerConfig::kDefaultMaxDaysToClose);
+    config.scanner.max_stale_trade_minutes = scanner_json.value(
+        "max_stale_trade_minutes", ScannerConfig::kDefaultMaxStaleTradeMinutes);
     config.scanner.rotation_minutes = scanner_json.value(
         "rotation_minutes", ScannerConfig::kDefaultRotationMinutes);
   }
