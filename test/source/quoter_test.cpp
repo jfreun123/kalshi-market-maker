@@ -595,3 +595,44 @@ TEST_F(QuoterTest, MidRangeQuotesNotShadedByLongshotFloor) {
   const std::string &ask_body = transport.recorded_requests().at(1).body;
   EXPECT_NE(ask_body.find(std::string(kAskPriceMid52)), std::string::npos);
 }
+
+
+TEST_F(QuoterTest, SingleFillNeverQuotesAGuaranteedLossExit) {
+  auto transport_ptr = std::make_unique<FakeTransport>();
+  FakeTransport &transport = *transport_ptr;
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId1, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId2, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId3, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  kalshi::RestClient rest{kalshi::Auth{kApiKey, kPemPrivateKey},
+                          std::move(transport_ptr), kBaseUrl};
+  kalshi::OrderManager order_mgr{rest};
+  kalshi::RiskManager risk_mgr{kalshi::RiskLimits{}};
+  kalshi::Quoter quoter{kalshi::QuoterConfig{}, order_mgr, risk_mgr};
+
+  quoter.update(kTicker, make_ob(kYesBid52, kNoBid52));
+  record_position_fill(order_mgr, kOrderId1, kalshi::Side::Yes,
+                       kalshi::QuoterConfig::kDefaultQuoteSize);
+  quoter.forget_order(kTicker, kOrderId1);
+  quoter.update(kTicker, make_ob(kYesBid52, kNoBid52));
+
+  bool checked_ask = false;
+  for (const auto &request : transport.recorded_requests()) {
+    if (request.body.find("\"side\":\"ask\"") == std::string::npos) {
+      continue;
+    }
+    const auto pos = request.body.find("\"price\":\"0.");
+    ASSERT_NE(pos, std::string::npos);
+    const int yes_cents = std::stoi(request.body.substr(pos + 11, 2));
+    EXPECT_GE(yes_cents, 51)
+        << "after buying at 50 the offer must stay above entry — skew biases "
+           "flow, it must never quote a locked-in loss";
+    checked_ask = true;
+  }
+  EXPECT_TRUE(checked_ask);
+}
