@@ -352,13 +352,25 @@ void Quoter::update(std::string_view ticker, const LocalOrderbook &book) {
   }
 
   const std::chrono::steady_clock::time_point now = clock_();
-  if (desired_bid.has_value()) {
+  const bool suppress_bid = reduce_only_ && inventory >= 0.0;
+  const bool suppress_ask = reduce_only_ && inventory <= 0.0;
+  if (suppress_bid && !own.bid_order_id.empty() &&
+      release_order(own.bid_order_id)) {
+    own.bid_order_id.clear();
+  }
+  if (suppress_ask && !own.ask_order_id.empty() &&
+      release_order(own.ask_order_id)) {
+    own.ask_order_id.clear();
+  }
+  if (desired_bid.has_value() && !suppress_bid) {
     refresh_bid(ticker_str, own, *desired_bid, now);
   }
-  if (desired_ask.has_value()) {
+  if (desired_ask.has_value() && !suppress_ask) {
     refresh_ask(ticker_str, own, *desired_ask, now);
   }
 }
+
+void Quoter::set_reduce_only(bool reduce_only) { reduce_only_ = reduce_only; }
 
 void Quoter::set_analytics(AnalyticsLogger *analytics) {
   analytics_ = analytics;

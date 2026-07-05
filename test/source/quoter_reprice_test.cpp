@@ -454,3 +454,70 @@ TEST_F(QuoterTest, EmaResetsWithResetQuotes) {
       << "after reset the EMA must not drag the new session's fair value "
          "toward the old market level";
 }
+
+TEST_F(QuoterTest, ReduceOnlyQuotesOnlyTheUnwindSideWhenLong) {
+  auto transport_ptr = std::make_unique<FakeTransport>();
+  FakeTransport &transport = *transport_ptr;
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId1, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  kalshi::RestClient rest{kalshi::Auth{kApiKey, kPemPrivateKey},
+                          std::move(transport_ptr), kBaseUrl};
+  kalshi::OrderManager order_mgr{rest};
+  record_position_fill(order_mgr, kOrderId1, kalshi::Side::Yes,
+                       kInventoryPosition);
+  kalshi::RiskManager risk_mgr{kalshi::RiskLimits{}};
+  kalshi::Quoter quoter{kalshi::QuoterConfig{}, order_mgr, risk_mgr};
+  quoter.set_reduce_only(true);
+
+  quoter.update(kTicker, make_ob(kYesBid52, kNoBid52));
+
+  ASSERT_EQ(transport.recorded_requests().size(), 1U)
+      << "long inventory: only the ask (sell side) may quote";
+  EXPECT_NE(transport.recorded_requests().front().body.find("\"side\":\"ask\""),
+            std::string::npos);
+}
+
+TEST_F(QuoterTest, ReduceOnlyPlacesNothingWhenFlat) {
+  auto transport_ptr = std::make_unique<FakeTransport>();
+  FakeTransport &transport = *transport_ptr;
+  kalshi::RestClient rest{kalshi::Auth{kApiKey, kPemPrivateKey},
+                          std::move(transport_ptr), kBaseUrl};
+  kalshi::OrderManager order_mgr{rest};
+  kalshi::RiskManager risk_mgr{kalshi::RiskLimits{}};
+  kalshi::Quoter quoter{kalshi::QuoterConfig{}, order_mgr, risk_mgr};
+  quoter.set_reduce_only(true);
+
+  quoter.update(kTicker, make_ob(kYesBid52, kNoBid52));
+
+  EXPECT_EQ(transport.recorded_requests().size(), 0U)
+      << "flat book in wind-down: do not open new exposure";
+}
+
+TEST_F(QuoterTest, ReduceOnlyCancelsTheAccumulatingSide) {
+  auto transport_ptr = std::make_unique<FakeTransport>();
+  FakeTransport &transport = *transport_ptr;
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId1, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId2, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  transport.enqueue({kHttpOk, "{}"});
+  kalshi::RestClient rest{kalshi::Auth{kApiKey, kPemPrivateKey},
+                          std::move(transport_ptr), kBaseUrl};
+  kalshi::OrderManager order_mgr{rest};
+  kalshi::RiskManager risk_mgr{kalshi::RiskLimits{}};
+  kalshi::Quoter quoter{kalshi::QuoterConfig{}, order_mgr, risk_mgr};
+
+  quoter.update(kTicker, make_ob(kYesBid52, kNoBid52));
+  ASSERT_EQ(transport.recorded_requests().size(), 2U);
+  record_position_fill(order_mgr, kOrderId1, kalshi::Side::Yes,
+                       kInventoryPosition);
+  quoter.set_reduce_only(true);
+  quoter.update(kTicker, make_ob(kYesBid52, kNoBid52));
+
+  EXPECT_EQ(transport.recorded_requests().size(), 3U)
+      << "the resting bid (which would add to the long) must be cancelled";
+  EXPECT_EQ(transport.recorded_requests().back().method, "DELETE");
+}
