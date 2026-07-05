@@ -87,6 +87,10 @@ AppConfig load_config(const std::filesystem::path &path) {
         quoter_json.value("fv_ema_alpha", QuoterConfig::kDefaultFvEmaAlpha);
     config.quoter.winddown_seconds = quoter_json.value(
         "winddown_seconds", QuoterConfig::kDefaultWinddownSeconds);
+    config.quoter.flow_lean_cents = quoter_json.value(
+        "flow_lean_cents", QuoterConfig::kDefaultFlowLeanCents);
+    config.quoter.inventory_cap_lots = quoter_json.value(
+        "inventory_cap_lots", QuoterConfig::kDefaultInventoryCapLots);
   }
 
   // The imbalance guard should engage once roughly one full quote of one-sided

@@ -62,6 +62,17 @@ double FlowImbalanceGuard::imbalance_ratio(std::string_view ticker,
   return high / std::max(low, kMinRatioDenominator);
 }
 
+std::optional<Side>
+FlowImbalanceGuard::dominant_taker_side(std::string_view ticker,
+                                        TimePoint now) const {
+  if (!is_imbalanced(ticker, now)) {
+    return std::nullopt;
+  }
+  const auto [yes_volume, no_volume] = windowed_volume(ticker, now);
+  // We recorded OUR side; the takers bought the opposite.
+  return (yes_volume > no_volume) ? Side::No : Side::Yes;
+}
+
 bool FlowImbalanceGuard::is_imbalanced(std::string_view ticker,
                                        TimePoint now) const {
   const auto [yes_volume, no_volume] = windowed_volume(ticker, now);

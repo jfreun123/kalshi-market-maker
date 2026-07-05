@@ -42,7 +42,7 @@ constexpr int kNoBid70 = 27; // mid = (67+73)/2 = 70
 // Inventory skew positions (LMSR log-odds: b = 100/ln(9) ≈ 45.5 contracts
 // from max_position=100 and band edge 90c, so q=20 shifts fv 52 → 41.11 and
 // q=−20 shifts fv 52 → 62.70; 1000 = extreme clamp).
-constexpr int kInventoryPosition = 20;
+constexpr int kInventoryPosition = 15; // below the 2x-quote-size cap
 constexpr int kExtremeLongPosition = 1'000;
 
 // V2 request body expected price strings (YES dimension, "price":"X.XXXX").
@@ -57,7 +57,8 @@ constexpr std::string_view kBidPriceExtremeClamp = R"("price":"0.0100")";
 constexpr std::string_view kAskPriceExtremeClamp = R"("price":"0.5200")";
 // Flow imbalance: default spread 4 → half 2 → bid 50; +2 imbalance → half 3 →
 // bid 49.
-constexpr std::string_view kBidPriceImbalanced = R"("price":"0.4900")";
+constexpr std::string_view kBidPriceImbalanced =
+    R"("price":"0.4800")"; // widen (half 2→3) and lean −1c (takers bought NO)
 constexpr kalshi::Quantity kImbalanceYesQty =
     kalshi::Quantity::from_contracts(30);
 constexpr kalshi::Quantity kImbalanceNoQty =

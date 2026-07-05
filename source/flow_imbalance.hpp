@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cstdint>
 #include <deque>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -50,6 +51,13 @@ public:
 
   // True when the window holds at least min_flow_volume contracts and the ratio
   // exceeds imbalance_ratio_threshold.
+  // When imbalanced, the side the TAKERS are buying (opposite of our fills:
+  // we filled NO means takers bought YES). Empty when balanced. Feeds the
+  // quoter's directional lean (item 32).
+  [[nodiscard]] std::optional<Side>
+  dominant_taker_side(std::string_view ticker,
+                      TimePoint now = Clock::now()) const;
+
   [[nodiscard]] bool is_imbalanced(std::string_view ticker,
                                    TimePoint now = Clock::now()) const;
 
