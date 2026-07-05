@@ -86,7 +86,7 @@ once the fill-probability model exists (item 42b).
 | Liveness filter + rotation | Do not sit on dead markets; swap idle ones out | structural |
 | Flow-rate admission (`min_trades_per_hour=6`) | Finalists need recent public trades — vol_24h credits yesterday's burst (run 15: $0 in a no-trade window) | structural (threshold: placeholder → 60a) |
 | Live-spread admission | Finalists' live book must be wider than `min_spread_cents` — a penny-wide book never fills us at our edge (run 15) | structural |
-| Pinned-tape admission (`min_trade_price_range_cents=2`) | Last-hour prints must span ≥2c — a tape pinned at one price is a determined/expired event where only informed takers remain (run 16) | structural |
+| Pinned-tape admission (`min_trade_price_range_cents=2` over `tape_range_lookback_minutes=180`) | Recent prints must span ≥2c — a tape pinned at one price is a determined/expired event where only informed takers remain (run 16); the 3h lookback keeps sparse-but-moving pre-game tapes in (item 63) | structural |
 
 ## The consolidation plan
 

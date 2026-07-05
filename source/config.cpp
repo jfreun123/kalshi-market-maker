@@ -157,6 +157,9 @@ AppConfig load_config(const std::filesystem::path &path) {
     config.scanner.min_trade_price_range_cents =
         scanner_json.value("min_trade_price_range_cents",
                            ScannerConfig::kDefaultMinTradePriceRangeCents);
+    config.scanner.tape_range_lookback_minutes =
+        scanner_json.value("tape_range_lookback_minutes",
+                           ScannerConfig::kDefaultTapeRangeLookbackMinutes);
   }
 
   const auto [quotable_min, quotable_max] =

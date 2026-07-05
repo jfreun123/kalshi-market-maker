@@ -152,7 +152,8 @@ TEST(ConfigTest, LoadsScannerSection) {
       {"min_volume_24h", kMinVolume},   {"min_days_to_close", kMinDays},
       {"max_days_to_close", kMaxDays},  {"max_stale_trade_minutes", 45},
       {"rotation_minutes", 7},          {"min_trades_per_hour", 9},
-      {"min_trade_price_range_cents", 4}};
+      {"min_trade_price_range_cents", 4},
+      {"tape_range_lookback_minutes", 240}};
 
   const auto path = write_temp_config(config_json);
   const auto config = kalshi::load_config(path);
@@ -169,6 +170,7 @@ TEST(ConfigTest, LoadsScannerSection) {
   EXPECT_EQ(config.scanner.rotation_minutes, 7);
   EXPECT_EQ(config.scanner.min_trades_per_hour, 9);
   EXPECT_EQ(config.scanner.min_trade_price_range_cents, 4);
+  EXPECT_EQ(config.scanner.tape_range_lookback_minutes, 240);
 }
 
 TEST(ConfigTest, DefaultsAppliedWhenOptionalSectionsAbsent) {
