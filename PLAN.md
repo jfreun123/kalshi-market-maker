@@ -225,6 +225,32 @@
     edge, banked per loop instead of hoped for. Wind-down inherits this
     automatically (reduce side now rests at reservation, not res−half).*
 
+31. [ ] **66 — clearing-price fair value (Jacob, 2026-07-05).** "The best
+    price is the one that would allow for the most trades on the orderbook"
+    — the top-of-book micro-price is measuring the wrong thing in these
+    books: it sees only L1 (bot walls dominate) and ignores the tape
+    entirely (run 18: fv said 80 while 100% of volume printed at 82; the
+    recurring drift line — −$0.59 in run 19, −$0.42 in run 13, always
+    against held inventory — is the same bias in dollars). Build
+    `ClearingPriceModel` as a third `IPricingModel`: fv = blend of (a) the
+    **full-depth uncrossing price** (walk the ladder; the price maximizing
+    executable volume where cumulative demand meets supply) and (b) the
+    **recent-print VWAP** (where trades actually clear), EMA-smoothed as
+    today, config-selected. **Validate offline first**: backtest micro vs
+    uncrossing vs tape-blend on the recorded analytics/capture sessions,
+    scored on next-print prediction error and simulated drift — the winner
+    on recordings gets the live switch (60b's learned micro-price with a
+    structural prior). Caveat noted: our own fills print at our ask by
+    construction; the unbiased evidence is drift + the run-18 tape.
+
+32. [ ] **65 — two-sided-flow admission (proposed, awaiting Jacob).** Run
+    19: 57 of 58 entry fills were the same side — demo taker flow is
+    near-unidirectional in most books, so round trips can't complete and
+    inventory exits at cost. The trades probe already parses the tape;
+    `taker_side` is in the same response: require the minority side to have
+    ≥ X% of recent prints before admission. Selects for the only market
+    type where "collect spread, stay balanced" is physically possible.
+
 **Selection principle (Jacob, 2026-07-04): profitable on every market we
 CHOOSE, then scale.** Not every market can be made profitably — trending
 books, dead books, and 1c-spread deep books all bleed makers. Scaling (Gate
@@ -274,9 +300,18 @@ refactors (R1–R4, R7) never block the gates.
   (`adverse_selection`, `write_trade_config`), `main.cpp` 810→~520 lines
   (mode runners in `app_modes.{hpp,cpp}`, tested), 1,233-line quoter test
   split into pricing + reprice suites. Suite 456 tests green.
-- **Demo carry ledger −$4.38** (`pnl_state.json`, 2026-07-05). PnL needs
-  fills-in-volume: run sessions during live slates; the machinery debate is
-  settled.
+- **Run 19 (2026-07-05, 15 min, 3 markets, kickoff window)**: 58 maker
+  fills (vs 10 in run 18 — the throughput levers worked); first completed
+  maker-maker round trip via unwind pricing (sold YES 79 / bought back 79,
+  +0.5c edge). Net −$0.74: entry +0.77, drift −0.59 (CROS trended against
+  the capped short), exit −0.92 (three taker flattens). Single remaining
+  loss channel: one-way flow accumulates inventory that exits at cost —
+  attacked by items 65 (two-sided admission), 66 (clearing-price fv), 60a
+  (drift lean). Demo overrides active in config-demo: scanner
+  min_spread 2, tape gate off, quoter 3/2, trade_top_n 3.
+- **Demo carry ledger −$5.22** (`pnl_state.json`, 2026-07-05, post-run-19).
+  PnL needs completed round trips, not just fills: two-sided books are the
+  binding constraint on demo.
 - Demo quirks: order entry can 503 exchange-wide while `/exchange/status`
   says active; fills can be fractional; laptop sleep mid-session is safe but
   wastes the session — soak runs belong on the L1 VM.
