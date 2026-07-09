@@ -347,6 +347,17 @@ void Quoter::update(std::string_view ticker, const LocalOrderbook &book) {
   if (complement_price(raw_ask) < config_.longshot_price_threshold_cents) {
     raw_ask = std::min(kAskMaxCents, raw_ask + config_.longshot_edge_cents);
   }
+  if (inventory > 0.0) {
+    raw_ask = std::max(
+        raw_bid + 1,
+        static_cast<int>(
+            std::ceil(reservation_val + config_.unwind_edge_cents)));
+  } else if (inventory < 0.0) {
+    raw_bid = std::min(
+        raw_ask - 1,
+        static_cast<int>(
+            std::floor(reservation_val - config_.unwind_edge_cents)));
+  }
 
   const int market_bid = best_bid->price_cents;
   const int market_ask = best_ask->price_cents;

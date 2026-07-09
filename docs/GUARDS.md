@@ -42,6 +42,7 @@ graph TD
 
 | Guard | What it does | Provenance | Status |
 |---|---|---|---|
+| Asymmetric unwind (`unwind_edge_cents=0`) | The inventory-reducing side quotes at reservation (passive-clamped); only opening risk charges the full half-spread — loops close at first counter-flow | Run 18 (−$0.10 = unwind priced like an open) | structural |
 | Imbalance widen (`imbalance_spread_cents=2`) | Extra spread while flow is one-sided | Flow guard | placeholder → 60b |
 | Min spread floor (`min_spread_cents=3`) | Never give away the underwriting premium | Palumbo (LPs are underwriters) | structural |
 | Longshot edge floor (`+1c` below `40c`) | Cheap-side buys demand extra edge | Bürgi Fig. 6 / Table 10 | placeholder → 60b |
