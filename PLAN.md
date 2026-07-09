@@ -212,6 +212,21 @@
     gates all must pass before score matters at all; a 0.957 volume score
     cannot buy admission.
 
+29. [x] **63 — pre-game markets are makeable (Jacob's catch, 2026-07-05).**
+    The tape gate's 1-hour window false-positived the Brazil–Norway
+    pre-game mention markets ("this isn't a live event BUT I can currently
+    market make on it"): real price discovery in steps all morning, quiet
+    last hour → wrongly "pinned". *Done — tape range now looks back
+    `tape_range_lookback_minutes` (default 180): pre-game steps count,
+    determined markets stay pinned across any window.* Second finding, a
+    config stance not code: the 2c-wide headliners (Penalty Kick 58/44 etc.)
+    never reached finalists because the scan spread floor was 3c —
+    config-demo now runs `scanner.min_spread_cents=2` and quoter
+    `target=3/min=2` so demo sessions can quote competitively on 2c books
+    (demo maker fees are 0; revisit both floors for production fees).
+    Principle refined: **"live event" is not the criterion — current
+    two-sided flow is.**
+
 **Selection principle (Jacob, 2026-07-04): profitable on every market we
 CHOOSE, then scale.** Not every market can be made profitably — trending
 books, dead books, and 1c-spread deep books all bleed makers. Scaling (Gate

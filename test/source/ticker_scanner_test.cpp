@@ -695,6 +695,72 @@ TEST_F(TickerScannerTest, OneSidedLiveBookAdmitted) {
       << "an empty book side means room to quote, not a tight book";
 }
 
+TEST_F(TickerScannerTest, SparseButMovingTapeAdmitted) {
+  auto [client, transport] = make_client_with_transport();
+  transport->enqueue(
+      {kHttpOk, make_markets_response({kMarketGoodA, kMarketGoodB})});
+  transport->enqueue({kHttpOk, R"({"incentive_programs":[],"cursor":""})"});
+  transport->enqueue(
+      {kHttpOk,
+       R"({"cursor":"","trades":[{"created_time":"2026-06-20T23:50:00Z",)"
+       R"("ticker":"KXCPI-B","trade_id":"b1","yes_price_dollars":"0.5500"},)"
+       R"({"created_time":"2026-06-20T22:10:00Z",)"
+       R"("ticker":"KXCPI-B","trade_id":"b2","yes_price_dollars":"0.5200"}]})"});
+  transport->enqueue(
+      {kHttpOk,
+       R"({"cursor":"","trades":[{"created_time":"2026-06-20T23:50:00Z",)"
+       R"("ticker":"KXFED-A","trade_id":"a1","yes_price_dollars":"0.5500"},)"
+       R"({"created_time":"2026-06-20T22:10:00Z",)"
+       R"("ticker":"KXFED-A","trade_id":"a2","yes_price_dollars":"0.5200"}]})"});
+
+  kalshi::ScannerConfig tape_only;
+  tape_only.max_stale_trade_minutes = 0;
+  tape_only.min_trades_per_hour = 0;
+  tape_only.min_spread_cents = 0;
+  tape_only.min_trade_price_range_cents = 2;
+  constexpr int kThreeHourLookback = 180;
+  tape_only.tape_range_lookback_minutes = kThreeHourLookback;
+  kalshi::TickerScanner scanner{client, tape_only};
+  auto results = scanner.scan(kScanTopN, kTestNow);
+
+  EXPECT_EQ(results.size(), 2U)
+      << "pre-game markets print sparsely; price discovery over the lookback "
+         "window counts even when the last hour is quiet";
+}
+
+TEST_F(TickerScannerTest, ShortLookbackDropsSparseTape) {
+  auto [client, transport] = make_client_with_transport();
+  transport->enqueue(
+      {kHttpOk, make_markets_response({kMarketGoodA, kMarketGoodB})});
+  transport->enqueue({kHttpOk, R"({"incentive_programs":[],"cursor":""})"});
+  transport->enqueue(
+      {kHttpOk,
+       R"({"cursor":"","trades":[{"created_time":"2026-06-20T23:50:00Z",)"
+       R"("ticker":"KXCPI-B","trade_id":"b1","yes_price_dollars":"0.5500"},)"
+       R"({"created_time":"2026-06-20T22:10:00Z",)"
+       R"("ticker":"KXCPI-B","trade_id":"b2","yes_price_dollars":"0.5200"}]})"});
+  transport->enqueue(
+      {kHttpOk,
+       R"({"cursor":"","trades":[{"created_time":"2026-06-20T23:50:00Z",)"
+       R"("ticker":"KXFED-A","trade_id":"a1","yes_price_dollars":"0.5500"},)"
+       R"({"created_time":"2026-06-20T22:10:00Z",)"
+       R"("ticker":"KXFED-A","trade_id":"a2","yes_price_dollars":"0.5200"}]})"});
+
+  kalshi::ScannerConfig tape_only;
+  tape_only.max_stale_trade_minutes = 0;
+  tape_only.min_trades_per_hour = 0;
+  tape_only.min_spread_cents = 0;
+  tape_only.min_trade_price_range_cents = 2;
+  constexpr int kShortLookback = 60;
+  tape_only.tape_range_lookback_minutes = kShortLookback;
+  kalshi::TickerScanner scanner{client, tape_only};
+  auto results = scanner.scan(kScanTopN, kTestNow);
+
+  EXPECT_EQ(results.size(), 0U)
+      << "with a short lookback the 100-minute-old print is invisible and "
+         "the tape looks pinned";
+}
+
 TEST_F(TickerScannerTest, TickerDatedPastEventDropped) {
   auto [client, transport] = make_client_with_transport();
   transport->enqueue(

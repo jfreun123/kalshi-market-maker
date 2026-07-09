@@ -312,22 +312,25 @@ bool TickerScanner::passes_flow_admission(
       return false;
     }
   }
-  if (config_.min_trade_price_range_cents > 0 &&
-      !tape_shows_price_discovery(*trades, hour_cutoff, ticker)) {
-    return false;
+  if (config_.min_trade_price_range_cents > 0) {
+    const auto lookback_cutoff =
+        now - std::chrono::minutes{config_.tape_range_lookback_minutes};
+    if (!tape_shows_price_discovery(*trades, lookback_cutoff, ticker)) {
+      return false;
+    }
   }
   return true;
 }
 
 bool TickerScanner::tape_shows_price_discovery(
     const std::vector<PublicTrade> &trades,
-    std::chrono::system_clock::time_point hour_cutoff,
+    std::chrono::system_clock::time_point lookback_cutoff,
     const std::string &ticker) const {
   int min_price = kMaxPriceCents + 1;
   int max_price = 0;
   int recent_count = 0;
   for (const auto &trade : trades) {
-    if (trade.created_time < hour_cutoff) {
+    if (trade.created_time < lookback_cutoff) {
       break;
     }
     ++recent_count;
@@ -345,8 +348,8 @@ bool TickerScanner::tape_shows_price_discovery(
   if (range < config_.min_trade_price_range_cents) {
     get_logger()->info(
         "scanner: dropped ticker={} — tape pinned in a {}c range over the "
-        "last hour (need {}c); likely a determined market",
-        ticker, range, config_.min_trade_price_range_cents);
+        "last {}m; likely a determined market",
+        ticker, range, config_.tape_range_lookback_minutes);
     return false;
   }
   return true;
