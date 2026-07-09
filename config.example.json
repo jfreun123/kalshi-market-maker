@@ -52,6 +52,7 @@
     "rotation_minutes": 5,
     "min_trades_per_hour": 6,
     "min_trade_price_range_cents": 2,
+    "tape_range_lookback_minutes": 180,
     "trade_top_n": 5
   }
 }
