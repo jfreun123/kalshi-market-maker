@@ -138,6 +138,10 @@ Verified against [docs/KALSHI_API_REFERENCE.md](docs/KALSHI_API_REFERENCE.md)
 | REST `GET /markets/{ticker}/orderbook` | In use (scanner finalist probe, item 61) | Unchanged; WS remains the in-session book source |
 | REST batched multi-market orderbooks | **Unused** | Scanner probes N finalists in one call (folds into item 58); Phase 3 recording of non-quoted candidate markets without WS subscriptions |
 | REST `GET /portfolio/orders/queue_positions` | **Unused** | `queue_position_fp` = contracts ahead at price-time priority, per resting order — see Phase 7 |
+| REST market candlesticks (single + batch) | **Unused** | 1-min/1-h/1-day OHLC of trade price **and yes_bid/yes_ask**, volume, open interest — Phase 3's production-scale data tier |
+| REST `GET /historical/trades` (+ `/historical/cutoff`) | **Unused** | Production trade tapes beyond the ~3-month live window — tape-VWAP calibration at scale |
+| WS `market_ticker_v2` | **Not subscribed** | Incremental per-market summary deltas — watch a candidate watchlist live (rotation, item 65 flow features, item 60a drift) without full book subscriptions |
+| WS `market_and_event_lifecycle` | **Not subscribed** | Push on market state changes — a determined/closed market exits the session instantly instead of waiting for the 5-min rotation poll (run-16 backstop at runtime) |
 
 The queue-positions endpoint deserves emphasis: it extends "price with flow
 in mind" from *where to quote* to *whether to move*. A resting order's queue
@@ -194,6 +198,15 @@ trade price — did fv say where flow would cross?) and **(b) simulated drift**
 (mark a unit of held inventory against each candidate fv; the run-13/18/19
 loss line replayed). Deliverable: results table appended to this doc. The
 winner on recordings — and only a winner — proceeds to Phase 4.
+
+**Production-data tier (no recording needed, start immediately):** market
+candlesticks carry OHLC of trade price *and* yes_bid/yes_ask per minute, and
+`/historical/trades` serves real production tapes — so the tape-vs-book
+question can be scored at candle granularity across hundreds of PRODUCTION
+markets before our first demo capture finishes. Candle-scale results rank
+the candidates; the tick-scale replay on our own captures confirms the
+winner under quoting latency. The same candle set calibrates item 60a's
+drift estimator on real markets instead of demo flow.
 
 ### Phase 4 — `ClearingPriceModel`
 
@@ -256,7 +269,14 @@ parallel with the fv backtest if sequencing demands it.
   should treat as inadmissible.
 - **Determined markets** print without price discovery (run 16); the item-62
   pinned-tape gate remains the defense — pricing assumes admission did its
-  job.
+  job. The `market_and_event_lifecycle` channel adds a runtime backstop:
+  determination pushes an exit instead of waiting for rotation.
+- **Integer-cent assumption.** Kalshi deprecated legacy integer-cent price
+  fields (2026-03-05) and offers per-market **subpenny pricing** near the
+  0/100 tails — exactly where the longshot guard operates. The codebase
+  prices in `int` cents throughout. `ClearingPriceModel` should compute in
+  fixed-point dollars from day one, and the quoter's tick-grid assumption
+  needs an audit item in PLAN before any live switch on a subpenny market.
 
 ## 8. Sequencing against open work
 
