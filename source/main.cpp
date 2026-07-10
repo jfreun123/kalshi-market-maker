@@ -17,7 +17,6 @@
 #include "rest_client.hpp"
 #include "risk_manager.hpp"
 #include "scan_output.hpp"
-#include "ticker_scanner.hpp"
 #include "trade_tape.hpp"
 #include "trading_session.hpp"
 #include "websocket_client.hpp"
