@@ -343,6 +343,13 @@ half-life) is confirmed at tick scale on our own demo captures with the
 simulated-drift score — thin bot-walled demo books may want more tape than
 these liquid books did; that remains the open question for Phase 3b.
 
+**Phase 3b harness (shipped 2026-07-10):** `kalshi_mm --fv-replay
+<capture/session.jsonl>` replays a `--capture` recording through the
+production parse path, `LocalOrderbook`, and `TradeTape` (via
+`WebSocketClient::inject_frame` over a `NullWebSocket` — no credentials or
+config), and prints per-candidate MAE/bias for the full grid at every
+public print. Awaiting the first live-slate capture to produce numbers.
+
 ### Phase 4 — `ClearingPriceModel`
 
 A third pricing model behind the existing `IPricingModel` interface,

@@ -272,9 +272,14 @@
     lags), but the mid carries run-18's bias in production (−0.2/−0.4c,
     prints land above it) and a low tape blend (w≈0.1–0.25) zeroes it.
     Phase 4 is therefore NOT tape-heavy: clearing-price anchor + small tape
-    correction. Next: Phase 3b — tick-scale replay on our own captures
-    (now recording trades since #96), scored on simulated drift, to pin
-    the dose before ClearingPriceModel ships.
+    correction. Phase 3b harness shipped 2026-07-10: `kalshi_mm --fv-replay
+    <capture/session.jsonl>` replays a recorded session through the
+    PRODUCTION parse path (`WebSocketClient::inject_frame`), LocalOrderbook,
+    and TradeTape, grading a 39-candidate grid (micro/clearing anchors ×
+    w_tape × half-life × own_fill_weight) on tick-scale MAE + bias per
+    print; no credentials or config needed. **Blocked on data: needs a
+    `--capture` session recorded during a live slate** — then the dose is
+    pinned and ClearingPriceModel (Phase 4) ships.
 
 32. [ ] **65 — two-sided-flow admission (proposed, awaiting Jacob).** Run
     19: 57 of 58 entry fills were the same side — demo taker flow is
