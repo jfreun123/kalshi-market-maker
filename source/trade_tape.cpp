@@ -18,6 +18,9 @@ void TradeTape::record_trade(const PublicTrade &trade) {
 }
 
 void TradeTape::record_own_fill(const std::string &trade_id) {
+  if (trade_id.empty()) {
+    return;
+  }
   own_trade_ids_.insert(trade_id);
 }
 

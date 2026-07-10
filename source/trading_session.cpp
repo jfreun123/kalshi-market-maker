@@ -4,6 +4,7 @@
 #include "flow_imbalance.hpp"
 #include "logger.hpp"
 #include "portfolio.hpp"
+#include "trade_tape.hpp"
 
 #include <algorithm>
 #include <exception>
@@ -70,6 +71,9 @@ void TradingSession::on_delta(const std::string &ticker, Side side,
 }
 
 void TradingSession::on_fill(const Fill &fill) {
+  if (trade_tape_ != nullptr) {
+    trade_tape_->record_own_fill(fill.trade_id);
+  }
   if (!order_mgr_.record_fill(fill)) {
     get_logger()->debug("duplicate fill ignored ticker={} trade_id={}",
                         fill.market_ticker, fill.trade_id);
@@ -114,6 +118,16 @@ void TradingSession::on_fill(const Fill &fill) {
 
 void TradingSession::set_analytics(AnalyticsLogger *analytics) {
   analytics_ = analytics;
+}
+
+void TradingSession::set_trade_tape(TradeTape *trade_tape) {
+  trade_tape_ = trade_tape;
+}
+
+void TradingSession::on_trade(const PublicTrade &trade) {
+  if (trade_tape_ != nullptr) {
+    trade_tape_->record_trade(trade);
+  }
 }
 
 void TradingSession::record_flatten(const Order &order) {

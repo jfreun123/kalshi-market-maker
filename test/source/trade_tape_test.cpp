@@ -168,6 +168,16 @@ TEST(TradeTapeTest, TradesForOtherTickerDoNotMix) {
   EXPECT_EQ(tape.print_count(kOtherTicker, now), 1);
 }
 
+TEST(TradeTapeTest, EmptyOwnFillIdExcludesNothing) {
+  kalshi::TradeTape tape{test_config()};
+  const auto now = base_time();
+  tape.record_own_fill("");
+  tape.record_trade(
+      make_trade("", kHighPrice, kSmallCount, kalshi::Side::Yes, now));
+
+  EXPECT_EQ(tape.print_count(kTicker, now), 1);
+}
+
 TEST(TradeTapeTest, MinorityRatioBalancedFlowIsHalf) {
   kalshi::TradeTape tape{test_config()};
   const auto now = base_time();

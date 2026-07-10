@@ -18,6 +18,7 @@
 #include "risk_manager.hpp"
 #include "scan_output.hpp"
 #include "ticker_scanner.hpp"
+#include "trade_tape.hpp"
 #include "trading_session.hpp"
 #include "websocket_client.hpp"
 
@@ -295,6 +296,8 @@ int main(int argc, char *argv[]) {
                           order_mgr, risk_mgr, &flow_guard};
     kalshi::TradingSession session{app_config.target_tickers, order_mgr,
                                    risk_mgr, quoter, &flow_guard};
+    kalshi::TradeTape trade_tape{kalshi::TradeTapeConfig{}};
+    session.set_trade_tape(&trade_tape);
 
     quoter.set_analytics(&analytics);
     session.set_analytics(&analytics);
@@ -366,6 +369,12 @@ int main(int argc, char *argv[]) {
           const std::lock_guard<std::mutex> lock{engine_mtx};
           *last_fill_time = std::max(*last_fill_time, fill.timestamp);
           session.on_fill(fill);
+        });
+
+    ws_client.on_trade(
+        [&session, &engine_mtx](const kalshi::PublicTrade &trade) {
+          const std::lock_guard<std::mutex> lock{engine_mtx};
+          session.on_trade(trade);
         });
 
     ws_client.on_disconnect([&session, &engine_mtx]() {

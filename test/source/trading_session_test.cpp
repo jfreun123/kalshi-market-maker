@@ -5,6 +5,7 @@
 #include "quoter.hpp"
 #include "rest_client.hpp"
 #include "risk_manager.hpp"
+#include "trade_tape.hpp"
 #include "trading_session.hpp"
 #include "types.hpp"
 
@@ -516,6 +517,37 @@ TEST_F(TradingSessionTest, SeedOrderbookPlacesInitialQuotes) {
   session_.seed_orderbook(make_orderbook(kTicker, kYesBid, kNoBid, kObQty));
 
   EXPECT_EQ(count_method(transport_, "POST"), 2);
+}
+
+TEST_F(TradingSessionTest, PublicTradesFeedTapeAndOwnFillsAreExcluded) {
+  constexpr int kPrintPrice = 55;
+  constexpr int kPrintContracts = 3;
+  constexpr int kOwnFillPrice = 44;
+  constexpr int kOwnFillContracts = 10;
+  kalshi::TradeTape tape{kalshi::TradeTapeConfig{}};
+  session_.set_trade_tape(&tape);
+
+  kalshi::PublicTrade print;
+  print.trade_id = "pub-1";
+  print.market_ticker = kTicker;
+  print.yes_price_cents = kPrintPrice;
+  print.quantity = kalshi::Quantity::from_contracts(kPrintContracts);
+  print.taker_side = kalshi::Side::Yes;
+  print.timestamp = std::chrono::system_clock::now();
+  session_.on_trade(print);
+
+  EXPECT_EQ(tape.print_count(kTicker, print.timestamp), 1);
+
+  auto own_fill = make_fill("order-x", kTicker, kalshi::Side::Yes,
+                            kOwnFillPrice, kOwnFillContracts);
+  own_fill.trade_id = "own-1";
+  session_.on_fill(own_fill);
+
+  kalshi::PublicTrade own_print = print;
+  own_print.trade_id = "own-1";
+  session_.on_trade(own_print);
+
+  EXPECT_EQ(tape.print_count(kTicker, print.timestamp), 1);
 }
 
 TEST_F(TradingSessionTest, DuplicateFillDoesNotDoubleCountInFlowGuard) {
