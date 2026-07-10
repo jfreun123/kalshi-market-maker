@@ -1,38 +1,81 @@
-# Better Pricing — the clearing price as fair value
+# Better Pricing — quoting where the flow is
 
 > Design doc for PLAN items 66 (clearing-price fair value) and 65
-> (two-sided-flow admission), plus the knob consolidation both unlock.
-> Companion to [PLAN.md](PLAN.md) · guards catalog:
+> (two-sided-flow admission), plus the cleanup both unlock. Written to be
+> readable without a market-making background — terms are explained as they
+> appear. Companion to [PLAN.md](PLAN.md) · guards catalog:
 > [docs/GUARDS.md](docs/GUARDS.md) · API ground truth:
 > [docs/KALSHI_API_REFERENCE.md](docs/KALSHI_API_REFERENCE.md).
 
-## 1. The principle
+## 0. Vocabulary
+
+Ten terms everything else builds on:
+
+- **The book** — the list of everyone's outstanding buy offers (**bids**) and
+  sell offers (**asks**) on a market, sorted by price. One price plus the
+  total size resting at it is a **level**; all the levels together are the
+  **ladder**; the size sitting at levels behind the best price is **depth**.
+  **L1** ("top of book") means looking at only the single best bid and best
+  ask and ignoring everything behind them.
+- **Spread / mid** — the gap between best bid and best ask, and the halfway
+  point between them.
+- **Maker / taker** — a maker posts a resting order and waits to be traded
+  with; a taker crosses the spread to trade instantly against a resting
+  order. Our bot is a maker: it earns by being paid the spread for waiting.
+- **The tape / a print** — the public record of completed trades. Each trade
+  "prints" at a price; on Kalshi each print also records which side the
+  taker was on.
+- **Fair value (fv)** — the bot's single-number belief about what a contract
+  is worth right now. Every quote is placed relative to it: bid a little
+  below fv, ask a little above.
+- **Inventory** — the position we're currently holding. Flat = zero. Holding
+  inventory is risk: if the price moves against it, we lose.
+- **Edge** — how much better than fair value a fill is at the moment it
+  happens. Buying at 78 when fv is 80 is +2 cents of edge.
+- **VWAP** — volume-weighted average price of trades: an average where
+  bigger trades count more.
+- **EMA** — exponential moving average: a way to smooth a jumpy number by
+  weighting recent observations more than old ones.
+- **Getting picked off (adverse selection)** — being filled by someone who
+  knew the price was about to move: your fill looks fine for one second and
+  is a loser ten seconds later.
+
+## 1. The idea
 
 An HFT interview question (Jacob's): *market participants share limit orders
-that may cross. Given all orders at once, find the single fair price.* The
-answer: **the price that maximizes matched volume** — where cumulative demand
-meets cumulative supply and the most back-and-forth flow can trade. That is a
-call-auction uncrossing price, and it is a definition of fair value grounded
-in *flow*, not in theory:
+that may cross. Given all the orders at once, find the single fair price.*
+The answer: **the price that lets the most volume trade** — where the total
+amount buyers want to buy meets the total amount sellers want to sell. In
+exchange language this is the **uncrossing** or **clearing price** (it is
+literally how opening auctions on stock exchanges set the opening price
+each morning).
 
-- The fair price is not what a model says the contract is worth. It is the
-  price at which trading activity balances on both sides.
-- Corroborated independently by practitioner consensus (r/quant, 2026-07-06,
-  saved as PDF in Jacob's Downloads): *"As a market maker you're mostly
-  quoting at a price where trading activity is balanced on both sides instead
-  of quoting at a theoretically 'correct' price"*; *"the 'IV' isn't a
-  forecast — it's the clearing price"*; *"their edge is the spread plus
-  leaning their quotes based on inventory, not selling at some computable
-  break-even."*
+The point of the question is a definition of fair value grounded in *flow*
+(actual willingness to trade) rather than in theory:
 
-The maker's job under this framing: find where flow balances, quote around
-it, lean on inventory, collect the spread. Edge comes from the service, not
-from out-predicting the market.
+> The fair price is not what a model says the contract is worth. It is the
+> price at which trading activity balances.
 
-## 2. What we price off today, and why it is wrong
+Working market makers say the same thing (r/quant thread, 2026-07-06, PDF
+saved by Jacob): *"you're mostly quoting at a price where trading activity
+is balanced on both sides instead of quoting at a theoretically 'correct'
+price"*, and *"their edge is the spread plus leaning their quotes based on
+inventory, not selling at some computable break-even."* Translation: a
+maker's profit is the fee it collects for providing the service (the
+spread), plus adjusting its prices based on what it happens to be holding.
+Its profit is not out-predicting the market — and quoting a "smarter"
+private opinion of the price just means informed traders trade through you
+until you agree with everyone else.
 
-`FairValueInput` (source/pricing_model.hpp) is the entire universe the
-pricing model can see:
+## 2. How the bot prices today, and why that's the bug
+
+Today fv comes from the **micro-price**: take the best bid and best ask,
+and weight each price by the size resting on the *opposite* side, so the
+answer leans toward whichever side has more pressure. Then smooth it with
+an EMA. Reasonable — but it only looks at L1, the top of the book.
+
+This is verifiable at the code level. The struct below is *everything* the
+pricing model is allowed to see (`source/pricing_model.hpp`):
 
 ```cpp
 struct FairValueInput {
@@ -43,244 +86,290 @@ struct FairValueInput {
 };
 ```
 
-No tape. No taker sides. No depth beyond L1 (the `mid_cents` fed in is the
-L1 micro-price, EMA-smoothed). Public flow influences *admission* (scanner
-gates 61/62/63) and never *price*. The only flow the quoter reacts to is its
-own fills (`FlowImbalanceGuard` records the bot's fills, not public trades)
-plus a fixed 1c lean when that guard trips.
+No tape. No public trades. No depth beyond the one blended number. The
+public trade stream reaches the *scanner* (to decide which markets to
+enter) but never the *price*. The only flow the quoter reacts to is its own
+fills.
 
-In demo books L1 is dominated by bot walls — resting size that never trades
-and carries no information. The tape is the only participant set that put up
-money. Measured cost of pricing off the walls:
+Why that's fatal on these books: the resting size at the top of demo books
+is mostly **bot walls** — big orders placed by other bots that never
+actually trade. Size without information. The tape is the only set of
+participants who actually put money on the line. Measured cost of pricing
+off the walls instead of the flow:
 
-- **Run 18**: fv said 80 while 100% of tape volume printed at 82 — a 2c bias.
-- **The recurring drift line** — −$0.59 (run 19), −$0.42 (run 13), always
-  marked against held inventory — is the same bias expressed in dollars.
-- Every guard added since runs 13–19 (fade, lean, EMA depth) partially
-  compensates for this anchor error rather than fixing it.
+- **Run 18**: our fv said 80 while 100% of the hour's volume printed at 82.
+  A 2-cent blind spot.
+- **The recurring "drift" loss** — drift is the loss from marking our held
+  inventory as the price moves against it — was −$0.59 in run 19 and
+  −$0.42 in run 13, always against the inventory we were holding. That's
+  the same 2-cent blind spot expressed in dollars: we hold positions priced
+  by the walls while the flow walks away from us.
+- Several guards added over runs 13–19 (the fade, the fixed lean, heavy
+  smoothing) partially *compensate* for the biased anchor rather than fix it.
 
-The quoter machinery itself is the right shape (spread capture + LMSR
-inventory skew + item-64 unwind asymmetry = exactly "spread plus leaning on
-inventory"). The broken component is the anchor those mechanisms hang off.
+Important: the machinery *around* fv is the right shape — collect the
+spread, shift quotes with inventory, exit passively (item 64). It matches
+exactly what the practitioners describe. The broken part is the one number
+everything hangs off.
 
-## 3. Translating "maximize crossed flow" to a resting binary book
+## 3. Turning "maximize matched flow" into something computable
 
-A resting book is uncrossed by definition: executable volume is zero at every
-price, so the interview answer cannot be applied literally. It decomposes
-into two measurable analogues, one from the book and one from the tape.
+One subtlety first: an open market's book never overlaps — if a bid ever
+met an ask, the exchange would have matched them already. So on a resting
+book, "how much volume could trade right now" is zero at every price, and
+the interview answer can't be applied literally. It decomposes into two
+measurable stand-ins: one from the book, one from the tape.
 
-### 3a. Book component — full-depth balance price
+### 3a. Book side — where cumulative supply meets demand
 
-Build the YES-space ladder from both sides (YES bids are demand; NO bids at
-`p_no` are implied YES asks at `100 − p_no`, per LocalOrderbook's existing
-convention). Define cumulative curves:
+Kalshi books are two lists of bids: YES bids and NO bids. A NO bid at 44¢
+is exactly an offer to sell YES at 56¢ (the two sides of the same coin), so
+we can redraw the whole book on one YES scale: buyers below, sellers above.
 
-- `D(p)` = total resting demand at prices ≥ p
-- `S(p)` = total resting supply at prices ≤ p
-
-The clearing price `p*` is where the curves balance — the price minimizing
-`|D(p) − S(p)|`, tie-broken toward the mid. This is the micro-price
-generalized from L1 to the full ladder: if one side is much deeper, `p*`
-leans away from it (that side must concede to trade). `LocalOrderbook`
-already holds the full ladder (`state_`); this is a cheap walk, no new data.
-
-Open design question, settled by backtest not argument: deep walls far from
-the touch are the *least* trustworthy size on these books. Candidate
-weightings — flat full-depth, exponential decay by distance from mid
-(`weight = λ^distance`), top-K levels — all go into the backtest grid.
-
-### 3b. Tape component — where flow actually crossed
-
-Every print is realized back-and-forth flow: a taker and a maker who agreed.
-The tape component is a **time-decayed VWAP of recent public prints**
-(half-life configurable), with two corrections:
-
-- **Exclude our own fills.** Our prints sit at our quotes by construction —
-  feeding them back in makes fv confirm itself. Match public `trade`
-  messages against our `fill` messages by `trade_id` and drop them.
-- **Sparse-tape fallback.** Below `min_tape_prints` in the window, the blend
-  weight shifts to the book component (demo tapes can be thin; a two-print
-  VWAP is noise).
-
-### 3c. The blend
+Now walk the ladder and accumulate. Tiny example:
 
 ```
-fv_raw = w_tape · tape_vwap + (1 − w_tape) · p*_book
+sellers (asks):  30 @ 68        cumulative selling at ≤68: 50
+                 20 @ 67        cumulative selling at ≤67: 20
+                 ---- spread ----
+buyers (bids):  100 @ 62        cumulative buying at ≥62: 100
+                 40 @ 60        cumulative buying at ≥60: 140
 ```
 
-EMA-smoothed exactly as today, then into the unchanged quoter pipeline
-(reservation, skew, unwind, clamps). `w_tape`, tape half-life, depth
-weighting, and min-print floor are config; the backtest picks the defaults.
+The mid is 64.5. But there is 140 of buying interest against 50 of selling
+interest — if flow arrived, the sellers would run out first, so the "price
+where the two sides balance" sits near 67, not 64.5. That balance point —
+the price where cumulative demand and cumulative supply are closest to
+equal — is the **book clearing price**. The micro-price is this exact idea
+computed from only the first row of each side; we're generalizing it to the
+whole ladder. `LocalOrderbook` already stores the whole ladder, so this
+costs nothing new.
+
+One honest wrinkle: deep walls far from the touch are the *least*
+trustworthy size on these books. So we'll test a few weightings — count all
+depth equally, discount levels by distance from the mid, or use only the
+top K levels — and let the backtest (Phase 3) pick, not an argument.
+
+### 3b. Tape side — where flow actually crossed
+
+Every print is a real matched trade: a taker and a maker who agreed on a
+price with money attached. The tape component of fv is a **time-decayed
+VWAP of recent public prints** — an average trade price where bigger trades
+count more and recent trades count more (half-life configurable: a print
+from N seconds ago counts half as much as one from now). Two corrections:
+
+- **Exclude our own fills.** Our trades print at our own quoted prices by
+  construction, so feeding them back in makes fv agree with wherever we
+  already were. We match public prints against our own fill stream by
+  `trade_id` and drop ours.
+- **Thin-tape fallback.** If fewer than `min_tape_prints` occurred in the
+  window, a two-print average is noise — the blend weight shifts toward the
+  book component.
+
+### 3c. The blend, and a real example
+
+```
+fv_raw = w_tape · tape_vwap + (1 − w_tape) · book_clearing_price
+```
+
+then EMA-smoothed exactly as today, then into the unchanged quoter. The
+weight, half-life, depth weighting, and print floor are config; the
+backtest picks defaults.
+
+Here is the bias this fixes, in one real production candle (a 1-hour
+summary bar fetched live on 2026-07-09; see §5 for what candles are), from
+the "Dodgers beat Diamondbacks Jul 12" market:
+
+```
+quoted best bid over the hour:  61 → 63
+quoted best ask over the hour:  67 → 66 → 67
+trades this hour:               ~50 contracts, ALL at 66–67 (mean 66.98)
+```
+
+The quoted mid says fv ≈ 65. The flow says the market clears at ≈ 67 —
+buyers lifted the offer all hour while the bid crawled up behind them. A
+maker anchored to the mid would think its 67 ask carries 2 cents of edge
+(it carries none — 67 IS the price) and would rest its bid near 63, four
+cents below where anyone is trading, never filling. That is run 18's
+pattern, visible in public production data.
 
 ## 4. What this deliberately does NOT change
 
-- **Inventory machinery stays**: LMSR skew, inventory brake, position caps,
-  item-64 unwind asymmetry. These price *risk*, not value, and compose with
-  a better anchor (the unwind quote pegs to the reservation, which pegs to
-  fv — better fv puts the unwind quote where run 18's takers actually were).
-- **Admission gates stay**: flow-rate, live-spread, pinned-tape, expired-date
-  (61/62/63). Selection and pricing are separate defenses.
-- **ViewBasedModel stays off for quoting, permanently.** Pricing toward a
-  privately "debiased" probability is quoting against the market's clearing
-  price; the market's persistent bias is the risk premium a maker is paid to
-  warehouse, not an error to trade against. If the Bürgi debias has value it
-  is in market selection, not quotes.
+- **Inventory machinery stays.** When we accumulate a position, the quoter
+  shifts both quotes to encourage the market to take it off our hands (the
+  "reservation price" — fv adjusted for what we hold), stops adding past a
+  cap, and prices the exit at fair value instead of demanding extra profit
+  to close (item 64). All of that is pricing *risk*, not value, and it
+  composes with a better anchor: the exit quote pegs to the reservation,
+  the reservation pegs to fv — fix fv and the exit quote finally rests
+  where the takers actually are.
+- **Admission gates stay** (items 61/62/63: enough recent trades, wide
+  enough spread, a tape that actually moves). Choosing markets and pricing
+  them are separate defenses.
+- **ViewBasedModel stays off for quoting, permanently.** That model prices
+  toward what research says the *true* probability is (correcting the
+  known favorite-longshot bias in prediction markets). The practitioner
+  point from §1 applies: the market's persistent bias is the risk premium a
+  maker is *paid to warehouse*, not an error to quote against. If the
+  debias has value, it's in choosing markets, not in setting quotes.
 
 ## 5. Data inventory — the exchange already exposes everything this needs
 
 Verified against [docs/KALSHI_API_REFERENCE.md](docs/KALSHI_API_REFERENCE.md)
-(live-doc pass 2026-07-02) and the live doc pages (2026-07-09):
+(live-doc pass 2026-07-02) and the live doc pages (2026-07-09). Two terms
+used below: **candlesticks** are per-interval summary bars (for each 1-min
+/ 1-hour / 1-day bucket: first, highest, lowest, and last price — for
+trades AND for the quoted bid and ask — plus volume); **queue position** is
+how many contracts sit ahead of our resting order at the same price — the
+exchange fills orders first-come-first-served within a price level
+("price-time priority"), so it measures how close our order is to trading.
 
 | Source | Status in our code | Role in this plan |
 |---|---|---|
-| WS `orderbook_delta` | **In use** — primary feed into `LocalOrderbook` (full ladder) | Book component computes from what we already hold; zero new plumbing |
-| WS `trade` channel | **Not subscribed** | Phase 0 — the tape, live; the one genuinely missing input |
-| REST `GET /markets/{ticker}/orderbook` | In use (scanner finalist probe, item 61) | Unchanged; WS remains the in-session book source |
-| REST batched multi-market orderbooks | **Unused** | Scanner probes N finalists in one call (folds into item 58); Phase 3 recording of non-quoted candidate markets without WS subscriptions |
-| REST `GET /portfolio/orders/queue_positions` | **Unused** | `queue_position_fp` = contracts ahead at price-time priority, per resting order — see Phase 7 |
-| REST market candlesticks (single + batch) | **Unused** | 1-min/1-h/1-day OHLC of trade price **and yes_bid/yes_ask**, volume, open interest — Phase 3's production-scale data tier |
-| REST `GET /historical/trades` (+ `/historical/cutoff`) | **Unused** | Production trade tapes beyond the ~3-month live window — tape-VWAP calibration at scale |
-| WS `market_ticker_v2` | **Not subscribed** | Incremental per-market summary deltas — watch a candidate watchlist live (rotation, item 65 flow features, item 60a drift) without full book subscriptions |
-| WS `market_and_event_lifecycle` | **Not subscribed** | Push on market state changes — a determined/closed market exits the session instantly instead of waiting for the 5-min rotation poll (run-16 backstop at runtime) |
+| WS `orderbook_delta` | **In use** — feeds `LocalOrderbook` (full ladder) | Book clearing price computes from what we already hold; zero new plumbing |
+| WS `trade` channel | **Not subscribed** | Phase 0 — the live tape; the one genuinely missing input |
+| REST `GET /markets/{ticker}/orderbook` | In use (scanner probe) | Unchanged; WS remains the in-session book source |
+| REST batched multi-market orderbooks | **Unused** | Scanner probes N finalists in one call (folds into item 58); records candidate markets we aren't quoting |
+| REST `GET /portfolio/orders/queue_positions` | **Unused** | Exact queue position per resting order — see Phase 7 |
+| REST market candlesticks (single + batch) | **Unused** | Per-minute trade AND bid/ask history for any market — Phase 3's production-scale data, no recording needed |
+| REST `GET /historical/trades` (+ `/historical/cutoff`) | **Unused** | Production trade tapes older than the ~3-month live window |
+| WS `market_ticker_v2` | **Not subscribed** | Lightweight per-market summaries — watch a candidate watchlist live without full book subscriptions (rotation, item 65, item 60a) |
+| WS `market_and_event_lifecycle` | **Not subscribed** | Push when a market's state changes — a determined/closed market exits the session instantly instead of waiting for the 5-minute rotation poll (run-16 backstop) |
 
 The queue-positions endpoint deserves emphasis: it extends "price with flow
-in mind" from *where to quote* to *whether to move*. A resting order's queue
-position is an asset denominated in flow — repricing abandons it. PLAN item
-42b (queue-value reprice rule) was gated on a fill-probability model needing
-~500 accumulated fills; exact queue positions plus the TradeTape flow rate
-make queue value measurable **now**:
+in mind" from *where to quote* to *whether to move*. A resting order's spot
+in line is an asset — repricing means cancelling and going to the back of a
+new line. PLAN item 42b (only reprice when it's worth abandoning the queue)
+was blocked waiting for a statistical model needing ~500 recorded fills;
+exact queue positions plus the tape's flow rate make it simple arithmetic
+**now**:
 
 ```
-expected_time_to_fill ≈ queue_position_fp / tape_flow_rate(our_side, our_price)
+expected_time_to_fill ≈ contracts_ahead_of_us / rate_of_prints_at_our_price
 ```
 
 ## 6. Implementation plan (TDD throughout)
 
 ### Phase 0 — hear the flow (prerequisite, no behavior change)
 
-The bot never receives public trades today: the WS subscribes only to
-`orderbook_delta` and `fill` (source/websocket_client.cpp). Add the public
-`trade` channel. Read `taker_outcome_side` / `taker_book_side` — the legacy
-`taker_side` field is deprecated (API ref §order-direction; PLAN item 65's
-mention of `taker_side` should follow suit). `CapturingWebSocket` tees every
-inbound frame already, so captures pick up trades for free once subscribed.
+Subscribe the WebSocket to the public `trade` channel (today the bot
+listens only to book updates and its own fills — it literally never hears
+other people's trades in real time). Read the current field names
+`taker_outcome_side` / `taker_book_side` (the older `taker_side` is
+deprecated). The capture wrapper already records every inbound message, so
+recordings pick up trades for free once subscribed.
 
 ### Phase 1 — `TradeTape` component
 
-Rolling window of public prints per ticker: price, size, taker side,
-timestamp; own-fill exclusion by `trade_id`. Queries, all `now`-parameterized
-for testability like `FlowImbalanceGuard`:
-
-- `vwap_cents(halflife)` — the tape component of fv
-- `print_count(window)` — sparse-tape fallback input
-- `minority_side_ratio(window)` — **feeds item 65 admission directly**; the
-  scanner's REST trades probe can share the same accounting for startup,
-  with the WS tape taking over in-session.
+A rolling per-market window of public prints: price, size, taker side,
+timestamp; our own fills excluded. Queries: `vwap_cents(halflife)`,
+`print_count(window)`, `minority_side_ratio(window)` — that last one is
+item 65's admission input (what fraction of recent prints came from the
+less-active side; if ~0, every taker is on the same side and round trips
+are impossible there).
 
 ### Phase 2 — book clearing price
 
-`LocalOrderbook::clearing_price_cents(DepthWeighting)` next to the existing
+`LocalOrderbook::clearing_price_cents(weighting)` next to the existing
 `micro_price_cents()`. Unit tests on synthetic ladders: balanced book →
-mid; one-sided wall → leans away; empty side → falls back like micro; deep
-far wall under decay weighting → bounded influence.
+mid; one-sided depth → leans away from it; empty side → same fallback as
+micro; a huge far-away wall under distance-decay → bounded influence.
 
 ### Phase 3 — offline backtest (the go/no-go gate)
 
-Record ≥2 live-slate capture sessions (full-depth deltas + trades — Phase 0
-makes captures complete). Replay harness computes every candidate fv at each
-book/tape event:
+Score every fv candidate on data before touching live behavior:
 
-- micro (today's baseline) · full-depth `p*` (each weighting) · tape VWAP
-  (each half-life) · blends (grid over `w_tape`)
+- **Candidates**: today's micro-price · book clearing price (each
+  weighting) · tape VWAP (each half-life) · blends (grid over `w_tape`).
+- **Scores**: (a) next-print error — after each book/tape event, how far
+  was the candidate fv from the *next* trade's price? (did it say where
+  flow would cross?) and (b) simulated drift — mark one held contract
+  against each candidate fv over the session; the run-13/18/19 loss line
+  replayed.
 
-Scored on: **(a) next-print prediction error** (MAE of fv vs the next public
-trade price — did fv say where flow would cross?) and **(b) simulated drift**
-(mark a unit of held inventory against each candidate fv; the run-13/18/19
-loss line replayed). Deliverable: results table appended to this doc. The
-winner on recordings — and only a winner — proceeds to Phase 4.
+**Production-data tier (start immediately, nothing to record):**
+candlesticks give per-minute trade prices AND quoted bid/ask for any
+production market, and `/historical/trades` serves real tapes — so the
+tape-vs-book question can be scored across hundreds of production markets
+at minute resolution before our first demo recording finishes. Candle-scale
+results rank the candidates; a tick-scale replay on our own recordings
+confirms the winner under real quoting conditions. The same candle data
+calibrates item 60a's trend detector on real markets instead of demo flow.
 
-**Production-data tier (no recording needed, start immediately):** market
-candlesticks carry OHLC of trade price *and* yes_bid/yes_ask per minute, and
-`/historical/trades` serves real production tapes — so the tape-vs-book
-question can be scored at candle granularity across hundreds of PRODUCTION
-markets before our first demo capture finishes. Candle-scale results rank
-the candidates; the tick-scale replay on our own captures confirms the
-winner under quoting latency. The same candle set calibrates item 60a's
-drift estimator on real markets instead of demo flow.
+Deliverable: a results table appended to this doc. The winner on data — and
+only a winner — proceeds to Phase 4.
 
 ### Phase 4 — `ClearingPriceModel`
 
-Third `IPricingModel`, config-selected (`pricing.model = "clearing"`),
-HeuristicModel remains the default. Requires widening `FairValueInput` (or a
-richer sibling struct) to carry the ladder and a tape summary — an interface
-change, so tests first per TDD. Quoter is untouched apart from constructing
-the input.
+A third pricing model behind the existing `IPricingModel` interface,
+selected by config; the current model stays the default until Phase 5.
+Requires widening `FairValueInput` to carry the ladder and a tape summary —
+an interface change, so tests first. Computed in fixed-point dollars, not
+integer cents (see §7).
 
 ### Phase 5 — live A/B
 
-Matched-market protocol as in runs 13/14 (same market family, consecutive
-sessions, one variable). Success criteria, pre-declared:
+Same protocol as runs 13/14: same market family, consecutive sessions, one
+variable changed. Success criteria, declared before the run:
 
-- attribution **drift line ≤ half** of the matched HeuristicModel baseline
-- **entry edge preserved** (within noise of +0.5–2.5c/lot)
-- **round-trip completion rate up** (with item-64 unwind in place, the
-  unwind quote finally rests where flow is)
+- the drift loss line at most **half** of the matched baseline session
+- entry edge preserved (within noise of +0.5–2.5c per fill)
+- more completed round trips (buy AND sell the same inventory as a maker —
+  with item 64's exit pricing in place, the exit quote finally rests where
+  the flow is)
 
 ### Phase 6 — knob consolidation (the "doing too much" dividend)
 
 Only after Phase 5 passes, one removal per run, measured:
 
-- **Fixed 1c flow lean** — subsumed by the tape component (the VWAP *is* the
-  taker-side pressure signal, continuous instead of a tripwire constant).
-- **Adverse theo-jump fade** — was reacting to L1 wall noise; with a
-  tape-anchored fv, re-test whether it still fires on anything real.
-- **EMA alpha** — a depth-and-tape fv is inherently steadier than L1 micro;
-  the smoothing that damped wall noise may now just add lag.
+- **the fixed 1-cent flow lean** — the tape VWAP is the same signal,
+  continuous instead of a tripwire;
+- **the adverse-jump fade** — it reacted to L1 wall noise; retest whether
+  it still fires on anything real once fv stops listening to walls;
+- **EMA depth** — a depth-and-tape fv is steadier than L1 micro by
+  construction; smoothing that damped wall noise may now just add lag.
 
-docs/GUARDS.md consolidation plan tracks the outcome of each.
+docs/GUARDS.md's consolidation plan tracks each outcome.
 
 ### Phase 7 — queue-value reprice rule (item 42b, newly unlocked)
 
-With `queue_positions` (contracts ahead) and TradeTape (flow rate at our
-price), the reprice decision becomes arithmetic instead of a timer:
-
-- reprice only if `|fv − quoted| · fill_prob_at_new_price` exceeds the
-  expected value of the queue position abandoned
-- poll queue positions on the reprice decision path only (it costs REST
-  tokens; never in the hot loop), or on rotation cadence
-- the same number prices item 24's layered quotes (a layer's value IS its
-  queue position) and tells the item-64 unwind quote how close its exit is
-
-This phase needs Phases 0–1 (tape flow rate) but not 2–5; it can proceed in
-parallel with the fv backtest if sequencing demands it.
+With exact queue positions (§5) and the tape's flow rate, "should we move
+our quote?" becomes arithmetic: reprice only if the value of quoting at the
+better price exceeds the value of the queue spot we'd abandon. Poll the
+endpoint only when deciding a reprice (it costs rate-limit tokens), never
+in the hot loop. The same number prices item 24's layered quotes and tells
+item 64's exit quote how close it is to filling. Needs Phases 0–1 only;
+can run in parallel with the fv backtest.
 
 ## 7. Risks and honest caveats
 
-- **Tape lag on real news.** After a genuine jump, recent prints anchor fv to
-  stale levels. Mitigations: time-decay half-life, blend weight on the book
-  component (which reprices instantly), and the fade guard stays until
+- **The tape lags real news.** After a genuine jump, recent prints anchor
+  fv to stale levels for a few seconds. Mitigations: the time decay, the
+  book component (which reprices instantly), and the fade guard stays until
   Phase 6 proves it redundant.
-- **Thin demo tapes.** Some admitted markets may print a few times a minute.
-  The sparse-tape fallback keeps fv defined; item 65 keeps us out of books
-  where the tape is too one-sided for the strategy to work at all.
-- **Self-referential tape.** If our maker fills dominate a book's prints,
-  own-fill exclusion can leave near-nothing — correct behavior (fall back to
-  book), but it flags the market as one where we ARE the flow, which item 65
-  should treat as inadmissible.
-- **Determined markets** print without price discovery (run 16); the item-62
-  pinned-tape gate remains the defense — pricing assumes admission did its
-  job. The `market_and_event_lifecycle` channel adds a runtime backstop:
-  determination pushes an exit instead of waiting for rotation.
-- **Integer-cent assumption.** Kalshi deprecated legacy integer-cent price
-  fields (2026-03-05) and offers per-market **subpenny pricing** near the
-  0/100 tails — exactly where the longshot guard operates. The codebase
-  prices in `int` cents throughout. `ClearingPriceModel` should compute in
-  fixed-point dollars from day one, and the quoter's tick-grid assumption
-  needs an audit item in PLAN before any live switch on a subpenny market.
+- **Thin demo tapes.** Some admitted markets print a few times a minute.
+  The fallback keeps fv defined; item 65 keeps us out of books where the
+  tape is so one-sided the strategy can't work at all.
+- **We might BE the tape.** If our own fills dominate a book's prints,
+  excluding them leaves near-nothing — correct behavior (fall back to the
+  book), but it flags a market where we are the only liquidity, which item
+  65 should treat as inadmissible.
+- **Determined markets** (the outcome is already decided in the real world)
+  print without price discovery — run 16's trap. The item-62 gate remains
+  the defense at admission; the `market_and_event_lifecycle` channel adds a
+  runtime backstop by pushing the state change the moment the exchange
+  knows.
+- **Integer-cent assumption.** Kalshi deprecated integer-cent price fields
+  (2026-03-05) and offers per-market **subpenny pricing** (prices finer
+  than 1 cent) near the 0/100 tails — exactly where our longshot guard
+  operates. The codebase prices in `int` cents throughout.
+  `ClearingPriceModel` computes in fixed-point dollars from day one, and
+  the quoter's 1-cent grid assumption needs an audit item in PLAN before
+  any live switch on a subpenny market.
 
 ## 8. Sequencing against open work
 
 PR #94 (unwind pricing) is independent — merge order irrelevant. Item 65
 (two-sided admission) shares Phase 0+1 plumbing and should ride the same
-branch sequence. The L1 VM (PLAN item 3) is orthogonal but capture sessions
-for Phase 3 are better run on it — laptop sleep truncates recordings.
+branch sequence. The L1 VM (PLAN item 3) is orthogonal, but Phase 3's
+capture sessions are better run on it — laptop sleep truncates recordings.
