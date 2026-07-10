@@ -104,6 +104,22 @@ bool reconcile_against_exchange(kalshi::RestClient &rest,
   return false;
 }
 
+// ---- Market self-selection ----
+
+// Scans for the top live markets exactly as the trading session does at
+// startup — one shared selection path for run, capture, and rotation modes.
+std::vector<std::string>
+scan_top_tickers(kalshi::RestClient &rest, const kalshi::AppConfig &app_config,
+                 std::shared_ptr<spdlog::logger> &log) {
+  kalshi::TickerScanner scanner{rest, app_config.scanner};
+  std::vector<std::string> tickers;
+  for (const auto &pick : scanner.scan(app_config.scanner.trade_top_n)) {
+    tickers.push_back(pick.ticker);
+    log->info("selected ticker={} score={:.3f}", pick.ticker, pick.score);
+  }
+  return tickers;
+}
+
 // ---- In-session market rotation (item 52) ----
 
 // Re-scans and swaps dead-idle markets for currently-live ones. The scan and
@@ -216,8 +232,18 @@ int run_capture_mode(const std::atomic<bool> &shutdown_requested,
                      const kalshi::AppConfig &app_config,
                      const std::filesystem::path &capture_dir,
                      std::shared_ptr<spdlog::logger> &log) {
-  if (app_config.target_tickers.empty()) {
-    log->critical("capture mode — target_tickers is empty; nothing to record");
+  std::vector<std::string> tickers = app_config.target_tickers;
+  if (tickers.empty()) {
+    log->info("capture mode — selecting top {} live market(s)",
+              app_config.scanner.trade_top_n);
+    kalshi::RestClient scan_rest{auth,
+                                 std::make_unique<kalshi::HttpTransport>(),
+                                 app_config.base_url};
+    tickers = scan_top_tickers(scan_rest, app_config, log);
+  }
+  if (tickers.empty()) {
+    log->critical("capture mode — scanner found no live markets and "
+                  "target_tickers is empty; nothing to record");
     return 1;
   }
 
@@ -249,7 +275,7 @@ int run_capture_mode(const std::atomic<bool> &shutdown_requested,
   });
 
   // Seed the REST capture and subscribe each ticker to the live WS stream.
-  for (const auto &ticker : app_config.target_tickers) {
+  for (const auto &ticker : tickers) {
     try {
       (void)rest.get_orderbook(ticker);
     } catch (const std::exception &ex) {
