@@ -477,6 +477,7 @@ int main(int argc, char *argv[]) {
             }
           }
           kalshi::set_panic_handler(nullptr);
+          analytics_logger->flush();
           log->info("shutdown complete");
         }};
 
