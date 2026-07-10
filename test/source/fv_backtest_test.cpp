@@ -36,6 +36,17 @@ kalshi::FvBacktestConfig small_config() {
   config.tape_weights = {0.0, kHalfTapeWeight};
   config.tape_half_life_seconds = {kHalfLifeSeconds};
   config.own_fill_weights = {0.0};
+  config.score_horizon_seconds = 0;
+  return config;
+}
+
+kalshi::FvBacktestConfig horizon_config(int horizon_seconds) {
+  kalshi::FvBacktestConfig config;
+  config.anchors = {kalshi::AnchorSpec{.label = "micro", .use_micro = true}};
+  config.tape_weights = {0.0};
+  config.tape_half_life_seconds = {kHalfLifeSeconds};
+  config.own_fill_weights = {0.0};
+  config.score_horizon_seconds = horizon_seconds;
   return config;
 }
 
@@ -165,6 +176,72 @@ TEST(FvBacktestTest, ScoresSortedByMaeAscending) {
   for (std::size_t idx = 1; idx < scores.size(); ++idx) {
     EXPECT_LE(scores[idx - 1].mae_cents, scores[idx].mae_cents);
   }
+}
+
+TEST(FvBacktestTest, HorizonGradesAgainstFirstPrintAtOrAfterDeadline) {
+  constexpr int kHorizonSeconds = 30;
+  constexpr int kEarlyGapSeconds = 10;
+  constexpr int kLateGapSeconds = 40;
+  constexpr int kMidPrint = 64;
+  constexpr int kLatePrint = 65;
+  constexpr double kHorizonMae = 3.0;
+  kalshi::FvBacktest backtest{horizon_config(kHorizonSeconds)};
+  backtest.on_snapshot(make_book());
+  backtest.on_trade(make_trade("t1", kFirstPrint, base_time()));
+  backtest.on_trade(make_trade(
+      "t2", kMidPrint, base_time() + std::chrono::seconds{kEarlyGapSeconds}));
+  backtest.on_trade(make_trade(
+      "t3", kLatePrint, base_time() + std::chrono::seconds{kLateGapSeconds}));
+
+  const auto scores = backtest.scores();
+  const auto &micro = find_score(scores, "micro");
+  EXPECT_EQ(micro.events, 2);
+  EXPECT_NEAR(micro.mae_cents, kHorizonMae, kTolerance);
+  EXPECT_NEAR(micro.bias_cents, -kHorizonMae, kTolerance);
+}
+
+TEST(FvBacktestTest, HorizonZeroGradesAgainstTheArrivingPrint) {
+  kalshi::FvBacktest backtest{horizon_config(0)};
+  backtest.on_snapshot(make_book());
+  backtest.on_trade(make_trade("t1", kFirstPrint, base_time()));
+  backtest.on_trade(make_trade(
+      "t2", kSecondPrint,
+      base_time() + std::chrono::seconds{kSecondPrintGapSeconds}));
+
+  const auto scores = backtest.scores();
+  const auto &micro = find_score(scores, "micro");
+  EXPECT_EQ(micro.events, 2);
+  EXPECT_NEAR(micro.mae_cents, kAnchorMae, kTolerance);
+  EXPECT_NEAR(micro.bias_cents, kAnchorBias, kTolerance);
+}
+
+TEST(FvBacktestTest, HorizonPendingEventsDoNotCrossTickers) {
+  constexpr int kHorizonSeconds = 30;
+  constexpr int kOtherPrint = 50;
+  constexpr int kOtherGapSeconds = 35;
+  constexpr int kResolveGapSeconds = 40;
+  constexpr int kLatePrint = 65;
+  constexpr double kHorizonMae = 3.0;
+  const std::string kOtherTicker = "KXOTHER";
+  kalshi::FvBacktest backtest{horizon_config(kHorizonSeconds)};
+  backtest.on_snapshot(make_book());
+  kalshi::Orderbook other_book = make_book();
+  other_book.ticker = kOtherTicker;
+  backtest.on_snapshot(other_book);
+
+  backtest.on_trade(make_trade("t1", kFirstPrint, base_time()));
+  kalshi::PublicTrade other = make_trade(
+      "o1", kOtherPrint, base_time() + std::chrono::seconds{kOtherGapSeconds});
+  other.market_ticker = kOtherTicker;
+  backtest.on_trade(other);
+  backtest.on_trade(make_trade(
+      "t3", kLatePrint,
+      base_time() + std::chrono::seconds{kResolveGapSeconds}));
+
+  const auto scores = backtest.scores();
+  const auto &micro = find_score(scores, "micro");
+  EXPECT_EQ(micro.events, 1);
+  EXPECT_NEAR(micro.mae_cents, kHorizonMae, kTolerance);
 }
 
 TEST(FvBacktestTest, DefaultConfigGeneratesGridWithMicroAndClearing) {

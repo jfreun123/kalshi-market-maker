@@ -5,10 +5,15 @@
 // session sees — book snapshots/deltas, public trades, own fills — through
 // the production LocalOrderbook and TradeTape, and grades a grid of fv
 // candidates (micro / clearing-price anchors × tape blend weights ×
-// half-lives × own-fill weights) against each public print: MAE = accuracy,
-// bias = the signed lean that becomes drift against held inventory. Own
-// fills still count as scoring targets (a taker crossed at that price);
-// they are only excluded from the tape per own_fill_weight.
+// half-lives × own-fill weights): MAE = accuracy, bias = the signed lean
+// that becomes drift against held inventory. Each print queues a scoring
+// event; it is graded against the first print in the same market at least
+// score_horizon_seconds later — a markout-style horizon, because grading
+// against the immediately next print rewards chasing the tape (demo prints
+// arrive in bursts at one price). Horizon 0 degenerates to next-print
+// grading. Events whose horizon extends past the recording are dropped.
+// Own fills still count as scoring targets (a taker crossed at that
+// price); they are only excluded from the tape per own_fill_weight.
 
 #include "orderbook.hpp"
 #include "trade_tape.hpp"
@@ -16,6 +21,7 @@
 
 #include <chrono>
 #include <cstddef>
+#include <deque>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -30,12 +36,14 @@ struct AnchorSpec {
 
 struct FvBacktestConfig {
   static constexpr int kDefaultTapeWindowSeconds = 600;
+  static constexpr int kDefaultScoreHorizonSeconds = 30;
 
   std::vector<AnchorSpec> anchors;
   std::vector<double> tape_weights;
   std::vector<int> tape_half_life_seconds;
   std::vector<double> own_fill_weights;
   int tape_window_seconds = kDefaultTapeWindowSeconds;
+  int score_horizon_seconds = kDefaultScoreHorizonSeconds;
 
   [[nodiscard]] static FvBacktestConfig defaults();
 };
@@ -79,8 +87,14 @@ private:
     Accumulator accumulator;
   };
 
+  struct PendingScore {
+    TimePoint deadline;
+    std::vector<double> fair_values;
+  };
+
   void build_candidates();
-  void score_print(const PublicTrade &trade);
+  void queue_scores(const PublicTrade &trade);
+  void resolve_pending(const PublicTrade &trade);
   [[nodiscard]] double fair_value_of(const Candidate &candidate,
                                      const LocalOrderbook &book,
                                      const PublicTrade &trade) const;
@@ -89,6 +103,7 @@ private:
   std::vector<Candidate> candidates_;
   std::vector<TradeTape> tapes_;
   std::unordered_map<std::string, LocalOrderbook> books_;
+  std::unordered_map<std::string, std::deque<PendingScore>> pending_by_ticker_;
 };
 
 } // namespace kalshi

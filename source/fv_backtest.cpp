@@ -11,6 +11,9 @@ constexpr double kFlatAnchorWeight = 0.0;
 constexpr double kLightTapeWeight = 0.1;
 constexpr double kQuarterTapeWeight = 0.25;
 constexpr double kHalfTapeWeight = 0.5;
+constexpr double kHeavyTapeWeight = 0.75;
+constexpr double kPureTapeWeight = 1.0;
+constexpr int kFastHalfLifeSeconds = 10;
 constexpr int kShortHalfLifeSeconds = 30;
 constexpr int kLongHalfLifeSeconds = 120;
 constexpr double kNoOwnFillCredit = 0.0;
@@ -29,9 +32,11 @@ FvBacktestConfig FvBacktestConfig::defaults() {
                  .weighting =
                      DepthWeighting{.decay_per_cent = kWallDecayPerCent}},
   };
-  config.tape_weights = {kFlatAnchorWeight, kLightTapeWeight,
-                         kQuarterTapeWeight, kHalfTapeWeight};
-  config.tape_half_life_seconds = {kShortHalfLifeSeconds, kLongHalfLifeSeconds};
+  config.tape_weights = {kFlatAnchorWeight,    kLightTapeWeight,
+                         kQuarterTapeWeight,   kHalfTapeWeight,
+                         kHeavyTapeWeight,     kPureTapeWeight};
+  config.tape_half_life_seconds = {kFastHalfLifeSeconds, kShortHalfLifeSeconds,
+                                   kLongHalfLifeSeconds};
   config.own_fill_weights = {kNoOwnFillCredit, kHalfOwnFillCredit};
   return config;
 }
@@ -102,13 +107,14 @@ void FvBacktest::on_fill(const Fill &fill) {
 }
 
 void FvBacktest::on_trade(const PublicTrade &trade) {
-  score_print(trade);
+  queue_scores(trade);
+  resolve_pending(trade);
   for (auto &tape : tapes_) {
     tape.record_trade(trade);
   }
 }
 
-void FvBacktest::score_print(const PublicTrade &trade) {
+void FvBacktest::queue_scores(const PublicTrade &trade) {
   const auto book_it = books_.find(trade.market_ticker);
   if (book_it == books_.end()) {
     return;
@@ -117,10 +123,29 @@ void FvBacktest::score_print(const PublicTrade &trade) {
   if (!book.best_bid().has_value() || !book.best_ask().has_value()) {
     return;
   }
-  for (Candidate &candidate : candidates_) {
-    const double error =
-        fair_value_of(candidate, book, trade) - trade.yes_price_cents;
-    candidate.accumulator.record(error);
+  PendingScore pending;
+  pending.deadline =
+      trade.timestamp + std::chrono::seconds{config_.score_horizon_seconds};
+  pending.fair_values.reserve(candidates_.size());
+  for (const Candidate &candidate : candidates_) {
+    pending.fair_values.push_back(fair_value_of(candidate, book, trade));
+  }
+  pending_by_ticker_[trade.market_ticker].push_back(std::move(pending));
+}
+
+void FvBacktest::resolve_pending(const PublicTrade &trade) {
+  const auto pending_it = pending_by_ticker_.find(trade.market_ticker);
+  if (pending_it == pending_by_ticker_.end()) {
+    return;
+  }
+  auto &queue = pending_it->second;
+  while (!queue.empty() && queue.front().deadline <= trade.timestamp) {
+    const PendingScore &due = queue.front();
+    for (std::size_t idx = 0; idx < candidates_.size(); ++idx) {
+      candidates_[idx].accumulator.record(due.fair_values[idx] -
+                                          trade.yes_price_cents);
+    }
+    queue.pop_front();
   }
 }
 

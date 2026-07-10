@@ -347,8 +347,43 @@ these liquid books did; that remains the open question for Phase 3b.
 <capture/session.jsonl>` replays a `--capture` recording through the
 production parse path, `LocalOrderbook`, and `TradeTape` (via
 `WebSocketClient::inject_frame` over a `NullWebSocket` — no credentials or
-config), and prints per-candidate MAE/bias for the full grid at every
-public print. Awaiting the first live-slate capture to produce numbers.
+config), and prints per-candidate MAE/bias. Scoring is **markout-style**:
+each print queues an event graded against the first same-market print ≥
+`score_horizon_seconds` (default 30) later — grading against the
+immediately-next print rewards chasing the tape, because demo prints
+arrive in bursts at one price (measured: the pure-10s-tape candidate
+scores 0.31c at horizon 0, an autocorrelation artifact, vs 0.66c at 30s).
+
+**Phase 3b first capture (2026-07-10, 30 min, 3 self-selected demo
+markets — PGA in-play + 2 pre-game WC mention markets, 1,070 scored
+prints, 30s horizon):**
+
+| candidate | MAE (¢) | bias (¢) |
+|---|---|---|
+| tape(w=1, h=10s), any anchor | **0.66** | −0.61 |
+| micro+tape(w=0.75, h=10s) | 0.93 | −0.89 |
+| micro+tape(w=0.5, h=30s) | 1.49 | −1.45 |
+| micro (pure) | 1.73 | −1.71 |
+| clearing(d=0.5) (pure) | 1.95 | −1.73 |
+| clearing(flat) (pure) | 2.72 | −1.35 |
+
+Findings, and their limits:
+
+1. **On demo books the tape dose inverts vs production**: more tape =
+   better, fresher = better, and pure L1 micro beats both clearing
+   variants (demo far-depth is junk walls — flat clearing is the worst
+   anchor on the board; distance decay only partially repairs it).
+2. **Every candidate's bias is negative** (−0.6 to −1.7¢): prints landed
+   above every fv formula all window long — persistent one-way buying in
+   the *public* flow, run 19's one-sidedness measured in market data.
+3. **The structural caveat that caps what this metric can decide**: in
+   one-way flow, every print is on the taker's side, so print-prediction
+   at ANY horizon rewards estimators that sit at the level being hit —
+   which is also exactly where a maker gets run over. The offline metric
+   has reached its discriminating limit; the tape-heavy winner here and
+   the book-heavy winner on production candles bracket the answer, and
+   **dollars must decide: Phase 5's live A/B on matched markets is the
+   real test**, with round-trip completion and drift as the score.
 
 ### Phase 4 — `ClearingPriceModel`
 
