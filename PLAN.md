@@ -265,8 +265,16 @@
     shipped 2026-07-09: `LocalOrderbook::clearing_price_cents(DepthWeighting)`
     — the micro-price generalized to the full ladder (flat / distance-decay /
     top-K weightings for the backtest grid; reduces exactly to micro at one
-    level per side). Next: Phase 3 — offline backtest, candle tier first;
-    the winner (and only a winner) becomes `ClearingPriceModel` (Phase 4).
+    level per side). Phase 3a (candle tier) ran 2026-07-09 on 30 production
+    markets / 4,014 events (`scripts/backtest_fv_candles.py`; table +
+    interpretation in BETTER_PRICING.md): **the book stays the anchor**
+    (mid beats every tape variant on MAE in every spread bucket — tape
+    lags), but the mid carries run-18's bias in production (−0.2/−0.4c,
+    prints land above it) and a low tape blend (w≈0.1–0.25) zeroes it.
+    Phase 4 is therefore NOT tape-heavy: clearing-price anchor + small tape
+    correction. Next: Phase 3b — tick-scale replay on our own captures
+    (now recording trades since #96), scored on simulated drift, to pin
+    the dose before ClearingPriceModel ships.
 
 32. [ ] **65 — two-sided-flow admission (proposed, awaiting Jacob).** Run
     19: 57 of 58 entry fills were the same side — demo taker flow is

@@ -308,6 +308,41 @@ calibrates item 60a's trend detector on real markets instead of demo flow.
 Deliverable: a results table appended to this doc. The winner on data — and
 only a winner — proceeds to Phase 4.
 
+**Phase 3 candle-tier results (run 2026-07-09, `scripts/backtest_fv_candles.py`,
+30 highest-volume production markets, 8h, 4,014 scoring events):**
+
+| candidate | MAE (¢) | bias (¢) |
+|---|---|---|
+| mid (book anchor) | **1.62** | −0.23 |
+| blend(w_tape=0.25, h=5m) | 1.96 | **−0.03** |
+| last trade | 2.10 | −0.03 |
+| blend(w_tape=0.5, h=5m) | 2.60 | +0.16 |
+| tape VWAP (h=2m) | 3.11 | +0.24 |
+| tape VWAP (h=5m) | 4.17 | +0.54 |
+| tape VWAP (h=15m) | 5.91 | +0.75 |
+
+The ranking holds in **every** spread bucket (≤1.5¢ / 1.5–3.5¢ / >3.5¢) —
+wide books did not flip it. Two conclusions:
+
+1. **The book stays the anchor.** The quoted mid beats every tape variant
+   on accuracy; the tape lags by construction (prints are history). The
+   strong form of this plan — a tape-anchored fv — is refuted at minute
+   scale on liquid production books.
+2. **The tape's job is bias correction.** The mid's error is not centered:
+   trades print systematically above it in tight/medium books (−0.22¢ /
+   −0.40¢ — run 18's direction, in production). A small blend
+   (w_tape ≈ 0.1–0.25) zeroes the bias at modest MAE cost. Bias, not MAE,
+   is what converts to drift dollars against held inventory — MAE ~1.6¢ is
+   mostly unavoidable bid-ask bounce (trades can only print at somebody's
+   quote, ~a half-spread from any honest fv).
+
+**Decision: Phase 4's `ClearingPriceModel` must not be tape-heavy.** Default
+shape: clearing-price book anchor (robustness vs walls) + low-w tape
+correction (bias). The dose (`w_tape`, `own_fill_weight`, depth weighting,
+half-life) is confirmed at tick scale on our own demo captures with the
+simulated-drift score — thin bot-walled demo books may want more tape than
+these liquid books did; that remains the open question for Phase 3b.
+
 ### Phase 4 — `ClearingPriceModel`
 
 A third pricing model behind the existing `IPricingModel` interface,
