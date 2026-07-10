@@ -56,9 +56,9 @@ std::optional<int> ticker_event_date_key(std::string_view ticker) {
   if (month_iter == kTickerMonthTokens.end()) {
     return std::nullopt;
   }
-  const int month = static_cast<int>(
-                        std::distance(kTickerMonthTokens.begin(), month_iter)) +
-                    1;
+  const int month =
+      static_cast<int>(std::distance(kTickerMonthTokens.begin(), month_iter)) +
+      1;
   const int year = kTickerBaseYear +
                    ((token[kYearTensIndex] - '0') * kDecimalBase) +
                    (token[kYearOnesIndex] - '0');
@@ -290,12 +290,11 @@ bool TickerScanner::passes_flow_admission(
   if (config_.max_stale_trade_minutes > 0) {
     const auto staleness_cutoff =
         now - std::chrono::minutes{config_.max_stale_trade_minutes};
-    if (trades->front().created_time < staleness_cutoff) {
+    if (trades->front().timestamp < staleness_cutoff) {
       get_logger()->info(
-          "scanner: dropped ticker={} — last trade {}m ago (limit {}m)",
-          ticker,
+          "scanner: dropped ticker={} — last trade {}m ago (limit {}m)", ticker,
           std::chrono::duration_cast<std::chrono::minutes>(
-              now - trades->front().created_time)
+              now - trades->front().timestamp)
               .count(),
           config_.max_stale_trade_minutes);
       return false;
@@ -305,7 +304,7 @@ bool TickerScanner::passes_flow_admission(
   if (config_.min_trades_per_hour > 0) {
     const auto needed = static_cast<std::size_t>(config_.min_trades_per_hour);
     if (trades->size() < needed ||
-        (*trades)[needed - 1].created_time < hour_cutoff) {
+        (*trades)[needed - 1].timestamp < hour_cutoff) {
       get_logger()->info(
           "scanner: dropped ticker={} — fewer than {} trades in the last hour",
           ticker, config_.min_trades_per_hour);
@@ -330,7 +329,7 @@ bool TickerScanner::tape_shows_price_discovery(
   int max_price = 0;
   int recent_count = 0;
   for (const auto &trade : trades) {
-    if (trade.created_time < lookback_cutoff) {
+    if (trade.timestamp < lookback_cutoff) {
       break;
     }
     ++recent_count;

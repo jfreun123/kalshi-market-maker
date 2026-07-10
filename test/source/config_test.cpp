@@ -148,14 +148,18 @@ TEST(ConfigTest, LoadsScannerSection) {
   constexpr double kMaxDays = 120.0;
 
   nlohmann::json config_json = minimal_config_json();
-  config_json["scanner"] = {
-      {"min_price_cents", kMinPrice},   {"max_price_cents", kMaxPrice},
-      {"min_spread_cents", kMinSpread}, {"max_spread_cents", kMaxSpread},
-      {"min_volume_24h", kMinVolume},   {"min_days_to_close", kMinDays},
-      {"max_days_to_close", kMaxDays},  {"max_stale_trade_minutes", 45},
-      {"rotation_minutes", 7},          {"min_trades_per_hour", 9},
-      {"min_trade_price_range_cents", 4},
-      {"tape_range_lookback_minutes", 240}};
+  config_json["scanner"] = {{"min_price_cents", kMinPrice},
+                            {"max_price_cents", kMaxPrice},
+                            {"min_spread_cents", kMinSpread},
+                            {"max_spread_cents", kMaxSpread},
+                            {"min_volume_24h", kMinVolume},
+                            {"min_days_to_close", kMinDays},
+                            {"max_days_to_close", kMaxDays},
+                            {"max_stale_trade_minutes", 45},
+                            {"rotation_minutes", 7},
+                            {"min_trades_per_hour", 9},
+                            {"min_trade_price_range_cents", 4},
+                            {"tape_range_lookback_minutes", 240}};
 
   const auto path = write_temp_config(config_json);
   const auto config = kalshi::load_config(path);

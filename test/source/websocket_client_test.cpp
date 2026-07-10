@@ -7,6 +7,7 @@
 #include <openssl/pem.h>
 #include <openssl/rsa.h>
 
+#include <chrono>
 #include <format>
 #include <memory>
 #include <stdexcept>
@@ -30,6 +31,9 @@ constexpr double kCentsPerDollar = 100.0;
 constexpr long long kFillTsMs = 1735689600000LL; // 2025-01-01T00:00:00Z in ms
 constexpr std::size_t kOneLevel = 1U;
 constexpr std::size_t kTwoLevels = 2U;
+constexpr std::size_t kTwoChannels = 2U;
+constexpr int kTradePrice = 67;
+constexpr int kTradeCount = 12;
 constexpr std::size_t kFillPlusOneMarket = 2U;  // fill sub + 1 market sub
 constexpr std::size_t kFillPlusTwoMarkets = 3U; // fill sub + 2 market subs
 constexpr std::size_t kFourMessages = 4U; // 2 reconnects x (fill + market)
@@ -135,6 +139,24 @@ std::string fill_message(const std::string &order_id, const std::string &ticker,
   return msg.dump();
 }
 
+std::string trade_message(const std::string &ticker,
+                          const std::string &taker_side, int yes_price,
+                          int count,
+                          const std::string &trade_id = "pub-trade-1") {
+  nlohmann::json msg;
+  msg["type"] = "trade";
+  msg["msg"]["trade_id"] = trade_id;
+  msg["msg"]["market_ticker"] = ticker;
+  msg["msg"]["yes_price_dollars"] = cents_to_dollars(yes_price);
+  msg["msg"]["no_price_dollars"] =
+      cents_to_dollars(kalshi::complement_price(yes_price));
+  msg["msg"]["count_fp"] = format_count(count);
+  msg["msg"]["taker_outcome_side"] = taker_side;
+  msg["msg"]["taker_book_side"] = (taker_side == "yes") ? "bid" : "ask";
+  msg["msg"]["ts_ms"] = kFillTsMs;
+  return msg.dump();
+}
+
 std::string with_seq(const std::string &message, long long sid, long long seq) {
   auto parsed = nlohmann::json::parse(message);
   parsed["sid"] = sid;
@@ -200,7 +222,7 @@ TEST_F(WebSocketClientTest, SubscribeSendsCorrectTicker) {
   EXPECT_EQ(tickers[0], kTestTicker);
 }
 
-TEST_F(WebSocketClientTest, SubscribeSendsOrderbookDeltaChannel) {
+TEST_F(WebSocketClientTest, SubscribeSendsOrderbookDeltaAndTradeChannels) {
   auto fake_ws = std::make_unique<kalshi::FakeWebSocket>();
   kalshi::FakeWebSocket *ws_raw = fake_ws.get();
 
@@ -211,8 +233,9 @@ TEST_F(WebSocketClientTest, SubscribeSendsOrderbookDeltaChannel) {
   ASSERT_EQ(ws_raw->sent_messages().size(), kFillPlusOneMarket);
   const auto market_sub = nlohmann::json::parse(ws_raw->sent_messages()[1]);
   const auto &channels = market_sub["params"]["channels"];
-  ASSERT_FALSE(channels.empty());
+  ASSERT_EQ(channels.size(), kTwoChannels);
   EXPECT_EQ(channels[0], "orderbook_delta");
+  EXPECT_EQ(channels[1], "trade");
   EXPECT_FALSE(market_sub["params"].contains("use_yes_price"));
 }
 
@@ -470,6 +493,59 @@ TEST_F(WebSocketClientTest, FillFeeCostParsedFromDollarsToCents) {
   client.run();
 
   EXPECT_NEAR(received.fee_cents, kExpectedFeeCents, 1e-9);
+}
+
+TEST_F(WebSocketClientTest, TradeCallbackFiredWithParsedFields) {
+  auto fake_ws = std::make_unique<kalshi::FakeWebSocket>();
+  kalshi::FakeWebSocket *ws_raw = fake_ws.get();
+  ws_raw->enqueue_message(
+      trade_message(kTestTicker, "yes", kTradePrice, kTradeCount));
+
+  auto client = make_client(std::move(fake_ws));
+
+  kalshi::PublicTrade received;
+  client.on_trade([&](const kalshi::PublicTrade &trade) { received = trade; });
+  client.run();
+
+  EXPECT_EQ(received.trade_id, "pub-trade-1");
+  EXPECT_EQ(received.market_ticker, kTestTicker);
+  EXPECT_EQ(received.yes_price_cents, kTradePrice);
+  EXPECT_EQ(received.quantity, kalshi::Quantity::from_contracts(kTradeCount));
+  EXPECT_EQ(received.taker_side, kalshi::Side::Yes);
+  const auto expected_ts = std::chrono::system_clock::time_point(
+      std::chrono::milliseconds(kFillTsMs));
+  EXPECT_EQ(received.timestamp, expected_ts);
+}
+
+TEST_F(WebSocketClientTest, TradeNoTakerSideParsedCorrectly) {
+  auto fake_ws = std::make_unique<kalshi::FakeWebSocket>();
+  kalshi::FakeWebSocket *ws_raw = fake_ws.get();
+  ws_raw->enqueue_message(
+      trade_message(kTestTicker, "no", kTradePrice, kTradeCount));
+
+  auto client = make_client(std::move(fake_ws));
+
+  kalshi::PublicTrade received;
+  client.on_trade([&](const kalshi::PublicTrade &trade) { received = trade; });
+  client.run();
+
+  EXPECT_EQ(received.taker_side, kalshi::Side::No);
+  EXPECT_EQ(received.yes_price_cents, kTradePrice);
+}
+
+TEST_F(WebSocketClientTest, MalformedTradeDroppedWithoutCallback) {
+  auto fake_ws = std::make_unique<kalshi::FakeWebSocket>();
+  kalshi::FakeWebSocket *ws_raw = fake_ws.get();
+  ws_raw->enqueue_message(R"({"type":"trade","msg":{}})");
+
+  auto client = make_client(std::move(fake_ws));
+
+  bool called = false;
+  client.on_trade(
+      [&](const kalshi::PublicTrade & /*trade*/) { called = true; });
+  client.run();
+
+  EXPECT_FALSE(called);
 }
 
 TEST_F(WebSocketClientTest, ContiguousSeqDispatchesAllDeltas) {

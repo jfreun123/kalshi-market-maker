@@ -757,17 +757,39 @@ TEST_F(RestClientTest, GetRecentTradesParsesNewestFirstWithPrices) {
 
   ASSERT_TRUE(trades.has_value());
   ASSERT_EQ(trades->size(), 2U);
-  EXPECT_GT(trades->front().created_time, trades->back().created_time);
+  EXPECT_GT(trades->front().timestamp, trades->back().timestamp);
   EXPECT_EQ(trades->front().yes_price_cents, 37);
   EXPECT_EQ(trades->back().yes_price_cents, 36);
+  EXPECT_EQ(trades->front().trade_id, "t1");
+  EXPECT_EQ(trades->front().market_ticker, "KXT");
+  EXPECT_EQ(trades->front().quantity, kalshi::Quantity::from_fp_string("1.51"));
+  EXPECT_EQ(trades->front().taker_side, kalshi::Side::Yes);
+  EXPECT_EQ(trades->back().taker_side, kalshi::Side::No);
   EXPECT_NE(transport_raw->last_request().url.find("ticker=KXT"),
             std::string::npos);
   EXPECT_NE(transport_raw->last_request().url.find("limit=2"),
             std::string::npos);
   const auto epoch_seconds = std::chrono::duration_cast<std::chrono::seconds>(
-                                 trades->front().created_time.time_since_epoch())
+                                 trades->front().timestamp.time_since_epoch())
                                  .count();
   EXPECT_EQ(epoch_seconds, 1'783'197'776LL);
+}
+
+TEST_F(RestClientTest, GetRecentTradesPrefersTakerOutcomeSideOverLegacy) {
+  auto transport = std::make_unique<FakeTransport>();
+  transport->enqueue(
+      {kHttpOk,
+       R"({"cursor":"","trades":[{"count_fp":"1.00",)"
+       R"("created_time":"2026-07-04T20:42:56.131595Z","taker_side":"yes",)"
+       R"("taker_outcome_side":"no",)"
+       R"("ticker":"KXT","trade_id":"t1","yes_price_dollars":"0.3700"}]})"});
+  auto client = make_client(std::move(transport));
+
+  const auto trades = client.get_recent_trades("KXT", 1);
+
+  ASSERT_TRUE(trades.has_value());
+  ASSERT_EQ(trades->size(), 1U);
+  EXPECT_EQ(trades->front().taker_side, kalshi::Side::No);
 }
 
 TEST_F(RestClientTest, GetRecentTradesEmptyVectorWhenNeverTraded) {

@@ -598,11 +598,20 @@ RestClient::get_recent_trades(std::string_view ticker, int limit) {
     auto json_data = nlohmann::json::parse(resp.body);
     std::vector<PublicTrade> trades;
     for (const auto &trade : json_data.at("trades")) {
-      trades.push_back(
-          {.created_time =
-               parse_iso8601(trade.at("created_time").get<std::string>()),
-           .yes_price_cents = parse_dollars_to_cents(
-               trade.at("yes_price_dollars").get<std::string>())});
+      PublicTrade parsed;
+      parsed.trade_id = trade.value("trade_id", std::string{});
+      parsed.market_ticker = trade.value("ticker", std::string{ticker});
+      parsed.yes_price_cents = parse_dollars_to_cents(
+          trade.at("yes_price_dollars").get<std::string>());
+      parsed.quantity = Quantity::from_fp_string(trade.value("count_fp", "0"));
+      const std::string taker_side_str =
+          trade.contains("taker_outcome_side")
+              ? trade.at("taker_outcome_side").get<std::string>()
+              : trade.value("taker_side", "yes");
+      parsed.taker_side = parse_side(taker_side_str);
+      parsed.timestamp =
+          parse_iso8601(trade.at("created_time").get<std::string>());
+      trades.push_back(parsed);
     }
     return trades;
   } catch (const std::exception &ex) {

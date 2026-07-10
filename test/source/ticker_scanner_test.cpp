@@ -650,14 +650,12 @@ TEST_F(TickerScannerTest, TightLiveBookDropped) {
   transport->enqueue(
       {kHttpOk, make_markets_response({kMarketGoodA, kMarketGoodB})});
   transport->enqueue({kHttpOk, R"({"incentive_programs":[],"cursor":""})"});
-  transport->enqueue(
-      {kHttpOk,
-       R"({"orderbook_fp":{"yes_dollars":[["0.2000","500.00"]],)"
-       R"("no_dollars":[["0.7900","400.00"]]}})"});
-  transport->enqueue(
-      {kHttpOk,
-       R"({"orderbook_fp":{"yes_dollars":[["0.2000","500.00"]],)"
-       R"("no_dollars":[["0.7400","400.00"]]}})"});
+  transport->enqueue({kHttpOk,
+                      R"({"orderbook_fp":{"yes_dollars":[["0.2000","500.00"]],)"
+                      R"("no_dollars":[["0.7900","400.00"]]}})"});
+  transport->enqueue({kHttpOk,
+                      R"({"orderbook_fp":{"yes_dollars":[["0.2000","500.00"]],)"
+                      R"("no_dollars":[["0.7400","400.00"]]}})"});
 
   kalshi::ScannerConfig book_only;
   book_only.max_stale_trade_minutes = 0;
@@ -676,13 +674,12 @@ TEST_F(TickerScannerTest, OneSidedLiveBookAdmitted) {
   transport->enqueue(
       {kHttpOk, make_markets_response({kMarketGoodA, kMarketGoodB})});
   transport->enqueue({kHttpOk, R"({"incentive_programs":[],"cursor":""})"});
-  transport->enqueue(
-      {kHttpOk, R"({"orderbook_fp":{"yes_dollars":[["0.2000","500.00"]],)"
-                R"("no_dollars":[]}})"});
-  transport->enqueue(
-      {kHttpOk,
-       R"({"orderbook_fp":{"yes_dollars":[["0.2000","500.00"]],)"
-       R"("no_dollars":[["0.7400","400.00"]]}})"});
+  transport->enqueue({kHttpOk,
+                      R"({"orderbook_fp":{"yes_dollars":[["0.2000","500.00"]],)"
+                      R"("no_dollars":[]}})"});
+  transport->enqueue({kHttpOk,
+                      R"({"orderbook_fp":{"yes_dollars":[["0.2000","500.00"]],)"
+                      R"("no_dollars":[["0.7400","400.00"]]}})"});
 
   kalshi::ScannerConfig book_only;
   book_only.max_stale_trade_minutes = 0;

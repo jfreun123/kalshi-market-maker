@@ -255,8 +255,7 @@ TEST_F(QuoterTest, LongInventoryUnwindAskQuotesAtReservation) {
 
   const std::string &ask_body = transport.recorded_requests().at(1).body;
   EXPECT_NE(ask_body.find("\"side\":\"ask\""), std::string::npos);
-  EXPECT_NE(ask_body.find(std::string(kAskPriceMid52Long20)),
-            std::string::npos)
+  EXPECT_NE(ask_body.find(std::string(kAskPriceMid52Long20)), std::string::npos)
       << "the inventory-reducing side must quote at the reservation price — "
          "closing risk pays up to fair value instead of demanding fresh edge";
 }
