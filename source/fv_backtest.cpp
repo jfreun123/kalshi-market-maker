@@ -56,8 +56,9 @@ void FvBacktest::build_candidates() {
   for (std::size_t anchor_index = 0; anchor_index < config_.anchors.size();
        ++anchor_index) {
     const auto &anchor = config_.anchors[anchor_index];
-    candidates_.push_back(
-        Candidate{.name = anchor.label, .anchor_index = anchor_index});
+    candidates_.push_back(Candidate{.name = anchor.label,
+                                    .anchor_index = anchor_index,
+                                    .accumulator = {}});
     for (const double tape_weight : config_.tape_weights) {
       if (tape_weight <= 0.0) {
         continue;
@@ -77,7 +78,8 @@ void FvBacktest::build_candidates() {
                         .anchor_index = anchor_index,
                         .tape_weight = tape_weight,
                         .half_life = std::chrono::seconds{half_life},
-                        .tape_index = tape_index});
+                        .tape_index = tape_index,
+                        .accumulator = {}});
         }
       }
     }
