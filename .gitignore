@@ -36,3 +36,6 @@ logs/
 # Scan output artifact
 scan_results.json
 docs/papers/*.pdf
+
+# Session recordings (raw frames + financial fills)
+capture/
