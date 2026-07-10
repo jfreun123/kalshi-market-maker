@@ -261,9 +261,12 @@
     0+1 shipped 2026-07-09 — WS `trade` channel subscribed (parsed via
     `taker_outcome_side`; captures now record the tape) and `TradeTape`
     (per-market rolling prints, own fills excluded by trade_id, time-decayed
-    VWAP + print count + minority-side ratio), fed by the session. Next:
-    Phase 2 (full-depth clearing price on `LocalOrderbook`) + Phase 3
-    (offline backtest, candle tier first).
+    VWAP + print count + minority-side ratio), fed by the session. Phase 2
+    shipped 2026-07-09: `LocalOrderbook::clearing_price_cents(DepthWeighting)`
+    — the micro-price generalized to the full ladder (flat / distance-decay /
+    top-K weightings for the backtest grid; reduces exactly to micro at one
+    level per side). Next: Phase 3 — offline backtest, candle tier first;
+    the winner (and only a winner) becomes `ClearingPriceModel` (Phase 4).
 
 32. [ ] **65 — two-sided-flow admission (proposed, awaiting Jacob).** Run
     19: 57 of 58 entry fills were the same side — demo taker flow is
