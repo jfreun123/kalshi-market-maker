@@ -92,6 +92,20 @@ TEST_F(AppModesTest, FlattenAllPositionsNoOpWhenFlat) {
   EXPECT_EQ(kalshi::flatten_all_positions(rest, log, nullptr), 0);
 }
 
+TEST_F(AppModesTest, ScanTopTickersEmptyWhenNoMarketsQualify) {
+  auto transport = std::make_unique<FakeTransport>();
+  FakeTransport *const transport_raw = transport.get();
+  transport_raw->enqueue({kHttpOk, R"({"cursor":"","markets":[]})"});
+  kalshi::RestClient rest{kalshi::Auth{"key", kPemPrivateKey},
+                          std::move(transport), kBaseUrl};
+  auto log = kalshi::get_logger();
+  const kalshi::AppConfig app_config;
+
+  const auto tickers = kalshi::scan_top_tickers(rest, app_config, log);
+
+  EXPECT_TRUE(tickers.empty());
+}
+
 TEST(FvReplayModeTest, ReplaysCaptureAndPrintsScores) {
   const auto path = std::filesystem::temp_directory_path() /
                     ("fv_replay_test_" + std::to_string(::getpid()) + ".jsonl");

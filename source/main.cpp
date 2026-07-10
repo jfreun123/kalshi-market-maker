@@ -17,7 +17,6 @@
 #include "rest_client.hpp"
 #include "risk_manager.hpp"
 #include "scan_output.hpp"
-#include "ticker_scanner.hpp"
 #include "trade_tape.hpp"
 #include "trading_session.hpp"
 #include "websocket_client.hpp"
@@ -269,12 +268,8 @@ int main(int argc, char *argv[]) {
     if (app_config.target_tickers.empty()) {
       log->info("selecting top {} live market(s) at startup",
                 app_config.scanner.trade_top_n);
-      kalshi::TickerScanner startup_scanner{rest, app_config.scanner};
-      for (const auto &pick :
-           startup_scanner.scan(app_config.scanner.trade_top_n)) {
-        app_config.target_tickers.push_back(pick.ticker);
-        log->info("selected ticker={} score={:.3f}", pick.ticker, pick.score);
-      }
+      app_config.target_tickers =
+          kalshi::scan_top_tickers(rest, app_config, log);
     }
     if (app_config.target_tickers.empty()) {
       log->critical("scanner found no tradable live markets — try later or "
