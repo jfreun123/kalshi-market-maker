@@ -1,6 +1,7 @@
 #include "orderbook.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <stdexcept>
 
 namespace kalshi {
@@ -100,6 +101,49 @@ double LocalOrderbook::micro_price_cents() const {
   return ((static_cast<double>(bid->price_cents) * ask_qty) +
           (static_cast<double>(ask->price_cents) * bid_qty)) /
          total_qty;
+}
+
+double
+LocalOrderbook::clearing_price_cents(const DepthWeighting &weighting) const {
+  if (state_.yes.empty() || state_.no.empty()) {
+    return micro_price_cents();
+  }
+  const double mid = mid_price_cents();
+  struct SideDepth {
+    double weight_total{0.0};
+    double weighted_price_sum{0.0};
+  };
+  const auto accumulate_side = [&](const std::vector<Level> &levels,
+                                   bool bids) {
+    SideDepth depth;
+    int levels_used = 0;
+    for (const auto &level : levels) {
+      if (weighting.max_levels > 0 && levels_used >= weighting.max_levels) {
+        break;
+      }
+      const double price =
+          bids ? level.price_cents : complement_price(level.price_cents);
+      const double distance_cents = bids ? (mid - price) : (price - mid);
+      const double weight = level.quantity.contracts() *
+                            std::pow(weighting.decay_per_cent, distance_cents);
+      depth.weight_total += weight;
+      depth.weighted_price_sum += weight * price;
+      ++levels_used;
+    }
+    return depth;
+  };
+  const SideDepth bid_depth = accumulate_side(state_.yes, true);
+  const SideDepth ask_depth = accumulate_side(state_.no, false);
+  if (bid_depth.weight_total <= 0.0 || ask_depth.weight_total <= 0.0) {
+    return micro_price_cents();
+  }
+  const double bid_avg_price =
+      bid_depth.weighted_price_sum / bid_depth.weight_total;
+  const double ask_avg_price =
+      ask_depth.weighted_price_sum / ask_depth.weight_total;
+  return ((bid_avg_price * ask_depth.weight_total) +
+          (ask_avg_price * bid_depth.weight_total)) /
+         (bid_depth.weight_total + ask_depth.weight_total);
 }
 
 int LocalOrderbook::spread_cents() const {
