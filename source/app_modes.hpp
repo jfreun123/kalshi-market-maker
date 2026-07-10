@@ -16,6 +16,7 @@
 #include <filesystem>
 #include <memory>
 #include <mutex>
+#include <ostream>
 #include <string>
 #include <vector>
 
@@ -48,6 +49,9 @@ int run_capture_mode(const std::atomic<bool> &shutdown_requested,
                      const Auth &auth, const AppConfig &app_config,
                      const std::filesystem::path &capture_dir,
                      std::shared_ptr<spdlog::logger> &log);
+
+int run_fv_replay_mode(const std::filesystem::path &capture_path,
+                       std::ostream &out, std::shared_ptr<spdlog::logger> &log);
 
 void rotate_markets(RestClient &rest, TradingSession &session,
                     WebSocketClient &ws_client, const AppConfig &app_config,

@@ -50,6 +50,24 @@ public:
   virtual void request_close() = 0;
 };
 
+// No-op transport for replay tooling: lets WebSocketClient parse frames via
+// inject_frame without any connection, so offline replays reuse the exact
+// production message parsing.
+class NullWebSocket : public IWebSocket {
+public:
+  void
+  connect(std::string_view /*url*/,
+          const std::map<std::string, std::string> & /*headers*/) override {}
+  void send(const std::string & /*message*/) override {}
+  void on_message(MessageHandler /*handler*/) override {}
+  void on_connect(ConnectHandler /*handler*/) override {}
+  void on_disconnect(DisconnectHandler /*handler*/) override {}
+  void on_heartbeat(HeartbeatHandler /*handler*/) override {}
+  void run() override {}
+  void stop() override {}
+  void request_close() override {}
+};
+
 // Production IWebSocket backed by ixwebsocket.
 // Fully implemented in Phase 10 when the main binary is wired up.
 class IxWebSocket : public IWebSocket {
@@ -128,6 +146,10 @@ public:
   // Time of the last message received. Initialized to construction time.
   // Use this to detect a silently stalled connection.
   [[nodiscard]] std::chrono::steady_clock::time_point last_message_time() const;
+
+  // Feed one raw frame through the production parse/dispatch path without a
+  // connection — the seam replay tooling uses to grade recorded sessions.
+  void inject_frame(const std::string &raw);
 
   // Blocks until stop() is called or max_reconnects exhausted.
   void run();

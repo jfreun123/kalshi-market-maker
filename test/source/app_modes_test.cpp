@@ -10,7 +10,12 @@
 #include <openssl/pem.h>
 #include <openssl/rsa.h>
 
+#include <unistd.h>
+
+#include <filesystem>
+#include <fstream>
 #include <memory>
+#include <sstream>
 #include <string>
 
 namespace {
@@ -99,4 +104,37 @@ TEST_F(AppModesTest, ScanTopTickersEmptyWhenNoMarketsQualify) {
   const auto tickers = kalshi::scan_top_tickers(rest, app_config, log);
 
   EXPECT_TRUE(tickers.empty());
+}
+
+TEST(FvReplayModeTest, ReplaysCaptureAndPrintsScores) {
+  const auto path = std::filesystem::temp_directory_path() /
+                    ("fv_replay_test_" + std::to_string(::getpid()) + ".jsonl");
+  {
+    std::ofstream fixture{path};
+    fixture
+        << R"({"type":"orderbook_snapshot","msg":{"market_ticker":"REPLAY-TICK",)"
+        << R"("yes_dollars_fp":[["0.6000","10.00"]],)"
+        << R"("no_dollars_fp":[["0.3600","10.00"]]}})" << "\n"
+        << R"({"type":"trade","msg":{"trade_id":"t1",)"
+        << R"("market_ticker":"REPLAY-TICK","yes_price_dollars":"0.6300",)"
+        << R"("no_price_dollars":"0.3700","count_fp":"5.00",)"
+        << R"("taker_outcome_side":"yes","taker_book_side":"bid",)"
+        << R"("ts_ms":1783300000000}})" << "\n";
+  }
+  std::ostringstream table;
+  auto log = kalshi::get_logger();
+  const int result = kalshi::run_fv_replay_mode(path, table, log);
+  std::filesystem::remove(path);
+
+  ASSERT_EQ(result, 0);
+  EXPECT_NE(table.str().find("micro"), std::string::npos);
+  EXPECT_NE(table.str().find("clearing(flat)"), std::string::npos);
+}
+
+TEST(FvReplayModeTest, MissingCaptureFileFails) {
+  std::ostringstream table;
+  auto log = kalshi::get_logger();
+  EXPECT_EQ(kalshi::run_fv_replay_mode(
+                std::filesystem::path{"/nonexistent/nope.jsonl"}, table, log),
+            1);
 }

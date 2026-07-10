@@ -1,6 +1,7 @@
 #include "app_modes.hpp"
 
 #include "capture.hpp"
+#include "fv_backtest.hpp"
 #include "logger.hpp"
 #include "scan_output.hpp"
 #include "ticker_scanner.hpp"
@@ -10,6 +11,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <format>
 #include <fstream>
 #include <ranges>
 #include <thread>
@@ -218,6 +220,61 @@ int run_flatten_mode(kalshi::RestClient &rest,
   log->info("flatten mode — closing all open positions");
   const int closed = flatten_all_positions(rest, log, nullptr);
   log->info("flatten mode — closed {} position(s)", closed);
+  return 0;
+}
+
+// ---- FV replay mode ----
+
+// Replays a captured session (raw WS frames, one per line) through the
+// production parse path and the FvBacktest candidate grid, printing the
+// tick-scale scoreboard (BETTER_PRICING.md Phase 3b). No credentials or
+// config needed — the capture file is the only input.
+int run_fv_replay_mode(const std::filesystem::path &capture_path,
+                       std::ostream &out,
+                       std::shared_ptr<spdlog::logger> &log) {
+  std::ifstream capture_file{capture_path};
+  if (!capture_file) {
+    log->critical("fv-replay — cannot open capture file {}",
+                  capture_path.string());
+    return 1;
+  }
+
+  kalshi::FvBacktest backtest{kalshi::FvBacktestConfig::defaults()};
+  kalshi::WebSocketClient client{kalshi::Auth{"replay", ""},
+                                 std::make_unique<kalshi::NullWebSocket>(),
+                                 "wss://replay.invalid/ws", 0};
+  client.on_orderbook_snapshot([&backtest](const kalshi::Orderbook &snapshot) {
+    backtest.on_snapshot(snapshot);
+  });
+  client.on_orderbook_delta([&backtest](const std::string &ticker,
+                                        kalshi::Side side, int price_cents,
+                                        kalshi::Quantity delta) {
+    backtest.on_delta(ticker, side, price_cents, delta);
+  });
+  client.on_trade([&backtest](const kalshi::PublicTrade &trade) {
+    backtest.on_trade(trade);
+  });
+  client.on_fill(
+      [&backtest](const kalshi::Fill &fill) { backtest.on_fill(fill); });
+
+  long long frames = 0;
+  std::string line;
+  while (std::getline(capture_file, line)) {
+    if (!line.empty()) {
+      client.inject_frame(line);
+      ++frames;
+    }
+  }
+
+  const auto scores = backtest.scores();
+  out << std::format("{:<40}{:>8}{:>10}{:>10}\n", "candidate", "events",
+                     "MAE(c)", "bias(c)");
+  for (const auto &score : scores) {
+    out << std::format("{:<40}{:>8}{:>10.3f}{:>+10.3f}\n", score.candidate,
+                       score.events, score.mae_cents, score.bias_cents);
+  }
+  log->info("fv-replay — {} frames from {}, {} candidates", frames,
+            capture_path.string(), scores.size());
   return 0;
 }
 
