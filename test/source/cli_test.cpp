@@ -74,6 +74,18 @@ TEST(CliArgsTest, CaptureFlagWithoutDirectoryKeepsDefault) {
   EXPECT_EQ(args.capture_dir, std::filesystem::path{"capture"});
 }
 
+TEST(CliArgsTest, FvReplayFlagTakesCapturePath) {
+  const auto args = parse({"kalshi_mm", "--fv-replay", "rec/session.jsonl"});
+  EXPECT_TRUE(args.fv_replay_mode);
+  EXPECT_EQ(args.replay_path, std::filesystem::path{"rec/session.jsonl"});
+}
+
+TEST(CliArgsTest, FvReplayWithoutPathKeepsDefault) {
+  const auto args = parse({"kalshi_mm", "--fv-replay"});
+  EXPECT_TRUE(args.fv_replay_mode);
+  EXPECT_EQ(args.replay_path, std::filesystem::path{"capture/session.jsonl"});
+}
+
 TEST(CliArgsTest, PositionalArgumentSetsConfigPath) {
   const auto args = parse({"kalshi_mm", "custom-config.json"});
   EXPECT_EQ(args.config_path, std::filesystem::path{"custom-config.json"});

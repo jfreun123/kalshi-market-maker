@@ -245,6 +245,10 @@ void WebSocketClient::on_trade(TradeCallback callback) {
   trade_callback_ = std::move(callback);
 }
 
+void WebSocketClient::inject_frame(const std::string &raw) {
+  handle_message(raw);
+}
+
 void WebSocketClient::on_disconnect(DisconnectCallback callback) {
   disconnect_callback_ = std::move(callback);
 }

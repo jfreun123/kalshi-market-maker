@@ -548,6 +548,21 @@ TEST_F(WebSocketClientTest, MalformedTradeDroppedWithoutCallback) {
   EXPECT_FALSE(called);
 }
 
+TEST_F(WebSocketClientTest, InjectFrameDispatchesWithoutRunning) {
+  kalshi::Auth auth{kApiKey, kPemPrivateKey};
+  kalshi::WebSocketClient client{
+      auth, std::make_unique<kalshi::NullWebSocket>(), kWsUrl, kNoReconnect,
+      std::chrono::milliseconds{0}};
+
+  kalshi::PublicTrade received;
+  client.on_trade([&](const kalshi::PublicTrade &trade) { received = trade; });
+  client.inject_frame(
+      trade_message(kTestTicker, "yes", kTradePrice, kTradeCount));
+
+  EXPECT_EQ(received.market_ticker, kTestTicker);
+  EXPECT_EQ(received.yes_price_cents, kTradePrice);
+}
+
 TEST_F(WebSocketClientTest, ContiguousSeqDispatchesAllDeltas) {
   auto fake_ws = std::make_unique<kalshi::FakeWebSocket>();
   kalshi::FakeWebSocket *ws_raw = fake_ws.get();

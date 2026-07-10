@@ -198,6 +198,12 @@ int main(int argc, char *argv[]) {
   try {
     const auto cli = kalshi::parse_args(
         std::span<char *>(argv, static_cast<std::size_t>(argc)));
+
+    if (cli.fv_replay_mode) {
+      auto replay_log = kalshi::get_logger();
+      return kalshi::run_fv_replay_mode(cli.replay_path, std::cout, replay_log);
+    }
+
     kalshi::AppConfig app_config = kalshi::load_config(cli.config_path);
 
     setup_logger(std::filesystem::path{app_config.log_dir}, cli.verbose);

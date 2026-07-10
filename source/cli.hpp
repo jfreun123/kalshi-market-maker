@@ -15,8 +15,10 @@ struct CliArgs {
   bool reconcile_mode{false};
   bool capture_mode{false};
   bool flatten_mode{false};
+  bool fv_replay_mode{false};
   bool verbose{false};
   std::filesystem::path capture_dir{"capture"};
+  std::filesystem::path replay_path{"capture/session.jsonl"};
   std::filesystem::path config_path{"config.json"};
 };
 
