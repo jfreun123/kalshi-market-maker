@@ -63,24 +63,30 @@ public:
   [[nodiscard]] std::vector<FvScore> scores() const;
 
 private:
+  struct Accumulator {
+    int events{0};
+    double abs_error_sum{0.0};
+    double signed_error_sum{0.0};
+
+    void record(double error_cents);
+  };
   struct Candidate {
     std::string name;
     std::size_t anchor_index{0};
     double tape_weight{0.0};
     std::chrono::seconds half_life{0};
     std::size_t tape_index{0};
-  };
-  struct Accumulator {
-    int events{0};
-    double abs_error_sum{0.0};
-    double signed_error_sum{0.0};
+    Accumulator accumulator;
   };
 
   void build_candidates();
+  void score_print(const PublicTrade &trade);
+  [[nodiscard]] double fair_value_of(const Candidate &candidate,
+                                     const LocalOrderbook &book,
+                                     const PublicTrade &trade) const;
 
   FvBacktestConfig config_;
   std::vector<Candidate> candidates_;
-  std::vector<Accumulator> accumulators_;
   std::vector<TradeTape> tapes_;
   std::unordered_map<std::string, LocalOrderbook> books_;
 };

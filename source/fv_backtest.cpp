@@ -44,7 +44,12 @@ FvBacktest::FvBacktest(FvBacktestConfig config) : config_{std::move(config)} {
     tapes_.emplace_back(tape_config);
   }
   build_candidates();
-  accumulators_.resize(candidates_.size());
+}
+
+void FvBacktest::Accumulator::record(double error_cents) {
+  ++events;
+  abs_error_sum += std::abs(error_cents);
+  signed_error_sum += error_cents;
 }
 
 void FvBacktest::build_candidates() {
@@ -95,48 +100,59 @@ void FvBacktest::on_fill(const Fill &fill) {
 }
 
 void FvBacktest::on_trade(const PublicTrade &trade) {
-  const auto book_it = books_.find(trade.market_ticker);
-  if (book_it != books_.end() && book_it->second.best_bid().has_value() &&
-      book_it->second.best_ask().has_value()) {
-    const LocalOrderbook &book = book_it->second;
-    for (std::size_t idx = 0; idx < candidates_.size(); ++idx) {
-      const Candidate &candidate = candidates_[idx];
-      const AnchorSpec &anchor = config_.anchors[candidate.anchor_index];
-      const double anchor_price =
-          anchor.use_micro ? book.micro_price_cents()
-                           : book.clearing_price_cents(anchor.weighting);
-      double fair_value = anchor_price;
-      if (candidate.tape_weight > 0.0) {
-        const auto vwap = tapes_[candidate.tape_index].vwap_cents(
-            trade.market_ticker, candidate.half_life, trade.timestamp);
-        if (vwap.has_value()) {
-          fair_value = (candidate.tape_weight * *vwap) +
-                       ((1.0 - candidate.tape_weight) * anchor_price);
-        }
-      }
-      const double error = fair_value - trade.yes_price_cents;
-      Accumulator &accumulator = accumulators_[idx];
-      ++accumulator.events;
-      accumulator.abs_error_sum += std::abs(error);
-      accumulator.signed_error_sum += error;
-    }
-  }
+  score_print(trade);
   for (auto &tape : tapes_) {
     tape.record_trade(trade);
   }
 }
 
+void FvBacktest::score_print(const PublicTrade &trade) {
+  const auto book_it = books_.find(trade.market_ticker);
+  if (book_it == books_.end()) {
+    return;
+  }
+  const LocalOrderbook &book = book_it->second;
+  if (!book.best_bid().has_value() || !book.best_ask().has_value()) {
+    return;
+  }
+  for (Candidate &candidate : candidates_) {
+    const double error =
+        fair_value_of(candidate, book, trade) - trade.yes_price_cents;
+    candidate.accumulator.record(error);
+  }
+}
+
+double FvBacktest::fair_value_of(const Candidate &candidate,
+                                 const LocalOrderbook &book,
+                                 const PublicTrade &trade) const {
+  const AnchorSpec &anchor = config_.anchors[candidate.anchor_index];
+  const double anchor_price = anchor.use_micro
+                                  ? book.micro_price_cents()
+                                  : book.clearing_price_cents(anchor.weighting);
+  if (candidate.tape_weight <= 0.0) {
+    return anchor_price;
+  }
+  const auto tape_vwap = tapes_[candidate.tape_index].vwap_cents(
+      trade.market_ticker, candidate.half_life, trade.timestamp);
+  if (!tape_vwap.has_value()) {
+    return anchor_price;
+  }
+  return (candidate.tape_weight * *tape_vwap) +
+         ((1.0 - candidate.tape_weight) * anchor_price);
+}
+
 std::vector<FvScore> FvBacktest::scores() const {
   std::vector<FvScore> results;
   results.reserve(candidates_.size());
-  for (std::size_t idx = 0; idx < candidates_.size(); ++idx) {
-    const Accumulator &accumulator = accumulators_[idx];
+  for (const Candidate &candidate : candidates_) {
+    const auto &[events, abs_error_sum, signed_error_sum] =
+        candidate.accumulator;
     FvScore score;
-    score.candidate = candidates_[idx].name;
-    score.events = accumulator.events;
-    if (accumulator.events > 0) {
-      score.mae_cents = accumulator.abs_error_sum / accumulator.events;
-      score.bias_cents = accumulator.signed_error_sum / accumulator.events;
+    score.candidate = candidate.name;
+    score.events = events;
+    if (events > 0) {
+      score.mae_cents = abs_error_sum / events;
+      score.bias_cents = signed_error_sum / events;
     }
     results.push_back(std::move(score));
   }
