@@ -435,7 +435,8 @@ int main(int argc, char *argv[]) {
     // throws, so it is safe to run from a destructor; it runs after join()
     // (single-threaded by then) so no lock is needed.
     ScopeGuard shutdown_guard{
-        [&ws_client, &ws_thread, &session, &rest, &cli, &log]() {
+        [&ws_client, &ws_thread, &session, &rest, &cli, &log,
+         &analytics_logger]() {
           log->info("shutting down — stopping feed, cancelling all quotes");
           ws_client.stop();
           if (ws_thread.joinable()) {
