@@ -24,10 +24,13 @@ void TradeTape::record_own_fill(const std::string &trade_id) {
   own_trade_ids_.insert(trade_id);
 }
 
-bool TradeTape::is_countable(const PublicTrade &print, TimePoint now) const {
+bool TradeTape::is_in_window(const PublicTrade &print, TimePoint now) const {
   const auto cutoff = now - std::chrono::seconds{config_.window_seconds};
-  return print.timestamp >= cutoff && print.timestamp <= now &&
-         !own_trade_ids_.contains(print.trade_id);
+  return print.timestamp >= cutoff && print.timestamp <= now;
+}
+
+bool TradeTape::is_countable(const PublicTrade &print, TimePoint now) const {
+  return is_in_window(print, now) && !own_trade_ids_.contains(print.trade_id);
 }
 
 std::optional<double> TradeTape::vwap_cents(std::string_view ticker,
@@ -40,15 +43,17 @@ std::optional<double> TradeTape::vwap_cents(std::string_view ticker,
   double weighted_price_sum = 0.0;
   double weight_sum = 0.0;
   for (const auto &print : tape_it->second) {
-    if (!is_countable(print, now)) {
+    if (!is_in_window(print, now)) {
       continue;
     }
     const double age_seconds =
         std::chrono::duration<double>(now - print.timestamp).count();
     const double half_lives_elapsed =
         age_seconds / static_cast<double>(half_life.count());
-    const double weight =
-        print.quantity.contracts() * std::exp2(-half_lives_elapsed);
+    double weight = print.quantity.contracts() * std::exp2(-half_lives_elapsed);
+    if (own_trade_ids_.contains(print.trade_id)) {
+      weight *= config_.own_fill_weight;
+    }
     weighted_price_sum += weight * print.yes_price_cents;
     weight_sum += weight;
   }

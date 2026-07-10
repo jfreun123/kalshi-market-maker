@@ -2,8 +2,11 @@
 
 // Rolling per-market window of public trade prints — the live tape. Feeds the
 // tape half of clearing-price fair value (BETTER_PRICING.md §3b) and the
-// two-sided-flow admission ratio (item 65). Own fills are excluded by
-// trade_id in either arrival order, so fv never confirms our own quotes.
+// two-sided-flow admission ratio (item 65). Own fills are identified by
+// trade_id in either arrival order and weighted into the VWAP by
+// own_fill_weight (default 0 = excluded, so fv never confirms our own
+// quotes; the taker who hit us is real flow, so the backtest may prefer a
+// partial weight); print_count and minority_side_ratio always exclude them.
 // Queries take `now` so they are testable and side-effect-free; record_trade
 // evicts prints older than the window to bound memory.
 
@@ -21,8 +24,10 @@ namespace kalshi {
 
 struct TradeTapeConfig {
   static constexpr int kDefaultWindowSeconds = 300;
+  static constexpr double kDefaultOwnFillWeight = 0.0;
 
   int window_seconds = kDefaultWindowSeconds;
+  double own_fill_weight = kDefaultOwnFillWeight;
 };
 
 class TradeTape {
@@ -43,6 +48,8 @@ public:
   minority_side_ratio(std::string_view ticker, TimePoint now) const;
 
 private:
+  [[nodiscard]] bool is_in_window(const PublicTrade &print,
+                                  TimePoint now) const;
   [[nodiscard]] bool is_countable(const PublicTrade &print,
                                   TimePoint now) const;
 

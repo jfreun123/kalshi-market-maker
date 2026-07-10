@@ -25,9 +25,20 @@ constexpr double kQuarterRatio = 0.25;
 constexpr double kTolerance = 1e-9;
 constexpr int kBeyondWindowSeconds = kWindowSeconds + 1;
 
+constexpr double kHalfOwnWeight = 0.5;
+constexpr double kFullOwnWeight = 1.0;
+constexpr double kHalfOwnMix = 2000.0 / 30.0;
+constexpr double kFullOwnMix = 65.0;
+
 kalshi::TradeTapeConfig test_config() {
   kalshi::TradeTapeConfig config;
   config.window_seconds = kWindowSeconds;
+  return config;
+}
+
+kalshi::TradeTapeConfig config_with_own_weight(double own_fill_weight) {
+  kalshi::TradeTapeConfig config = test_config();
+  config.own_fill_weight = own_fill_weight;
   return config;
 }
 
@@ -166,6 +177,49 @@ TEST(TradeTapeTest, TradesForOtherTickerDoNotMix) {
   ASSERT_TRUE(vwap.has_value());
   EXPECT_NEAR(*vwap, kLowPrice, kTolerance);
   EXPECT_EQ(tape.print_count(kOtherTicker, now), 1);
+}
+
+TEST(TradeTapeTest, OwnFillHalfWeightBlendsOwnPrintsIntoVwap) {
+  kalshi::TradeTape tape{config_with_own_weight(kHalfOwnWeight)};
+  const auto now = base_time();
+  tape.record_own_fill("ours");
+  tape.record_trade(
+      make_trade("ours", kLowPrice, kSmallCount, kalshi::Side::Yes, now));
+  tape.record_trade(
+      make_trade("theirs", kHighPrice, kSmallCount, kalshi::Side::Yes, now));
+
+  const auto vwap = tape.vwap_cents(kTicker, kHalfLife, now);
+  ASSERT_TRUE(vwap.has_value());
+  EXPECT_NEAR(*vwap, kHalfOwnMix, kTolerance);
+}
+
+TEST(TradeTapeTest, OwnFillFullWeightCountsOwnPrintsFully) {
+  kalshi::TradeTape tape{config_with_own_weight(kFullOwnWeight)};
+  const auto now = base_time();
+  tape.record_own_fill("ours");
+  tape.record_trade(
+      make_trade("ours", kLowPrice, kSmallCount, kalshi::Side::Yes, now));
+  tape.record_trade(
+      make_trade("theirs", kHighPrice, kSmallCount, kalshi::Side::Yes, now));
+
+  const auto vwap = tape.vwap_cents(kTicker, kHalfLife, now);
+  ASSERT_TRUE(vwap.has_value());
+  EXPECT_NEAR(*vwap, kFullOwnMix, kTolerance);
+}
+
+TEST(TradeTapeTest, OwnFillWeightDoesNotAffectPrintCountOrRatio) {
+  kalshi::TradeTape tape{config_with_own_weight(kFullOwnWeight)};
+  const auto now = base_time();
+  tape.record_own_fill("ours");
+  tape.record_trade(
+      make_trade("ours", kLowPrice, kSmallCount, kalshi::Side::No, now));
+  tape.record_trade(
+      make_trade("theirs", kHighPrice, kSmallCount, kalshi::Side::Yes, now));
+
+  EXPECT_EQ(tape.print_count(kTicker, now), 1);
+  const auto ratio = tape.minority_side_ratio(kTicker, now);
+  ASSERT_TRUE(ratio.has_value());
+  EXPECT_NEAR(*ratio, 0.0, kTolerance);
 }
 
 TEST(TradeTapeTest, EmptyOwnFillIdExcludesNothing) {
