@@ -385,13 +385,21 @@ Findings, and their limits:
    **dollars must decide: Phase 5's live A/B on matched markets is the
    real test**, with round-trip completion and drift as the score.
 
-### Phase 4 — `ClearingPriceModel`
+### Phase 4 — `ClearingPriceModel` (shipped 2026-07-10)
 
-A third pricing model behind the existing `IPricingModel` interface,
-selected by config; the current model stays the default until Phase 5.
-Requires widening `FairValueInput` to carry the ladder and a tape summary —
-an interface change, so tests first. Computed in fixed-point dollars, not
-integer cents (see §7).
+`fv = (1 − w) · anchor + w · tape_vwap`, where the anchor is the quoter's
+existing EMA-smoothed micro-price and the tape term is the raw decayed VWAP
+of recent public prints (no prints → pure anchor). Selected by
+`quoter.use_clearing_pricing`; knobs `clearing_tape_weight` (default 0.5)
+and `tape_half_life_seconds` (default 30) — the midpoint of the offline
+bracket, since liquid production books favored ~0.25 and thin one-way demo
+books rewarded up to 1.0. The quoter queries the live `TradeTape` and
+passes the VWAP through `FairValueInput::tape_vwap_cents`; skew, lean, and
+all guards apply downstream unchanged. **Off by default — Phase 5's A/B
+flips it only if the dollars agree.** Two deviations from the original
+sketch, both data-driven: the anchor stays micro (not the full-depth
+clearing price — demo far-depth proved to be junk walls), and prices remain
+integer cents for now (the subpenny audit is PLAN item 69).
 
 ### Phase 5 — live A/B
 

@@ -68,6 +68,12 @@ AppConfig load_config(const std::filesystem::path &path) {
         "min_spread_cents", QuoterConfig::kDefaultMinSpreadCents);
     config.quoter.use_view_based_pricing =
         quoter_json.value("use_view_based_pricing", false);
+    config.quoter.use_clearing_pricing =
+        quoter_json.value("use_clearing_pricing", false);
+    config.quoter.clearing_tape_weight = quoter_json.value(
+        "clearing_tape_weight", QuoterConfig::kDefaultClearingTapeWeight);
+    config.quoter.tape_half_life_seconds = quoter_json.value(
+        "tape_half_life_seconds", QuoterConfig::kDefaultTapeHalfLifeSeconds);
     config.quoter.view_debias_beta =
         quoter_json.value("view_debias_beta", ViewBasedModel::kDefaultBeta);
     config.quoter.maker_fee_rate =

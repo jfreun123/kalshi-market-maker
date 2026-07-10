@@ -16,6 +16,7 @@ namespace kalshi {
 
 class FlowImbalanceGuard; // widen the spread under adverse one-sided flow
 class AnalyticsLogger;    // JSONL quote/fill events for offline measurement
+class TradeTape;          // rolling public-print window (clearing-price fv)
 
 // LMSR log-odds inventory skew (Berg & Proebsting pp.49-56): the reservation
 // price shifts a constant amount per contract in log-odds space, so the skew
@@ -66,6 +67,11 @@ struct QuoterConfig {
   // Directional flow lean (item 32): while flow is imbalanced, shift fair
   // value toward the takers' side by this much — believe persistent flow.
   static constexpr double kDefaultFlowLeanCents = 1.0;
+  // Clearing-price fv (item 66 Phase 4): tape blend weight and the VWAP
+  // half-life the quoter queries the tape with. Weight only applies when the
+  // ClearingPriceModel is selected (use_clearing_pricing).
+  static constexpr double kDefaultClearingTapeWeight = 0.5;
+  static constexpr int kDefaultTapeHalfLifeSeconds = 30;
   // Asymmetric unwind pricing (item 64): with inventory on, the reducing side
   // quotes at the reservation price plus only this much edge — closing risk
   // pays up to fair value; only opening risk charges the full half-spread.
@@ -89,6 +95,9 @@ struct QuoterConfig {
   double fv_ema_alpha = kDefaultFvEmaAlpha;
   int winddown_seconds = kDefaultWinddownSeconds;
   double flow_lean_cents = kDefaultFlowLeanCents;
+  bool use_clearing_pricing = false;
+  double clearing_tape_weight = kDefaultClearingTapeWeight;
+  int tape_half_life_seconds = kDefaultTapeHalfLifeSeconds;
   int inventory_cap_lots = kDefaultInventoryCapLots;
   double unwind_edge_cents = kDefaultUnwindEdgeCents;
   // Price toward the favorite-longshot-debiased view instead of the raw mid.
@@ -132,6 +141,7 @@ public:
   // Optional analytics tap: when set, every update() emits a quote-decision
   // event (PLAN item 31). Must outlive the Quoter; nullptr disables.
   void set_analytics(AnalyticsLogger *analytics);
+  void set_trade_tape(const TradeTape *trade_tape);
 
   // Forget all tracked resting quotes. Call this after the resting orders have
   // been cancelled out-of-band (risk halt, disconnect, shutdown): the quoter's
@@ -183,6 +193,7 @@ private:
   double inventory_b_contracts_;
   std::unordered_map<std::string, double> fv_ema_;
   AnalyticsLogger *analytics_{nullptr};
+  const TradeTape *trade_tape_{nullptr};
   bool reduce_only_{false};
   std::unordered_map<std::string, OwnQuote> own_quotes_;
   LocalOrderbook scratch_book_;

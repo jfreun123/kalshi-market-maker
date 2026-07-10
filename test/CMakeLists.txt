@@ -45,6 +45,7 @@ kalshi_add_test(flow_imbalance_test source/flow_imbalance_test.cpp)
 kalshi_add_test(trade_tape_test source/trade_tape_test.cpp)
 kalshi_add_test(fv_backtest_test source/fv_backtest_test.cpp)
 kalshi_add_test(view_based_model_test source/view_based_model_test.cpp)
+kalshi_add_test(clearing_price_model_test source/clearing_price_model_test.cpp)
 
 # ---- Replay tests ----
 

@@ -36,6 +36,18 @@ double HeuristicModel::estimate(const FairValueInput &input) const {
   return std::clamp(value, kMinValidCents, kMaxValidCents);
 }
 
+ClearingPriceModel::ClearingPriceModel(double tape_weight)
+    : tape_weight_{tape_weight} {}
+
+double ClearingPriceModel::estimate(const FairValueInput &input) const {
+  double value = input.mid_cents;
+  if (input.tape_vwap_cents.has_value()) {
+    value = (tape_weight_ * *input.tape_vwap_cents) +
+            ((1.0 - tape_weight_) * input.mid_cents);
+  }
+  return std::clamp(value, kMinValidCents, kMaxValidCents);
+}
+
 constexpr double kMinProb = 0.01;
 constexpr double kMaxProb = 0.99;
 constexpr double kBetaMax = 0.95; // keep (1 - beta) safely positive
