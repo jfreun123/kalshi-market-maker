@@ -97,6 +97,7 @@ public:
   using DeltaCallback = std::function<void(const std::string &ticker, Side,
                                            int price, Quantity delta)>;
   using FillCallback = std::function<void(const Fill &)>;
+  using TradeCallback = std::function<void(const PublicTrade &)>;
   using DisconnectCallback = std::function<void()>;
   using ReconnectCallback = std::function<void()>;
 
@@ -116,6 +117,7 @@ public:
   void on_orderbook_snapshot(SnapshotCallback callback);
   void on_orderbook_delta(DeltaCallback callback);
   void on_fill(FillCallback callback);
+  void on_trade(TradeCallback callback);
   void on_disconnect(DisconnectCallback callback);
 
   // Fires after a connection is re-established and subscriptions are resent —
@@ -159,6 +161,7 @@ private:
   SnapshotCallback snapshot_callback_;
   DeltaCallback delta_callback_;
   FillCallback fill_callback_;
+  TradeCallback trade_callback_;
   DisconnectCallback disconnect_callback_;
   ReconnectCallback reconnect_callback_;
 

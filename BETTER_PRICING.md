@@ -158,10 +158,19 @@ VWAP of recent public prints** — an average trade price where bigger trades
 count more and recent trades count more (half-life configurable: a print
 from N seconds ago counts half as much as one from now). Two corrections:
 
-- **Exclude our own fills.** Our trades print at our own quoted prices by
-  construction, so feeding them back in makes fv agree with wherever we
-  already were. We match public prints against our own fill stream by
-  `trade_id` and drop ours.
+- **Down-weight our own fills** (`own_fill_weight`, default 0 = excluded).
+  Our trades print at our own quoted prices by construction, so feeding
+  them back in at full weight makes fv agree with wherever we already were
+  — the worst case is a picked-off stale quote generating a print that
+  confirms the stale price. But every print of ours has two halves: our
+  price (our own opinion recycled — poker: you don't read the villain's
+  range off *your* bet) and the taker's decision to cross at it (real flow
+  — you *do* update when the villain calls). Jacob's challenge, 2026-07-09.
+  The taker half already reaches fv through the inventory skew and flow
+  lean, so 0 is the safe default; whether partial credit in the VWAP beats
+  routing it only through skew/lean is a backtest question — `own_fill_
+  weight` joins the Phase 3 grid alongside `w_tape` and the half-life.
+  We match public prints against our own fill stream by `trade_id`.
 - **Thin-tape fallback.** If fewer than `min_tape_prints` occurred in the
   window, a two-print average is noise — the blend weight shifts toward the
   book component.

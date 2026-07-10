@@ -16,6 +16,8 @@
 
 namespace kalshi {
 
+class TradeTape;
+
 // Owns the domain reactions of the market-making loop: live orderbook state and
 // the snapshot/delta/fill handlers that drive the quoter, order manager, risk
 // manager, and portfolio read-model.
@@ -57,11 +59,17 @@ public:
                 Quantity qty);
   // Record a fill, refresh per-market risk, and notify the PnL listener.
   void on_fill(const Fill &fill);
+  // Feed a public print to the trade tape (no-op without a tape).
+  void on_trade(const PublicTrade &trade);
 
   // Optional analytics tap: when set, every recorded fill emits a fill event
   // enriched with the book mid and post-fill inventory (PLAN item 31). Must
   // outlive the session; nullptr disables.
   void set_analytics(AnalyticsLogger *analytics);
+  // Optional live tape: when set, on_trade records public prints and on_fill
+  // marks our own trade_ids so the tape never counts our own fills. Must
+  // outlive the session; nullptr disables.
+  void set_trade_tape(TradeTape *trade_tape);
   // Record a shutdown-flatten execution so its realized PnL reaches the
   // OrderManager and the persisted carry (the WS feed is already down when the
   // flatten runs, so no fill message will ever arrive for it).
@@ -143,6 +151,7 @@ private:
   Quoter &quoter_;
   FlowImbalanceGuard *flow_guard_{nullptr};
   AnalyticsLogger *analytics_{nullptr};
+  TradeTape *trade_tape_{nullptr};
   Clock clock_;
   std::chrono::milliseconds error_cooldown_{kDefaultErrorCooldown};
   std::unordered_map<std::string, std::chrono::steady_clock::time_point>

@@ -196,3 +196,12 @@ TEST(PriceHelpersTest, ComplementIsSymmetric) {
     EXPECT_EQ(complement_price(complement_price(price)), price);
   }
 }
+
+TEST(PublicTradeTest, DefaultsAreEmpty) {
+  const PublicTrade trade;
+  EXPECT_TRUE(trade.trade_id.empty());
+  EXPECT_TRUE(trade.market_ticker.empty());
+  EXPECT_EQ(trade.yes_price_cents, 0);
+  EXPECT_TRUE(trade.quantity.is_zero());
+  EXPECT_EQ(trade.taker_side, Side::Yes);
+}

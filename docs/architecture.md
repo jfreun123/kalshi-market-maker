@@ -17,6 +17,7 @@ sequenceDiagram
     participant OM as OrderManager
     participant REST as RestClient
     participant AN as AnalyticsLogger
+    participant TAPE as TradeTape
 
     WS->>SESS: on_delta(ticker, side, price, qty)
     SESS->>OB: apply_delta(...)
@@ -28,8 +29,12 @@ sequenceDiagram
     OM->>REST: POST amend | POST create | DELETE (V2 signed)
     QE->>AN: quote_decision(...)
     WS->>SESS: on_fill(fill)
+    SESS->>TAPE: record_own_fill(trade_id)
     SESS->>OM: record_fill(fill)  [dedup by trade_id]
     SESS->>AN: fill(...)
+    WS->>SESS: on_trade(public trade)
+    SESS->>TAPE: record_trade(...)
+    Note over TAPE: rolling per-market print window:<br/>vwap · print_count · minority_side_ratio
     Note over SESS,RM: every ~1s: portfolio snapshot →<br/>kOverExposure / kPortfolioLoss / kDrawdown
     Note over SESS,REST: every ~2min: reconcile positions →<br/>kModelDiverge on drift
 ```
@@ -75,5 +80,10 @@ sequenceDiagram
 - **Measure everything** — `AnalyticsLogger` streams quote decisions, fills,
   and per-request HTTP RTT to `logs/analytics.jsonl`; the analysis scripts
   (markout, PnL attribution, latency report) read it offline.
+- **The bot hears the tape** — the WS subscription includes the public `trade`
+  channel; `TradeTape` keeps a rolling per-market window of prints (own fills
+  excluded by trade_id) exposing time-decayed VWAP, print count, and the
+  minority-taker-side ratio — the inputs for clearing-price fair value and
+  two-sided-flow admission ([BETTER_PRICING.md](../BETTER_PRICING.md)).
 - **Incentive-aware selection** — the scanner joins active Liquidity Incentive
   pools into ranking, biasing toward markets that pay for resting size.

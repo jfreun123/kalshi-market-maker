@@ -114,11 +114,15 @@ struct IncentiveProgram {
 
 // ---- PublicTrade ----
 
-// One public print from GET /markets/trades: when it happened and at what
-// YES price. The scanner's admission probes read the recent tape from these.
+// One public print, from GET /markets/trades (scanner admission probes) or
+// the WS trade channel (the live tape feeding TradeTape).
 struct PublicTrade {
-  std::chrono::system_clock::time_point created_time;
+  std::string trade_id;
+  std::string market_ticker;
   int yes_price_cents{0};
+  Quantity quantity{};
+  Side taker_side{Side::Yes};
+  std::chrono::system_clock::time_point timestamp;
 };
 
 // ---- Price helpers ----

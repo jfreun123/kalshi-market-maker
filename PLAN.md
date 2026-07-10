@@ -257,6 +257,13 @@
     on recordings gets the live switch (60b's learned micro-price with a
     structural prior). Caveat noted: our own fills print at our ask by
     construction; the unbiased evidence is drift + the run-18 tape.
+    **Full plan: [BETTER_PRICING.md](BETTER_PRICING.md).** Progress: Phases
+    0+1 shipped 2026-07-09 — WS `trade` channel subscribed (parsed via
+    `taker_outcome_side`; captures now record the tape) and `TradeTape`
+    (per-market rolling prints, own fills excluded by trade_id, time-decayed
+    VWAP + print count + minority-side ratio), fed by the session. Next:
+    Phase 2 (full-depth clearing price on `LocalOrderbook`) + Phase 3
+    (offline backtest, candle tier first).
 
 32. [ ] **65 — two-sided-flow admission (proposed, awaiting Jacob).** Run
     19: 57 of 58 entry fills were the same side — demo taker flow is
@@ -265,6 +272,9 @@
     `taker_side` is in the same response: require the minority side to have
     ≥ X% of recent prints before admission. Selects for the only market
     type where "collect spread, stay balanced" is physically possible.
+    Input shipped 2026-07-09: the REST trades probe now parses taker side +
+    size, and `TradeTape::minority_side_ratio` computes the live ratio —
+    the gate itself (threshold + scanner wiring) awaits Jacob's confirm.
 
 **Selection principle (Jacob, 2026-07-04): profitable on every market we
 CHOOSE, then scale.** Not every market can be made profitably — trending

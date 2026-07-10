@@ -241,6 +241,10 @@ void WebSocketClient::on_fill(FillCallback callback) {
   fill_callback_ = std::move(callback);
 }
 
+void WebSocketClient::on_trade(TradeCallback callback) {
+  trade_callback_ = std::move(callback);
+}
+
 void WebSocketClient::on_disconnect(DisconnectCallback callback) {
   disconnect_callback_ = std::move(callback);
 }
@@ -272,7 +276,7 @@ void WebSocketClient::send_subscribe(const std::string &ticker) {
   nlohmann::json msg;
   msg["id"] = next_msg_id_++;
   msg["cmd"] = "subscribe";
-  msg["params"]["channels"] = {"orderbook_delta"};
+  msg["params"]["channels"] = {"orderbook_delta", "trade"};
   msg["params"]["market_tickers"] = {ticker};
   ws_->send(msg.dump());
 }
@@ -372,6 +376,31 @@ void dispatch_fill(const WebSocketClient::FillCallback &callback,
   }
 }
 
+void dispatch_trade(const WebSocketClient::TradeCallback &callback,
+                    const nlohmann::json &msg_body) {
+  if (!callback) {
+    return;
+  }
+  try {
+    PublicTrade trade;
+    trade.trade_id = msg_body.at("trade_id").get<std::string>();
+    trade.market_ticker = msg_body.at("market_ticker").get<std::string>();
+    trade.yes_price_cents =
+        dollars_to_cents(msg_body.at("yes_price_dollars").get<std::string>());
+    trade.quantity = parse_fp_count(msg_body.at("count_fp").get<std::string>());
+    trade.taker_side =
+        parse_side(msg_body.at("taker_outcome_side").get<std::string>());
+    const auto ts_ms = msg_body.at("ts_ms").get<long long>();
+    trade.timestamp =
+        std::chrono::system_clock::time_point(std::chrono::milliseconds(ts_ms));
+    callback(trade);
+  } catch (const nlohmann::json::exception &ex) {
+    get_logger()->debug("ws dropped malformed trade: {}", ex.what());
+  } catch (const std::exception &ex) {
+    get_logger()->error("ws trade callback threw: {}", ex.what());
+  }
+}
+
 } // namespace
 
 void WebSocketClient::handle_heartbeat() {
@@ -441,6 +470,8 @@ void WebSocketClient::handle_message(const std::string &raw) {
     dispatch_delta(delta_callback_, msg_body);
   } else if (msg_type == "fill") {
     dispatch_fill(fill_callback_, msg_body);
+  } else if (msg_type == "trade") {
+    dispatch_trade(trade_callback_, msg_body);
   }
   // All other message types are silently ignored.
 }
