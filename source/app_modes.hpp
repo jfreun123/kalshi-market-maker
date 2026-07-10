@@ -40,6 +40,10 @@ int flatten_all_positions(RestClient &rest,
 
 int run_flatten_mode(RestClient &rest, std::shared_ptr<spdlog::logger> &log);
 
+std::vector<std::string> scan_top_tickers(RestClient &rest,
+                                          const AppConfig &app_config,
+                                          std::shared_ptr<spdlog::logger> &log);
+
 int run_capture_mode(const std::atomic<bool> &shutdown_requested,
                      const Auth &auth, const AppConfig &app_config,
                      const std::filesystem::path &capture_dir,
