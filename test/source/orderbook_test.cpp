@@ -364,3 +364,116 @@ TEST(LocalOrderbookTest, EmptyYesBookAfterRemovingAllLevels) {
 
   EXPECT_FALSE(orderbook.best_bid().has_value());
 }
+
+// ---- Clearing price (full-depth balance; BETTER_PRICING.md §3a) ----
+
+namespace {
+
+constexpr int kDeepBidTop = 62;
+constexpr int kDeepBidSecond = 60;
+constexpr Quantity kDeepBidTopQty = Quantity::from_contracts(100);
+constexpr Quantity kDeepBidSecondQty = Quantity::from_contracts(40);
+constexpr int kThinAskTopNo = 33;
+constexpr int kThinAskSecondNo = 32;
+constexpr Quantity kThinAskTopQty = Quantity::from_contracts(20);
+constexpr Quantity kThinAskSecondQty = Quantity::from_contracts(30);
+constexpr double kDeepBidClearing = 87748.0 / 1330.0;
+
+constexpr int kMirrorAskTopNo = 35;
+constexpr int kMirrorAskSecondNo = 33;
+
+constexpr int kWallPrice = 40;
+constexpr Quantity kWallQty = Quantity::from_contracts(1000);
+constexpr Quantity kTenLots = Quantity::from_contracts(10);
+constexpr int kNearBid = 62;
+constexpr int kNearAskNo = 33;
+constexpr double kHalfDecay = 0.5;
+constexpr double kFlatWallFloor = 66.0;
+constexpr double kDecayedWallTolerance = 0.01;
+constexpr double kTolerance = 1e-9;
+
+kalshi::Orderbook deep_bid_book() {
+  kalshi::Orderbook book;
+  book.ticker = "KXBTCD";
+  book.yes = {{kDeepBidTop, kDeepBidTopQty},
+              {kDeepBidSecond, kDeepBidSecondQty}};
+  book.no = {{kThinAskTopNo, kThinAskTopQty},
+             {kThinAskSecondNo, kThinAskSecondQty}};
+  return book;
+}
+
+} // namespace
+
+TEST(LocalOrderbookTest, ClearingPriceSingleLevelEqualsMicroPrice) {
+  kalshi::LocalOrderbook orderbook;
+  kalshi::Orderbook snap;
+  snap.ticker = "KXBTCD";
+  snap.yes = {{kYesBid, kQtyLarge}};
+  snap.no = {{kNoBid, kQtySmall}};
+  orderbook.apply_snapshot(snap);
+
+  EXPECT_NEAR(orderbook.clearing_price_cents(kalshi::DepthWeighting{}),
+              orderbook.micro_price_cents(), kTolerance);
+}
+
+TEST(LocalOrderbookTest, ClearingPriceBalancedDepthIsMid) {
+  kalshi::LocalOrderbook orderbook;
+  kalshi::Orderbook snap;
+  snap.ticker = "KXBTCD";
+  snap.yes = {{kDeepBidTop, kDeepBidTopQty},
+              {kDeepBidSecond, kDeepBidSecondQty}};
+  snap.no = {{kMirrorAskTopNo, kDeepBidTopQty},
+             {kMirrorAskSecondNo, kDeepBidSecondQty}};
+  orderbook.apply_snapshot(snap);
+
+  EXPECT_NEAR(orderbook.clearing_price_cents(kalshi::DepthWeighting{}),
+              orderbook.mid_price_cents(), kTolerance);
+}
+
+TEST(LocalOrderbookTest, ClearingPriceDeepBidsLeanTowardAsk) {
+  kalshi::LocalOrderbook orderbook;
+  orderbook.apply_snapshot(deep_bid_book());
+
+  const double clearing =
+      orderbook.clearing_price_cents(kalshi::DepthWeighting{});
+  EXPECT_GT(clearing, orderbook.mid_price_cents());
+  EXPECT_NEAR(clearing, kDeepBidClearing, kTolerance);
+}
+
+TEST(LocalOrderbookTest, ClearingPriceDistanceDecayTamesFarWall) {
+  kalshi::LocalOrderbook orderbook;
+  kalshi::Orderbook snap;
+  snap.ticker = "KXBTCD";
+  snap.yes = {{kNearBid, kTenLots}, {kWallPrice, kWallQty}};
+  snap.no = {{kNearAskNo, kTenLots}};
+  orderbook.apply_snapshot(snap);
+
+  const double flat = orderbook.clearing_price_cents(kalshi::DepthWeighting{});
+  kalshi::DepthWeighting decayed;
+  decayed.decay_per_cent = kHalfDecay;
+  const double tamed = orderbook.clearing_price_cents(decayed);
+
+  EXPECT_GT(flat, kFlatWallFloor);
+  EXPECT_NEAR(tamed, orderbook.micro_price_cents(), kDecayedWallTolerance);
+}
+
+TEST(LocalOrderbookTest, ClearingPriceTopOneLevelEqualsMicroPrice) {
+  kalshi::LocalOrderbook orderbook;
+  orderbook.apply_snapshot(deep_bid_book());
+
+  kalshi::DepthWeighting top_one;
+  top_one.max_levels = 1;
+  EXPECT_NEAR(orderbook.clearing_price_cents(top_one),
+              orderbook.micro_price_cents(), kTolerance);
+}
+
+TEST(LocalOrderbookTest, ClearingPriceEmptySideFallsBackToMicroPrice) {
+  kalshi::LocalOrderbook orderbook;
+  kalshi::Orderbook snap;
+  snap.ticker = "KXBTCD";
+  snap.yes = {{kYesBid, kQtyLarge}};
+  orderbook.apply_snapshot(snap);
+
+  EXPECT_DOUBLE_EQ(orderbook.clearing_price_cents(kalshi::DepthWeighting{}),
+                   orderbook.micro_price_cents());
+}
