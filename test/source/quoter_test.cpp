@@ -1,5 +1,9 @@
 #include "quoter_test_util.hpp"
 
+#include "fair_value.hpp"
+#include "pricing_model.hpp"
+#include "trade_tape.hpp"
+
 // ---- Tests ----
 
 TEST_F(QuoterTest, PlacesBidAndAskOnFirstUpdate) {
@@ -706,4 +710,50 @@ TEST_F(QuoterTest, InventoryCapStopsTheAccumulatingSide) {
       << "at 2x quote_size long, only the unwind side may quote";
   EXPECT_NE(transport.recorded_requests().front().body.find("\"side\":\"ask\""),
             std::string::npos);
+}
+
+TEST_F(QuoterTest, ClearingModelLeansQuotesTowardTapePrints) {
+  constexpr double kClearingHalfWeight = 0.5;
+  constexpr int kPrintPrice = 56;
+  constexpr int kPrintContracts = 10;
+  constexpr std::string_view kBlendedBid = R"("price":"0.5200")";
+  constexpr std::string_view kBlendedAskYesLeg = R"("price":"0.5600")";
+  auto transport_ptr = std::make_unique<FakeTransport>();
+  FakeTransport &transport = *transport_ptr;
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId1, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId2, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  kalshi::RestClient rest{kalshi::Auth{kApiKey, kPemPrivateKey},
+                          std::move(transport_ptr), kBaseUrl};
+  kalshi::OrderManager order_mgr{rest};
+  kalshi::RiskManager risk_mgr{kalshi::RiskLimits{}};
+  kalshi::Quoter quoter{
+      kalshi::QuoterConfig{},
+      kalshi::FairValueEngine{
+          std::make_unique<kalshi::ClearingPriceModel>(kClearingHalfWeight)},
+      order_mgr, risk_mgr};
+
+  kalshi::TradeTape tape{kalshi::TradeTapeConfig{}};
+  kalshi::PublicTrade print;
+  print.trade_id = "pub-1";
+  print.market_ticker = kTicker;
+  print.yes_price_cents = kPrintPrice;
+  print.quantity = kalshi::Quantity::from_contracts(kPrintContracts);
+  print.taker_side = kalshi::Side::Yes;
+  print.timestamp = std::chrono::system_clock::now();
+  tape.record_trade(print);
+  quoter.set_trade_tape(&tape);
+
+  quoter.update(kTicker, make_ob(kYesBid52, kNoBid52));
+
+  ASSERT_EQ(transport.recorded_requests().size(), 2U);
+  EXPECT_NE(transport.recorded_requests()[0].body.find(kBlendedBid),
+            std::string::npos)
+      << transport.recorded_requests()[0].body;
+  EXPECT_NE(transport.recorded_requests()[1].body.find(kBlendedAskYesLeg),
+            std::string::npos)
+      << transport.recorded_requests()[1].body;
 }

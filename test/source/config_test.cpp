@@ -83,7 +83,10 @@ TEST(ConfigTest, LoadsAllFields) {
         {"longshot_edge_cents", kLongshotEdge},
         {"fv_ema_alpha", kFvEmaAlpha},
         {"winddown_seconds", 30},
-        {"unwind_edge_cents", 1.5}}},
+        {"unwind_edge_cents", 1.5},
+        {"use_clearing_pricing", true},
+        {"clearing_tape_weight", 0.4},
+        {"tape_half_life_seconds", 45}}},
       {"flow",
        {{"window_seconds", kFlowWindowSeconds},
         {"imbalance_ratio_threshold", kFlowRatioThreshold},
@@ -125,6 +128,9 @@ TEST(ConfigTest, LoadsAllFields) {
   EXPECT_DOUBLE_EQ(config.quoter.fv_ema_alpha, kFvEmaAlpha);
   EXPECT_EQ(config.quoter.winddown_seconds, 30);
   EXPECT_DOUBLE_EQ(config.quoter.unwind_edge_cents, 1.5);
+  EXPECT_TRUE(config.quoter.use_clearing_pricing);
+  EXPECT_DOUBLE_EQ(config.quoter.clearing_tape_weight, 0.4);
+  EXPECT_EQ(config.quoter.tape_half_life_seconds, 45);
   EXPECT_EQ(config.flow.window_seconds, kFlowWindowSeconds);
   EXPECT_DOUBLE_EQ(config.flow.imbalance_ratio_threshold, kFlowRatioThreshold);
   EXPECT_EQ(config.flow.min_flow_volume, kFlowMinVolume);
@@ -200,6 +206,11 @@ TEST(ConfigTest, DefaultsAppliedWhenOptionalSectionsAbsent) {
   EXPECT_EQ(config.quoter.min_spread_cents,
             kalshi::QuoterConfig::kDefaultMinSpreadCents);
   EXPECT_FALSE(config.quoter.use_view_based_pricing);
+  EXPECT_FALSE(config.quoter.use_clearing_pricing);
+  EXPECT_DOUBLE_EQ(config.quoter.clearing_tape_weight,
+                   kalshi::QuoterConfig::kDefaultClearingTapeWeight);
+  EXPECT_EQ(config.quoter.tape_half_life_seconds,
+            kalshi::QuoterConfig::kDefaultTapeHalfLifeSeconds);
   EXPECT_DOUBLE_EQ(config.quoter.view_debias_beta,
                    kalshi::ViewBasedModel::kDefaultBeta);
   EXPECT_DOUBLE_EQ(config.quoter.maker_fee_rate, 0.0);

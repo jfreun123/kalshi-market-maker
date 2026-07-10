@@ -283,22 +283,32 @@ int main(int argc, char *argv[]) {
     kalshi::OrderManager order_mgr{rest};
     kalshi::RiskManager risk_mgr{app_config.risk};
     kalshi::FlowImbalanceGuard flow_guard{app_config.flow};
-    // Pricing model: debiased "view" pricing when enabled, else the heuristic.
-    auto pricing_model =
-        app_config.quoter.use_view_based_pricing
-            ? kalshi::FairValueEngine{std::make_unique<kalshi::ViewBasedModel>(
-                  app_config.quoter.view_debias_beta)}
-            : kalshi::FairValueEngine{
-                  std::make_unique<kalshi::HeuristicModel>()};
-    log->info("pricing model={}", app_config.quoter.use_view_based_pricing
-                                      ? "view_based"
-                                      : "heuristic");
+    // Pricing model: clearing-price tape blend > debiased view > heuristic.
+    auto pricing_model = [&app_config]() -> kalshi::FairValueEngine {
+      if (app_config.quoter.use_clearing_pricing) {
+        return kalshi::FairValueEngine{
+            std::make_unique<kalshi::ClearingPriceModel>(
+                app_config.quoter.clearing_tape_weight)};
+      }
+      if (app_config.quoter.use_view_based_pricing) {
+        return kalshi::FairValueEngine{std::make_unique<kalshi::ViewBasedModel>(
+            app_config.quoter.view_debias_beta)};
+      }
+      return kalshi::FairValueEngine{
+          std::make_unique<kalshi::HeuristicModel>()};
+    }();
+    log->info("pricing model={}",
+              app_config.quoter.use_clearing_pricing
+                  ? "clearing"
+                  : (app_config.quoter.use_view_based_pricing ? "view_based"
+                                                              : "heuristic"));
     kalshi::Quoter quoter{app_config.quoter, std::move(pricing_model),
                           order_mgr, risk_mgr, &flow_guard};
     kalshi::TradingSession session{app_config.target_tickers, order_mgr,
                                    risk_mgr, quoter, &flow_guard};
     kalshi::TradeTape trade_tape{kalshi::TradeTapeConfig{}};
     session.set_trade_tape(&trade_tape);
+    quoter.set_trade_tape(&trade_tape);
 
     quoter.set_analytics(&analytics);
     session.set_analytics(&analytics);

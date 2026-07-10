@@ -32,9 +32,9 @@ FvBacktestConfig FvBacktestConfig::defaults() {
                  .weighting =
                      DepthWeighting{.decay_per_cent = kWallDecayPerCent}},
   };
-  config.tape_weights = {kFlatAnchorWeight,    kLightTapeWeight,
-                         kQuarterTapeWeight,   kHalfTapeWeight,
-                         kHeavyTapeWeight,     kPureTapeWeight};
+  config.tape_weights = {kFlatAnchorWeight,  kLightTapeWeight,
+                         kQuarterTapeWeight, kHalfTapeWeight,
+                         kHeavyTapeWeight,   kPureTapeWeight};
   config.tape_half_life_seconds = {kFastHalfLifeSeconds, kShortHalfLifeSeconds,
                                    kLongHalfLifeSeconds};
   config.own_fill_weights = {kNoOwnFillCredit, kHalfOwnFillCredit};
@@ -61,9 +61,8 @@ void FvBacktest::build_candidates() {
   for (std::size_t anchor_index = 0; anchor_index < config_.anchors.size();
        ++anchor_index) {
     const auto &anchor = config_.anchors[anchor_index];
-    candidates_.push_back(Candidate{.name = anchor.label,
-                                    .anchor_index = anchor_index,
-                                    .accumulator = {}});
+    candidates_.push_back(Candidate{
+        .name = anchor.label, .anchor_index = anchor_index, .accumulator = {}});
     for (const double tape_weight : config_.tape_weights) {
       if (tape_weight <= 0.0) {
         continue;

@@ -1,5 +1,7 @@
 #include "quoter.hpp"
 
+#include "trade_tape.hpp"
+
 #include "analytics.hpp"
 #include "ensure.hpp"
 #include "flow_imbalance.hpp"
@@ -302,8 +304,14 @@ void Quoter::update(std::string_view ticker, const LocalOrderbook &book) {
           : config_.fv_ema_alpha * micro +
                 (1.0 - config_.fv_ema_alpha) * ema_it->second;
   fv_ema_[ticker_str] = smoothed_micro;
-  const double fair_val = fv_engine_.estimate(
-      FairValueInput{smoothed_micro, kDefaultTimeToCloseHours, 0, {}});
+  std::optional<double> tape_vwap;
+  if (trade_tape_ != nullptr) {
+    tape_vwap = trade_tape_->vwap_cents(
+        ticker_str, std::chrono::seconds{config_.tape_half_life_seconds},
+        std::chrono::system_clock::now());
+  }
+  const double fair_val = fv_engine_.estimate(FairValueInput{
+      smoothed_micro, kDefaultTimeToCloseHours, 0, {}, tape_vwap});
   ensure(std::isfinite(fair_val), "fair value is not finite");
 
   int target_spread = config_.target_spread_cents;
@@ -401,6 +409,10 @@ void Quoter::set_reduce_only(bool reduce_only) { reduce_only_ = reduce_only; }
 
 void Quoter::set_analytics(AnalyticsLogger *analytics) {
   analytics_ = analytics;
+}
+
+void Quoter::set_trade_tape(const TradeTape *trade_tape) {
+  trade_tape_ = trade_tape;
 }
 
 void Quoter::reset_quotes() {

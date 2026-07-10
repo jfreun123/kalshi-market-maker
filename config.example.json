@@ -22,7 +22,10 @@
     "winddown_seconds": 45,
     "flow_lean_cents": 1.0,
     "inventory_cap_lots": 2,
-    "unwind_edge_cents": 0.0
+    "unwind_edge_cents": 0.0,
+    "use_clearing_pricing": false,
+    "clearing_tape_weight": 0.5,
+    "tape_half_life_seconds": 30
   },
   "flow": {
     "window_seconds": 300,

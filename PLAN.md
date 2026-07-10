@@ -272,7 +272,15 @@
     lags), but the mid carries run-18's bias in production (−0.2/−0.4c,
     prints land above it) and a low tape blend (w≈0.1–0.25) zeroes it.
     Phase 4 is therefore NOT tape-heavy: clearing-price anchor + small tape
-    correction. Phase 3b harness shipped 2026-07-10: `kalshi_mm --fv-replay
+    correction. **Phase 4 shipped 2026-07-10**: `ClearingPriceModel`
+    (fv = (1−w)·EMA-micro + w·tape-VWAP, sparse-tape fallback to anchor)
+    selected by `quoter.use_clearing_pricing` with `clearing_tape_weight`
+    (0.5) and `tape_half_life_seconds` (30) — defaults are the midpoint of
+    the offline bracket (liquid books said ~0.25, thin demo books rewarded
+    up to 1.0); the quoter feeds the model the live TradeTape VWAP. OFF by
+    default: run 20 (matched-market A/B vs HeuristicModel, scored on round
+    trips + drift dollars) decides the flip. Phase 3b harness shipped
+    2026-07-10: `kalshi_mm --fv-replay
     <capture/session.jsonl>` replays a recorded session through the
     PRODUCTION parse path (`WebSocketClient::inject_frame`), LocalOrderbook,
     and TradeTape, grading a 39-candidate grid (micro/clearing anchors ×

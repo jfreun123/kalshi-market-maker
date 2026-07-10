@@ -204,9 +204,9 @@ TEST(FvBacktestTest, HorizonZeroGradesAgainstTheArrivingPrint) {
   kalshi::FvBacktest backtest{horizon_config(0)};
   backtest.on_snapshot(make_book());
   backtest.on_trade(make_trade("t1", kFirstPrint, base_time()));
-  backtest.on_trade(make_trade(
-      "t2", kSecondPrint,
-      base_time() + std::chrono::seconds{kSecondPrintGapSeconds}));
+  backtest.on_trade(
+      make_trade("t2", kSecondPrint,
+                 base_time() + std::chrono::seconds{kSecondPrintGapSeconds}));
 
   const auto scores = backtest.scores();
   const auto &micro = find_score(scores, "micro");
@@ -234,9 +234,9 @@ TEST(FvBacktestTest, HorizonPendingEventsDoNotCrossTickers) {
       "o1", kOtherPrint, base_time() + std::chrono::seconds{kOtherGapSeconds});
   other.market_ticker = kOtherTicker;
   backtest.on_trade(other);
-  backtest.on_trade(make_trade(
-      "t3", kLatePrint,
-      base_time() + std::chrono::seconds{kResolveGapSeconds}));
+  backtest.on_trade(
+      make_trade("t3", kLatePrint,
+                 base_time() + std::chrono::seconds{kResolveGapSeconds}));
 
   const auto scores = backtest.scores();
   const auto &micro = find_score(scores, "micro");

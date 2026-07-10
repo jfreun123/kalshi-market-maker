@@ -293,9 +293,8 @@ int run_capture_mode(const std::atomic<bool> &shutdown_requested,
   if (tickers.empty()) {
     log->info("capture mode — selecting top {} live market(s)",
               app_config.scanner.trade_top_n);
-    kalshi::RestClient scan_rest{auth,
-                                 std::make_unique<kalshi::HttpTransport>(),
-                                 app_config.base_url};
+    kalshi::RestClient scan_rest{
+        auth, std::make_unique<kalshi::HttpTransport>(), app_config.base_url};
     tickers = scan_top_tickers(scan_rest, app_config, log);
   }
   if (tickers.empty()) {
