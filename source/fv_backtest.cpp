@@ -19,6 +19,8 @@ constexpr int kLongHalfLifeSeconds = 120;
 constexpr double kNoOwnFillCredit = 0.0;
 constexpr double kHalfOwnFillCredit = 0.5;
 constexpr double kWallDecayPerCent = 0.5;
+constexpr double kGentleDecayPerCent = 0.8;
+constexpr int kNearTouchLevels = 3;
 
 } // namespace
 
@@ -31,6 +33,13 @@ FvBacktestConfig FvBacktestConfig::defaults() {
                  .use_micro = false,
                  .weighting =
                      DepthWeighting{.decay_per_cent = kWallDecayPerCent}},
+      AnchorSpec{.label = "clearing(d=0.8)",
+                 .use_micro = false,
+                 .weighting =
+                     DepthWeighting{.decay_per_cent = kGentleDecayPerCent}},
+      AnchorSpec{.label = "clearing(top3)",
+                 .use_micro = false,
+                 .weighting = DepthWeighting{.max_levels = kNearTouchLevels}},
   };
   config.tape_weights = {kFlatAnchorWeight,  kLightTapeWeight,
                          kQuarterTapeWeight, kHalfTapeWeight,
