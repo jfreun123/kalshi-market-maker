@@ -54,14 +54,10 @@ for leg, tick_set, clearing in (
     print(f"run_ab: leg {leg} = {model} on {tick_set}")
 EOF
 
-start_leg() {
-  local leg="$1"
-  "$BIN" "$AB_DIR/config-$leg.json" > "$AB_DIR/$leg.out" 2>&1 &
-  echo $!
-}
-
-PID_A=$(start_leg A)
-PID_B=$(start_leg B)
+"$BIN" "$AB_DIR/config-A.json" > "$AB_DIR/A.out" 2>&1 &
+PID_A=$!
+"$BIN" "$AB_DIR/config-B.json" > "$AB_DIR/B.out" 2>&1 &
+PID_B=$!
 trap 'kill -INT "$PID_A" "$PID_B" 2>/dev/null || true' INT TERM
 echo "run_ab: both legs live for $MINUTES minute(s) (pids $PID_A $PID_B)"
 (sleep $((MINUTES * 60)) && kill -INT "$PID_A" "$PID_B" 2>/dev/null) &
