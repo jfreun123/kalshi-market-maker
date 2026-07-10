@@ -87,6 +87,8 @@ TEST(ConfigTest, LoadsAllFields) {
         {"use_clearing_pricing", true},
         {"clearing_tape_weight", 0.4},
         {"tape_half_life_seconds", 45}}},
+      {"pnl_state_path", "state/pnl_A.json"},
+      {"account_wide_janitorial", false},
       {"flow",
        {{"window_seconds", kFlowWindowSeconds},
         {"imbalance_ratio_threshold", kFlowRatioThreshold},
@@ -129,6 +131,8 @@ TEST(ConfigTest, LoadsAllFields) {
   EXPECT_EQ(config.quoter.winddown_seconds, 30);
   EXPECT_DOUBLE_EQ(config.quoter.unwind_edge_cents, 1.5);
   EXPECT_TRUE(config.quoter.use_clearing_pricing);
+  EXPECT_EQ(config.pnl_state_path, "state/pnl_A.json");
+  EXPECT_FALSE(config.account_wide_janitorial);
   EXPECT_DOUBLE_EQ(config.quoter.clearing_tape_weight, 0.4);
   EXPECT_EQ(config.quoter.tape_half_life_seconds, 45);
   EXPECT_EQ(config.flow.window_seconds, kFlowWindowSeconds);
@@ -207,6 +211,8 @@ TEST(ConfigTest, DefaultsAppliedWhenOptionalSectionsAbsent) {
             kalshi::QuoterConfig::kDefaultMinSpreadCents);
   EXPECT_FALSE(config.quoter.use_view_based_pricing);
   EXPECT_FALSE(config.quoter.use_clearing_pricing);
+  EXPECT_EQ(config.pnl_state_path, "pnl_state.json");
+  EXPECT_TRUE(config.account_wide_janitorial);
   EXPECT_DOUBLE_EQ(config.quoter.clearing_tape_weight,
                    kalshi::QuoterConfig::kDefaultClearingTapeWeight);
   EXPECT_EQ(config.quoter.tape_half_life_seconds,

@@ -35,9 +35,10 @@ int run_reconcile_mode(RestClient &rest,
                        const std::vector<std::string> &tickers,
                        std::shared_ptr<spdlog::logger> &log);
 
-int flatten_all_positions(RestClient &rest,
-                          std::shared_ptr<spdlog::logger> &log,
-                          TradingSession *session);
+int flatten_all_positions(
+    RestClient &rest, std::shared_ptr<spdlog::logger> &log,
+    TradingSession *session,
+    const std::vector<std::string> *only_tickers = nullptr);
 
 int run_flatten_mode(RestClient &rest, std::shared_ptr<spdlog::logger> &log);
 

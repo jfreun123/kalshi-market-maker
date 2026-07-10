@@ -316,7 +316,7 @@ int main(int argc, char *argv[]) {
     kalshi::set_panic_handler([&session]() { session.cancel_all_quotes(); });
     kalshi::install_crash_flatten_handlers();
 
-    const std::filesystem::path pnl_path{"pnl_state.json"};
+    const std::filesystem::path pnl_path{app_config.pnl_state_path};
     auto prior_pnl = load_pnl(pnl_path);
     for (const auto &[ticker, cents] : prior_pnl) {
       log->info("pnl_state loaded ticker={} prior_pnl_dollars={:.2f}", ticker,
@@ -329,7 +329,16 @@ int main(int argc, char *argv[]) {
 
     if (paper_ptr == nullptr) {
       try {
-        session.cancel_preexisting_orders(rest.get_open_orders());
+        auto stale_orders = rest.get_open_orders();
+        if (!app_config.account_wide_janitorial) {
+          std::erase_if(stale_orders,
+                        [&app_config](const kalshi::Order &order) {
+                          return std::ranges::find(app_config.target_tickers,
+                                                   order.market_ticker) ==
+                                 app_config.target_tickers.end();
+                        });
+        }
+        session.cancel_preexisting_orders(stale_orders);
       } catch (const std::exception &ex) {
         log->warn("startup: could not fetch/cancel pre-existing orders: {}",
                   ex.what());
@@ -434,51 +443,61 @@ int main(int argc, char *argv[]) {
     // cancel every resting quote. cancel_all_quotes is best-effort and never
     // throws, so it is safe to run from a destructor; it runs after join()
     // (single-threaded by then) so no lock is needed.
-    ScopeGuard shutdown_guard{
-        [&ws_client, &ws_thread, &session, &rest, &cli, &log]() {
-          log->info("shutting down — stopping feed, cancelling all quotes");
-          ws_client.stop();
-          if (ws_thread.joinable()) {
-            ws_thread.join();
-          }
-          session.cancel_all_quotes();
-          if (!cli.paper_mode) {
-            // Verify against exchange truth and retry: run 8's shutdown died
-            // mid-flatten with the network down and left live orders behind
-            // (item 53). Never assume a fired cancel landed.
-            constexpr int kShutdownAttempts = 3;
-            constexpr auto kShutdownRetryDelay = std::chrono::seconds{2};
-            for (int attempt = 1; attempt <= kShutdownAttempts; ++attempt) {
-              try {
-                const auto still_open = rest.get_open_orders();
-                if (still_open.empty()) {
-                  break;
-                }
-                log->warn("shutdown: {} order(s) still resting (attempt "
-                          "{}/{}) — cancelling account-wide",
-                          still_open.size(), attempt, kShutdownAttempts);
-                session.cancel_preexisting_orders(still_open);
-              } catch (const std::exception &ex) {
-                log->error("shutdown cancel sweep failed (attempt {}/{}): {}",
-                           attempt, kShutdownAttempts, ex.what());
-                if (attempt < kShutdownAttempts) {
-                  std::this_thread::sleep_for(kShutdownRetryDelay);
-                }
-              }
+    ScopeGuard shutdown_guard{[&ws_client, &ws_thread, &session, &rest, &cli,
+                               &log, &app_config]() {
+      log->info("shutting down — stopping feed, cancelling all quotes");
+      ws_client.stop();
+      if (ws_thread.joinable()) {
+        ws_thread.join();
+      }
+      session.cancel_all_quotes();
+      if (!cli.paper_mode) {
+        // Verify against exchange truth and retry: run 8's shutdown died
+        // mid-flatten with the network down and left live orders behind
+        // (item 53). Never assume a fired cancel landed.
+        constexpr int kShutdownAttempts = 3;
+        constexpr auto kShutdownRetryDelay = std::chrono::seconds{2};
+        for (int attempt = 1; attempt <= kShutdownAttempts; ++attempt) {
+          try {
+            auto still_open = rest.get_open_orders();
+            if (!app_config.account_wide_janitorial) {
+              const auto ours = session.tickers();
+              std::erase_if(still_open, [&ours](const kalshi::Order &order) {
+                return std::ranges::find(ours, order.market_ticker) ==
+                       ours.end();
+              });
             }
-            try {
-              const int closed = flatten_all_positions(rest, log, &session);
-              if (closed > 0) {
-                log->info("shutdown — flattened {} position(s) to end flat",
-                          closed);
-              }
-            } catch (const std::exception &ex) {
-              log->error("shutdown flatten failed: {}", ex.what());
+            if (still_open.empty()) {
+              break;
+            }
+            log->warn("shutdown: {} order(s) still resting (attempt "
+                      "{}/{}) — cancelling",
+                      still_open.size(), attempt, kShutdownAttempts);
+            session.cancel_preexisting_orders(still_open);
+          } catch (const std::exception &ex) {
+            log->error("shutdown cancel sweep failed (attempt {}/{}): {}",
+                       attempt, kShutdownAttempts, ex.what());
+            if (attempt < kShutdownAttempts) {
+              std::this_thread::sleep_for(kShutdownRetryDelay);
             }
           }
-          kalshi::set_panic_handler(nullptr);
-          log->info("shutdown complete");
-        }};
+        }
+        try {
+          const auto session_tickers = session.tickers();
+          const int closed = flatten_all_positions(
+              rest, log, &session,
+              app_config.account_wide_janitorial ? nullptr : &session_tickers);
+          if (closed > 0) {
+            log->info("shutdown — flattened {} position(s) to end flat",
+                      closed);
+          }
+        } catch (const std::exception &ex) {
+          log->error("shutdown flatten failed: {}", ex.what());
+        }
+      }
+      kalshi::set_panic_handler(nullptr);
+      log->info("shutdown complete");
+    }};
 
     constexpr auto kPollInterval = std::chrono::milliseconds{100};
     constexpr int kStalenessCheckInterval = 300; // 300 × 100ms = 30s
