@@ -38,8 +38,12 @@
    p50/p95/max per endpoint. Mac baseline (2026-07-04): order-path ~294ms,
    orderbook ~76ms, general GETs p50 184ms — the numbers L1 must beat.*
 3. [ ] **L1 — EC2 in Kalshi's region** (t4g.small ~$12/mo; NOT a trading-VPS
-   product). Probe us-east-1 vs us-east-2 RTT first; rerun the L0 session
-   from the winner; fold host into Phase 32 supervision.
+   product). **Region answered by Kalshi Institutional (Brad, 2026-07-11):
+   us-east-2 (Ohio) is the recommended lowest-latency region** — no probe
+   needed. Rerun the L0 session from Ohio; fold host into Phase 32
+   supervision. Same email: rate-limit tiers above Advanced are Premier
+   (1k/1k per sec), Paragon (2k/2k), Prime (4k/4k), unlocked by volume
+   share and reviewed daily — the write-budget ladder for items 54/L3.
 4. [x] **L2 = item 44 — Amend + Decrease Order V2.** *Done — semantics
    pinned live (amend = POST .../orders/{id}/amend with a full order body,
    response may carry a new order_id per official docs, demo returns the
