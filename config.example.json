@@ -56,6 +56,7 @@
     "min_trades_per_hour": 6,
     "min_trade_price_range_cents": 2,
     "tape_range_lookback_minutes": 180,
+    "min_minority_flow_ratio": 0.0,
     "trade_top_n": 5
   }
 }
