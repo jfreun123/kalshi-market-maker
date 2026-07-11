@@ -519,6 +519,30 @@ TEST_F(TradingSessionTest, SeedOrderbookPlacesInitialQuotes) {
   EXPECT_EQ(count_method(transport_, "POST"), 2);
 }
 
+TEST_F(TradingSessionTest, FillForUntrackedTickerIsIgnored) {
+  std::vector<std::string> lines;
+  kalshi::AnalyticsLogger analytics{
+      [&lines](const std::string &line) { lines.push_back(line); }};
+  session_.set_analytics(&analytics);
+  kalshi::FlowImbalanceConfig flow_config;
+  flow_config.min_flow_volume = 1;
+  kalshi::FlowImbalanceGuard flow_guard{flow_config};
+  kalshi::TradingSession session{std::vector<std::string>{kTicker}, order_mgr_,
+                                 risk_mgr_, quoter_, &flow_guard};
+  session.set_analytics(&analytics);
+
+  constexpr int kForeignPrice = 60;
+  constexpr int kForeignQty = 10;
+  auto foreign = make_fill("other-instance-order", "KXELSEWHERE",
+                           kalshi::Side::Yes, kForeignPrice, kForeignQty);
+  foreign.trade_id = "foreign-1";
+  session.on_fill(foreign);
+
+  EXPECT_TRUE(lines.empty())
+      << "another instance's fill must not enter our analytics";
+  EXPECT_FALSE(flow_guard.is_imbalanced("KXELSEWHERE"));
+}
+
 TEST_F(TradingSessionTest, PublicTradesFeedTapeAndOwnFillsAreExcluded) {
   constexpr int kPrintPrice = 55;
   constexpr int kPrintContracts = 3;

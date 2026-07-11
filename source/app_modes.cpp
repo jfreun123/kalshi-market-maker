@@ -191,10 +191,16 @@ int run_reconcile_mode(kalshi::RestClient &rest,
 // number of positions it attempted to close.
 int flatten_all_positions(kalshi::RestClient &rest,
                           std::shared_ptr<spdlog::logger> &log,
-                          kalshi::TradingSession *session) {
+                          kalshi::TradingSession *session,
+                          const std::vector<std::string> *only_tickers) {
   int closed = 0;
   for (const auto &position : rest.get_positions()) {
     if (position.position.is_zero()) {
+      continue;
+    }
+    if (only_tickers != nullptr &&
+        std::ranges::find(*only_tickers, position.ticker) ==
+            only_tickers->end()) {
       continue;
     }
     try {

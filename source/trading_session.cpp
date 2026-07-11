@@ -74,6 +74,13 @@ void TradingSession::on_fill(const Fill &fill) {
   if (trade_tape_ != nullptr) {
     trade_tape_->record_own_fill(fill.trade_id);
   }
+  if (!is_tracked(fill.market_ticker)) {
+    get_logger()->debug(
+        "fill for untracked ticker={} ignored (another session's fill on "
+        "this account, or a market never adopted)",
+        fill.market_ticker);
+    return;
+  }
   if (!order_mgr_.record_fill(fill)) {
     get_logger()->debug("duplicate fill ignored ticker={} trade_id={}",
                         fill.market_ticker, fill.trade_id);
