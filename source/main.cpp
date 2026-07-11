@@ -436,7 +436,14 @@ int main(int argc, char *argv[]) {
     std::signal(SIGINT, handle_signal);
     std::signal(SIGTERM, handle_signal);
 
-    std::thread ws_thread([&ws_client]() { ws_client.run(); });
+    std::thread ws_thread([&ws_client, &log]() {
+      try {
+        ws_client.run();
+      } catch (const std::exception &ex) {
+        log->critical("ws thread died: {} — requesting shutdown", ex.what());
+      }
+      g_shutdown.store(true);
+    });
 
     // Guarantees that on ANY exit from this scope — normal shutdown, a thrown
     // exception, or stack unwind — we stop the feed, join the thread, and

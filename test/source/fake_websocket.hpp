@@ -3,6 +3,7 @@
 #include "websocket_client.hpp"
 
 #include <map>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -35,6 +36,10 @@ public:
   // firing the on_connect handler.
   void set_handshake_failure(bool fails) { handshake_fails_ = fails; }
 
+  // Throw from the next N connect() calls — a transport-layer failure that
+  // must not escape the reconnect loop.
+  void set_connect_throws(int count) { connect_throws_remaining_ = count; }
+
   // Inspection
   [[nodiscard]] int connect_count() const { return connect_count_; }
   [[nodiscard]] const std::string &connected_url() const {
@@ -55,6 +60,10 @@ public:
     ++connect_count_;
     connected_url_ = url;
     connected_headers_ = headers;
+    if (connect_throws_remaining_ > 0) {
+      --connect_throws_remaining_;
+      throw std::runtime_error{"fake transport: connect failed"};
+    }
   }
 
   void send(const std::string &message) override {
@@ -118,6 +127,7 @@ private:
   std::string connected_url_;
   std::map<std::string, std::string> connected_headers_;
   int connect_count_{0};
+  int connect_throws_remaining_{0};
   bool fire_disconnect_{false};
   bool fire_heartbeat_{false};
   bool handshake_fails_{false};
