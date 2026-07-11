@@ -792,6 +792,41 @@ TEST_F(RestClientTest, GetRecentTradesPrefersTakerOutcomeSideOverLegacy) {
   EXPECT_EQ(trades->front().taker_side, kalshi::Side::No);
 }
 
+TEST_F(RestClientTest, GetCandlesticksParsesClosesAndSkipsNulls) {
+  auto transport = std::make_unique<FakeTransport>();
+  FakeTransport *const transport_raw = transport.get();
+  transport_raw->enqueue(
+      {kHttpOk,
+       R"({"candlesticks":[)"
+       R"({"end_period_ts":1,"price":{"close_dollars":"0.5000"}},)"
+       R"({"end_period_ts":2,"price":{}},)"
+       R"({"end_period_ts":3,"price":{"close_dollars":"0.5300"}}]})"});
+  auto client = make_client(std::move(transport));
+
+  const auto candles =
+      client.get_candlesticks("KXT-26SEP-A", 1'000, 2'000);
+
+  ASSERT_TRUE(candles.has_value());
+  ASSERT_EQ(candles->size(), 3U);
+  EXPECT_EQ((*candles)[0].close_cents, 50);
+  EXPECT_FALSE((*candles)[1].close_cents.has_value());
+  EXPECT_EQ((*candles)[2].close_cents, 53);
+  EXPECT_NE(transport_raw->last_request().url.find(
+                "/series/KXT/markets/KXT-26SEP-A/candlesticks"),
+            std::string::npos);
+  EXPECT_NE(transport_raw->last_request().url.find("period_interval=1"),
+            std::string::npos);
+}
+
+TEST_F(RestClientTest, GetCandlesticksNulloptOnHttpError) {
+  auto transport = std::make_unique<FakeTransport>();
+  transport->enqueue({500, "oops"});
+  auto client = make_client(std::move(transport));
+
+  EXPECT_FALSE(client.get_candlesticks("KXT-26SEP-A", 1'000, 2'000)
+                   .has_value());
+}
+
 TEST_F(RestClientTest, GetRecentTradesEmptyVectorWhenNeverTraded) {
   auto transport = std::make_unique<FakeTransport>();
   transport->enqueue({kHttpOk, R"({"cursor":"","trades":[]})"});

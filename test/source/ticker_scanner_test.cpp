@@ -865,6 +865,66 @@ TEST_F(TickerScannerTest, ZeroRatioDisablesTwoSidedGate) {
       << "gate off by default — one-way tape admitted";
 }
 
+TEST_F(TickerScannerTest, RevertingTapePassesReversionGate) {
+  auto [client, transport] = make_client_with_transport();
+  transport->enqueue(
+      {kHttpOk, make_markets_response({kMarketGoodA, kMarketGoodB})});
+  transport->enqueue({kHttpOk, R"({"incentive_programs":[],"cursor":""})"});
+  transport->enqueue({kHttpOk, R"({"candlesticks":[{"end_period_ts":1,"price":{"close_dollars":"0.5000"}},{"end_period_ts":2,"price":{"close_dollars":"0.5300"}},{"end_period_ts":3,"price":{"close_dollars":"0.5000"}},{"end_period_ts":4,"price":{"close_dollars":"0.5300"}}]})"});
+  transport->enqueue({kHttpOk, R"({"candlesticks":[{"end_period_ts":1,"price":{"close_dollars":"0.5000"}},{"end_period_ts":2,"price":{"close_dollars":"0.5300"}},{"end_period_ts":3,"price":{"close_dollars":"0.5000"}},{"end_period_ts":4,"price":{"close_dollars":"0.5300"}}]})"});
+
+  kalshi::ScannerConfig reversion_only;
+  reversion_only.max_stale_trade_minutes = 0;
+  reversion_only.min_trades_per_hour = 0;
+  reversion_only.min_spread_cents = 0;
+  reversion_only.min_trade_price_range_cents = 0;
+  reversion_only.min_reversion_kappa = 1.0;
+  kalshi::TickerScanner scanner{client, reversion_only};
+  auto results = scanner.scan(kScanTopN, kTestNow);
+
+  EXPECT_EQ(results.size(), 2U)
+      << "closes 50,53,50,53: K=9, z=3, K >= 1.0*z^2=9 — harvestable wiggle";
+}
+
+TEST_F(TickerScannerTest, TrendingTapeDroppedByReversionGate) {
+  auto [client, transport] = make_client_with_transport();
+  transport->enqueue(
+      {kHttpOk, make_markets_response({kMarketGoodA, kMarketGoodB})});
+  transport->enqueue({kHttpOk, R"({"incentive_programs":[],"cursor":""})"});
+  transport->enqueue({kHttpOk, R"({"candlesticks":[{"end_period_ts":1,"price":{"close_dollars":"0.5000"}},{"end_period_ts":2,"price":{"close_dollars":"0.5300"}},{"end_period_ts":3,"price":{"close_dollars":"0.5600"}},{"end_period_ts":4,"price":{"close_dollars":"0.5900"}}]})"});
+  transport->enqueue({kHttpOk, R"({"candlesticks":[{"end_period_ts":1,"price":{"close_dollars":"0.5000"}},{"end_period_ts":2,"price":{"close_dollars":"0.5300"}},{"end_period_ts":3,"price":{"close_dollars":"0.5600"}},{"end_period_ts":4,"price":{"close_dollars":"0.5900"}}]})"});
+
+  kalshi::ScannerConfig reversion_only;
+  reversion_only.max_stale_trade_minutes = 0;
+  reversion_only.min_trades_per_hour = 0;
+  reversion_only.min_spread_cents = 0;
+  reversion_only.min_trade_price_range_cents = 0;
+  reversion_only.min_reversion_kappa = 1.0;
+  kalshi::TickerScanner scanner{client, reversion_only};
+  auto results = scanner.scan(kScanTopN, kTestNow);
+
+  EXPECT_EQ(results.size(), 0U)
+      << "closes 50,53,56,59: K=9 < z^2=81 — pure trend, the z^2 loss case";
+}
+
+TEST_F(TickerScannerTest, ZeroKappaDisablesReversionGate) {
+  auto [client, transport] = make_client_with_transport();
+  transport->enqueue(
+      {kHttpOk, make_markets_response({kMarketGoodA, kMarketGoodB})});
+  transport->enqueue({kHttpOk, R"({"incentive_programs":[],"cursor":""})"});
+
+  kalshi::ScannerConfig gates_off;
+  gates_off.max_stale_trade_minutes = 0;
+  gates_off.min_trades_per_hour = 0;
+  gates_off.min_spread_cents = 0;
+  gates_off.min_trade_price_range_cents = 0;
+  gates_off.min_reversion_kappa = 0.0;
+  kalshi::TickerScanner scanner{client, gates_off};
+  auto results = scanner.scan(kScanTopN, kTestNow);
+
+  EXPECT_EQ(results.size(), 2U) << "gate off — no candle probe, no drops";
+}
+
 TEST_F(TickerScannerTest, ShortLookbackDropsSparseTape) {
   auto [client, transport] = make_client_with_transport();
   transport->enqueue(

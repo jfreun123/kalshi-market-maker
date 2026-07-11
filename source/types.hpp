@@ -4,6 +4,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -123,6 +124,15 @@ struct PublicTrade {
   Quantity quantity{};
   Side taker_side{Side::Yes};
   std::chrono::system_clock::time_point timestamp;
+};
+
+// ---- Candle ----
+
+// One candlestick period from GET .../candlesticks: the close of actual
+// trade prices in the period (absent when nothing traded) — the input for
+// the reversion-score admission (item 67, docs/papers README §5).
+struct Candle {
+  std::optional<int> close_cents;
 };
 
 // ---- Price helpers ----
