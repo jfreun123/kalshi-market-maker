@@ -262,9 +262,25 @@ std::vector<Market> RestClient::get_markets(std::string_view event_ticker) {
       url += "&cursor=" + cursor;
     }
 
-    auto headers = auth_.sign("GET", path);
-    auto resp = transport_->get(url, headers);
-    check_response(resp);
+    constexpr int kPageAttempts = 3;
+    constexpr auto kPageRetryDelay = std::chrono::milliseconds{300};
+    HttpResponse resp;
+    for (int attempt = 1;; ++attempt) {
+      try {
+        auto headers = auth_.sign("GET", path);
+        resp = transport_->get(url, headers);
+        check_response(resp);
+        break;
+      } catch (const std::exception &ex) {
+        if (attempt >= kPageAttempts) {
+          throw;
+        }
+        get_logger()->warn(
+            "get_markets page fetch failed (attempt {}/{}): {} — retrying",
+            attempt, kPageAttempts, ex.what());
+        std::this_thread::sleep_for(kPageRetryDelay);
+      }
+    }
 
     auto json_data = nlohmann::json::parse(resp.body);
     for (const auto &market_json : json_data.at("markets")) {
