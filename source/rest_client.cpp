@@ -621,6 +621,43 @@ RestClient::get_recent_trades(std::string_view ticker, int limit) {
   }
 }
 
+std::optional<std::vector<Candle>>
+RestClient::get_candlesticks(std::string_view ticker,
+                             long long start_ts_seconds,
+                             long long end_ts_seconds) {
+  const std::string ticker_str{ticker};
+  const std::string series = ticker_str.substr(0, ticker_str.find('-'));
+  const std::string endpoint =
+      "/series/" + series + "/markets/" + ticker_str + "/candlesticks";
+  const std::string path = path_prefix_ + endpoint;
+  const std::string url = base_url_ + endpoint +
+                          "?start_ts=" + std::to_string(start_ts_seconds) +
+                          "&end_ts=" + std::to_string(end_ts_seconds) +
+                          "&period_interval=1";
+  try {
+    auto headers = auth_.sign("GET", path);
+    auto resp = transport_->get(url, headers);
+    check_response(resp);
+    auto json_data = nlohmann::json::parse(resp.body);
+    std::vector<Candle> candles;
+    for (const auto &candle : json_data.at("candlesticks")) {
+      Candle parsed;
+      const auto price = candle.value("price", nlohmann::json::object());
+      if (price.contains("close_dollars") &&
+          !price.at("close_dollars").is_null()) {
+        parsed.close_cents =
+            parse_dollars_to_cents(price.at("close_dollars").get<std::string>());
+      }
+      candles.push_back(parsed);
+    }
+    return candles;
+  } catch (const std::exception &ex) {
+    get_logger()->debug("candlesticks probe failed ticker={}: {}", ticker,
+                        ex.what());
+    return std::nullopt;
+  }
+}
+
 std::vector<Fill> RestClient::get_fills(long long min_ts_seconds) {
   constexpr int kPageLimit = 100;
   const std::string path = path_prefix_ + "/portfolio/fills";

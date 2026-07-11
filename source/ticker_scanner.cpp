@@ -253,7 +253,8 @@ void TickerScanner::admit_finalists(
                             config_.min_trade_price_range_cents > 0 ||
                             config_.min_minority_flow_ratio > 0.0;
   const bool check_book = config_.min_spread_cents > 0;
-  if (!check_trades && !check_book) {
+  const bool check_reversion = config_.min_reversion_kappa > 0.0;
+  if (!check_trades && !check_book && !check_reversion) {
     return;
   }
   std::vector<MarketScore> admitted;
@@ -265,6 +266,10 @@ void TickerScanner::admit_finalists(
       continue;
     }
     if (check_book && !passes_book_admission(candidate.ticker)) {
+      continue;
+    }
+    if (check_reversion &&
+        !passes_reversion_admission(candidate.ticker, now)) {
       continue;
     }
     admitted.push_back(std::move(candidate));
@@ -324,6 +329,47 @@ bool TickerScanner::passes_flow_admission(
   }
   if (config_.min_minority_flow_ratio > 0.0 &&
       !tape_is_two_sided(*trades, hour_cutoff, ticker)) {
+    return false;
+  }
+  return true;
+}
+
+bool TickerScanner::passes_reversion_admission(
+    const std::string &ticker,
+    std::chrono::system_clock::time_point now) const {
+  const auto end_ts =
+      std::chrono::duration_cast<std::chrono::seconds>(now.time_since_epoch())
+          .count();
+  const auto start_ts =
+      end_ts - static_cast<long long>(config_.reversion_window_minutes) * 60;
+  const auto candles = rest_.get_candlesticks(ticker, start_ts, end_ts);
+  if (!candles.has_value()) {
+    return true;
+  }
+  std::vector<int> closes;
+  for (const auto &candle : *candles) {
+    if (candle.close_cents.has_value()) {
+      closes.push_back(*candle.close_cents);
+    }
+  }
+  if (closes.size() < 2) {
+    get_logger()->info(
+        "scanner: dropped ticker={} — too few traded candles to judge "
+        "reversion",
+        ticker);
+    return false;
+  }
+  double path_variation = 0.0;
+  for (std::size_t idx = 1; idx < closes.size(); ++idx) {
+    path_variation += std::abs(closes[idx] - closes[idx - 1]);
+  }
+  const double net_move = closes.back() - closes.front();
+  const double trend_cost = net_move * net_move;
+  if (path_variation < config_.min_reversion_kappa * trend_cost) {
+    get_logger()->info(
+        "scanner: dropped ticker={} — trending (K={:.0f} < {:.1f}*z^2={:.0f});"
+        " makers harvest wiggle, trend is cost squared",
+        ticker, path_variation, config_.min_reversion_kappa, trend_cost);
     return false;
   }
   return true;

@@ -30,6 +30,8 @@ struct ScannerConfig {
   // last-trade counts as fresh).
   static constexpr int kDefaultMaxStaleTradeMinutes = 30;
   static constexpr double kDefaultMinMinorityFlowRatio = 0.0;
+  static constexpr double kDefaultMinReversionKappa = 0.0;
+  static constexpr int kDefaultReversionWindowMinutes = 180;
   // In-session market rotation cadence (item 52): re-scan and swap dead-idle
   // markets for live ones every this many minutes; 0 disables rotation.
   static constexpr int kDefaultRotationMinutes = 5;
@@ -67,6 +69,8 @@ struct ScannerConfig {
   int min_trade_price_range_cents{kDefaultMinTradePriceRangeCents};
   int tape_range_lookback_minutes{kDefaultTapeRangeLookbackMinutes};
   double min_minority_flow_ratio{kDefaultMinMinorityFlowRatio};
+  double min_reversion_kappa{kDefaultMinReversionKappa};
+  int reversion_window_minutes{kDefaultReversionWindowMinutes};
   // When non-empty, scan fetches each event series separately instead of
   // using the global /markets listing (which returns zero-volume junk).
   std::vector<std::string> event_series{};
@@ -98,6 +102,9 @@ private:
   [[nodiscard]] bool
   passes_flow_admission(const std::string &ticker,
                         std::chrono::system_clock::time_point now) const;
+  [[nodiscard]] bool passes_reversion_admission(
+      const std::string &ticker,
+      std::chrono::system_clock::time_point now) const;
   [[nodiscard]] bool
   tape_is_two_sided(const std::vector<PublicTrade> &trades,
                     std::chrono::system_clock::time_point hour_cutoff,

@@ -65,6 +65,15 @@ public:
   std::optional<std::vector<PublicTrade>>
   get_recent_trades(std::string_view ticker, int limit);
 
+  // Trailing 1-minute candlesticks for a market (GET /series/{s}/markets/
+  // {t}/candlesticks). Only the trade-price close per period is kept — the
+  // input for the reversion-score gate (item 67): K = sum |dclose| vs z =
+  // net change. nullopt = probe failed (callers fail open); a period with
+  // no trades has close_cents absent.
+  std::optional<std::vector<Candle>>
+  get_candlesticks(std::string_view ticker, long long start_ts_seconds,
+                   long long end_ts_seconds);
+
   // Fetches fills from the exchange (paginated), oldest cutoff controlled by
   // min_ts_seconds (0 = no cutoff). Used to backfill fills that arrived while
   // the WS fill channel was disconnected; replaying them through record_fill

@@ -174,6 +174,11 @@ AppConfig load_config(const std::filesystem::path &path) {
                            ScannerConfig::kDefaultTapeRangeLookbackMinutes);
     config.scanner.min_minority_flow_ratio = scanner_json.value(
         "min_minority_flow_ratio", ScannerConfig::kDefaultMinMinorityFlowRatio);
+    config.scanner.min_reversion_kappa = scanner_json.value(
+        "min_reversion_kappa", ScannerConfig::kDefaultMinReversionKappa);
+    config.scanner.reversion_window_minutes =
+        scanner_json.value("reversion_window_minutes",
+                           ScannerConfig::kDefaultReversionWindowMinutes);
   }
 
   const auto [quotable_min, quotable_max] =
