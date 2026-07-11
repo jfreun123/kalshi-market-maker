@@ -17,6 +17,7 @@ into the lean `PLAN.md`.
 | `bawa-2025-prediction-market-alpha.pdf` | Bawa (2025), *The Mathematical Execution Behind Prediction Market Alpha* | Practitioner (Substack) |
 | `berg-proebsting-2009-hanson-automated-market-maker.pdf` | Berg & Proebsting (2009), *Hanson's Automated Market Maker* | Academic (J. Prediction Markets 3(1):45–59) |
 | `designing-prediction-markets-lesswrong-2026.pdf` | ToasterLightning (2026), *Designing Prediction Markets* | Blog (LessWrong) |
+| `marketmaking.pdf` | Chakraborty & Kearns (2011), *Market Making and Mean Reversion* | Academic (ACM EC'11) |
 
 ---
 
@@ -147,6 +148,70 @@ the post's uniqueness claim; CPMM is one member of the CFMM family).*
 
 ---
 
+## 5. Chakraborty & Kearns (2011) — *Market Making and Mean Reversion* (EC'11)
+
+The theory paper for the loss pattern runs 13–20 kept measuring. Studies a
+ladder market maker against an *exogenous* price series (no dealer monopoly,
+no stochastic assumptions for the main result) and derives an exact profit
+identity. Studied 2026-07-11; page refs are the 7-page ACM version.
+
+**Key results**
+- **Theorem 2.1 (exact identity, any price path):** the maker that requotes a
+  ladder around price every step (buy P−1 / sell P+1, depth Cₜ covering the
+  next jump), with forced liquidation at T, earns exactly **(K − z²)/2** where
+  `K = Σ|Pₜ − Pₜ₋₁|` (total path variation) and `z = P_T − P₀` (net move).
+  Proof pairs each up-tick sell at p with the buy at p−1 on the next return;
+  only |z| fills never pair, and liquidating them costs z(z−1)/2 (pp.3–4).
+  Profit = fluctuation harvested minus net-move **squared**.
+- **Theorem 3.1:** any random walk with even the *slightest* mean reversion
+  toward P₀ ⇒ E[K] ≥ E[z²] ⇒ positive expected profit; an unbiased random
+  walk yields exactly zero for every trading algorithm (martingale) (p.4).
+  Mean reversion is *the* property that makes market making profitable.
+- **Theorem 3.2 (OU process):** E[K] grows Ω(σT) linearly while
+  E[z²] ≤ σ²/2γ + (µ−Q₀)² is bounded ⇒ profit grows **linearly in time**,
+  with high probability — for arbitrarily weak reversion γ, given enough T
+  (p.5). Analogous result for the Schwartz model (log-OU, p.6).
+- **Granularity condition:** execution requires volatility comparable to the
+  tick: profit grows only while limiting variance σ²/2γ ≳ tick² — too-fine
+  ticks (or too-quiet books) mean orders rarely execute (p.5 remarks).
+- **Trading frequency (§4, simulated):** requoting only every L steps barely
+  hurts on a reverting series — L=40 still keeps >80% of the L=1 profit at
+  T=1000, though profit variance rises sharply then stabilizes (Figs. 2–4).
+- **MM vs stat arb framing (p.2):** the maker has *no directional view* and
+  profits from non-directional volatility; stat arb (pairs trading) is the
+  opposite — deliberate directional bets on convergence.
+
+**Model limits (honest):** single exogenous price both sides can trade at;
+guaranteed fills on touch (no queue competition), no market impact, no fees,
+inventory unbounded, and **no adverse selection** — fills are mechanical
+price-touches, not informed counterparties.
+
+**Relevance to this project**
+- **(K − z²)/2 is our attribution table.** entry_edge ≈ the K/2 harvest;
+  the recurring **drift** line ≈ −z²/2 (run 13 −$0.42, run 19 −$0.59, run 20
+  baseline −$0.48 — every losing run was a one-way z); exit_cost ≈ the
+  liquidation term z(z−1)/2. Our one green session (2026-07-10 leg A, +$0.04)
+  was the K-dominant case: oscillating books, small net move.
+- **The adverse-selection omission matches demo reality better than
+  Glosten–Milgrom:** measured picked-off fills ≈ 0/37 across runs — demo flow
+  is *directional*, not informed. Our cost lives in the z² term, exactly the
+  term this model prices.
+- **It reduces profitability to a selection problem** — admit markets where
+  K̂ ≫ ẑ² — and we can measure both directly from 1-minute candles (sum of
+  |Δprice| vs net Δprice over a trailing window). PLAN item 67 builds this
+  **reversion-score admission**; the two-sided-flow gate (item 65) is its
+  crude flow-side proxy. Item 68 adds the K/z² split to attribution so every
+  session tests the identity.
+- **Validates, with theory, guards we built empirically:** the inventory
+  brake (caps |z|, truncating the squared tail), passive wind-down (attacks
+  the liquidation term), layered quoting (item 24 — the ladder is *required*
+  by the identity to survive jumps), min-spread/liveness gates (the
+  granularity condition; also a warning that sub-penny grids shrink per-loop
+  harvest — item 69 adjacent), and rest timers (§4: requote frequency is not
+  where the money is — deprioritizes L4 timer-teardown).
+
+---
+
 ## Cross-cutting takeaways for our build
 
 - **Stay a maker, quote the mid-range, lean toward the favorite side** (Bürgi: makers only profit ≥50¢ with significance above 70¢, winning maker flow is long favorites; sub-50¢ buys need an extra edge requirement, and the closing day is a regime of its own). ⚠ *"makers win" unqualified was wrong — makers average −9.64%; the game is being in the winning subset.*
@@ -154,3 +219,4 @@ the post's uniqueness claim; CPMM is one member of the CFMM family).*
 - **Micro-price + order-book imbalance** (Bawa) are the concrete upgrades to `FairValueEngine` (VAMP shipped; L2/EMA per item 21) and `FlowImbalanceGuard` (IR>0.65 as a bounded *directional* signal with a 15–30 min decay).
 - **Edge is estimation, sized by fractional Kelly, verified by Brier logging** — with Bürgi's category-conditional, time-decaying β and the honest caveat that the Kelly race numbers are illustrative.
 - **Inventory pricing in log-odds** (Berg & Proebsting) generalizes our linear skew; their rounding discipline (always favor the maker) applies verbatim to our quote rounding.
+- **Profit = (K − z²)/2** (Chakraborty & Kearns): the maker's whole game is selecting reverting books and capping net moves — volatility is revenue, trend is cost squared. Admission should measure K̂ vs ẑ² directly (item 67); inventory caps and wind-down are the z-side defenses we already ship.

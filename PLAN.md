@@ -300,6 +300,21 @@
     size, and `TradeTape::minority_side_ratio` computes the live ratio —
     the gate itself (threshold + scanner wiring) awaits Jacob's confirm.
 
+33. [ ] **67 — reversion-score admission (Chakraborty–Kearns, studied
+    2026-07-11; docs/papers §5).** Their Theorem 2.1: ladder-maker profit on
+    ANY path = (K − z²)/2, K = Σ|Δprice|, z = net move — so admission should
+    measure exactly that. Per finalist, from trailing 1-min candles (batched
+    endpoint, one call): K̂ = Σ|Δclose|, ẑ = net Δclose over the window;
+    admit when K̂ ≥ κ·ẑ² (κ config) and fold the ratio into the score. The
+    direct, theory-grounded form of what item 65 (flow balance) and 60a
+    (drift penalty) approximate. Off by default like 65; enable in demo.
+
+34. [ ] **68 — K/z² attribution split.** Add to `pnl_attribution.py`: per
+    market per session, report harvested variation (K̂) vs net move (ẑ²)
+    from the quote stream next to entry/drift/exit — every session becomes a
+    live test of the (K − z²)/2 identity, and the number tells us whether a
+    loss was "bad market selection" (z² blowup) vs "bad pricing" (thin K).
+
 **Selection principle (Jacob, 2026-07-04): profitable on every market we
 CHOOSE, then scale.** Not every market can be made profitably — trending
 books, dead books, and 1c-spread deep books all bleed makers. Scaling (Gate
