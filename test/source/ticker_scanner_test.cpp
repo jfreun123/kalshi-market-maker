@@ -725,6 +725,146 @@ TEST_F(TickerScannerTest, SparseButMovingTapeAdmitted) {
          "window counts even when the last hour is quiet";
 }
 
+TEST_F(TickerScannerTest, OneWayTapeDroppedByTwoSidedGate) {
+  auto [client, transport] = make_client_with_transport();
+  transport->enqueue(
+      {kHttpOk, make_markets_response({kMarketGoodA, kMarketGoodB})});
+  transport->enqueue({kHttpOk, R"({"incentive_programs":[],"cursor":""})"});
+  transport->enqueue(
+      {kHttpOk,
+       R"({"cursor":"","trades":[{"created_time":"2026-06-20T23:50:00Z",)"
+       R"("ticker":"KXCPI-B","trade_id":"b1","yes_price_dollars":"0.5500",)"
+       R"("count_fp":"10.00","taker_outcome_side":"yes"},)"
+       R"({"created_time":"2026-06-20T23:30:00Z",)"
+       R"("ticker":"KXCPI-B","trade_id":"b2","yes_price_dollars":"0.5200",)"
+       R"("count_fp":"12.00","taker_outcome_side":"yes"}]})"});
+  transport->enqueue(
+      {kHttpOk,
+       R"({"cursor":"","trades":[{"created_time":"2026-06-20T23:50:00Z",)"
+       R"("ticker":"KXFED-A","trade_id":"a1","yes_price_dollars":"0.5500",)"
+       R"("count_fp":"10.00","taker_outcome_side":"yes"},)"
+       R"({"created_time":"2026-06-20T23:30:00Z",)"
+       R"("ticker":"KXFED-A","trade_id":"a2","yes_price_dollars":"0.5200",)"
+       R"("count_fp":"12.00","taker_outcome_side":"yes"}]})"});
+
+  kalshi::ScannerConfig flow_only;
+  flow_only.max_stale_trade_minutes = 0;
+  flow_only.min_trades_per_hour = 0;
+  flow_only.min_spread_cents = 0;
+  flow_only.min_trade_price_range_cents = 0;
+  flow_only.min_minority_flow_ratio = 0.2;
+  kalshi::TickerScanner scanner{client, flow_only};
+  auto results = scanner.scan(kScanTopN, kTestNow);
+
+  EXPECT_EQ(results.size(), 0U) << "every recent print is the same taker side "
+                                   "— round trips are impossible";
+}
+
+TEST_F(TickerScannerTest, BalancedTapePassesTwoSidedGate) {
+  auto [client, transport] = make_client_with_transport();
+  transport->enqueue(
+      {kHttpOk, make_markets_response({kMarketGoodA, kMarketGoodB})});
+  transport->enqueue({kHttpOk, R"({"incentive_programs":[],"cursor":""})"});
+  transport->enqueue(
+      {kHttpOk,
+       R"({"cursor":"","trades":[{"created_time":"2026-06-20T23:50:00Z",)"
+       R"("ticker":"KXCPI-B","trade_id":"b1","yes_price_dollars":"0.5500",)"
+       R"("count_fp":"10.00","taker_outcome_side":"yes"},)"
+       R"({"created_time":"2026-06-20T23:30:00Z",)"
+       R"("ticker":"KXCPI-B","trade_id":"b2","yes_price_dollars":"0.5200",)"
+       R"("count_fp":"6.00","taker_outcome_side":"no"}]})"});
+  transport->enqueue(
+      {kHttpOk,
+       R"({"cursor":"","trades":[{"created_time":"2026-06-20T23:50:00Z",)"
+       R"("ticker":"KXFED-A","trade_id":"a1","yes_price_dollars":"0.5500",)"
+       R"("count_fp":"10.00","taker_outcome_side":"yes"},)"
+       R"({"created_time":"2026-06-20T23:30:00Z",)"
+       R"("ticker":"KXFED-A","trade_id":"a2","yes_price_dollars":"0.5200",)"
+       R"("count_fp":"6.00","taker_outcome_side":"no"}]})"});
+
+  kalshi::ScannerConfig flow_only;
+  flow_only.max_stale_trade_minutes = 0;
+  flow_only.min_trades_per_hour = 0;
+  flow_only.min_spread_cents = 0;
+  flow_only.min_trade_price_range_cents = 0;
+  flow_only.min_minority_flow_ratio = 0.2;
+  kalshi::TickerScanner scanner{client, flow_only};
+  auto results = scanner.scan(kScanTopN, kTestNow);
+
+  EXPECT_EQ(results.size(), 2U)
+      << "minority side has 6/16 = 37.5% of recent volume";
+}
+
+TEST_F(TickerScannerTest, TwoSidedGateFallsBackToPrintCountsWithoutSizes) {
+  auto [client, transport] = make_client_with_transport();
+  transport->enqueue(
+      {kHttpOk, make_markets_response({kMarketGoodA, kMarketGoodB})});
+  transport->enqueue({kHttpOk, R"({"incentive_programs":[],"cursor":""})"});
+  transport->enqueue(
+      {kHttpOk,
+       R"({"cursor":"","trades":[{"created_time":"2026-06-20T23:50:00Z",)"
+       R"("ticker":"KXCPI-B","trade_id":"b1","yes_price_dollars":"0.5500",)"
+       R"("taker_outcome_side":"yes"},)"
+       R"({"created_time":"2026-06-20T23:30:00Z",)"
+       R"("ticker":"KXCPI-B","trade_id":"b2","yes_price_dollars":"0.5200",)"
+       R"("taker_outcome_side":"no"}]})"});
+  transport->enqueue(
+      {kHttpOk,
+       R"({"cursor":"","trades":[{"created_time":"2026-06-20T23:50:00Z",)"
+       R"("ticker":"KXFED-A","trade_id":"a1","yes_price_dollars":"0.5500",)"
+       R"("taker_outcome_side":"yes"},)"
+       R"({"created_time":"2026-06-20T23:30:00Z",)"
+       R"("ticker":"KXFED-A","trade_id":"a2","yes_price_dollars":"0.5200",)"
+       R"("taker_outcome_side":"no"}]})"});
+
+  kalshi::ScannerConfig flow_only;
+  flow_only.max_stale_trade_minutes = 0;
+  flow_only.min_trades_per_hour = 0;
+  flow_only.min_spread_cents = 0;
+  flow_only.min_trade_price_range_cents = 0;
+  flow_only.min_minority_flow_ratio = 0.2;
+  kalshi::TickerScanner scanner{client, flow_only};
+  auto results = scanner.scan(kScanTopN, kTestNow);
+
+  EXPECT_EQ(results.size(), 2U)
+      << "no count_fp on the wire — one print per side passes on counts";
+}
+
+TEST_F(TickerScannerTest, ZeroRatioDisablesTwoSidedGate) {
+  auto [client, transport] = make_client_with_transport();
+  transport->enqueue(
+      {kHttpOk, make_markets_response({kMarketGoodA, kMarketGoodB})});
+  transport->enqueue({kHttpOk, R"({"incentive_programs":[],"cursor":""})"});
+  transport->enqueue(
+      {kHttpOk,
+       R"({"cursor":"","trades":[{"created_time":"2026-06-20T23:50:00Z",)"
+       R"("ticker":"KXCPI-B","trade_id":"b1","yes_price_dollars":"0.5500",)"
+       R"("count_fp":"10.00","taker_outcome_side":"yes"},)"
+       R"({"created_time":"2026-06-20T23:30:00Z",)"
+       R"("ticker":"KXCPI-B","trade_id":"b2","yes_price_dollars":"0.5200",)"
+       R"("count_fp":"12.00","taker_outcome_side":"yes"}]})"});
+  transport->enqueue(
+      {kHttpOk,
+       R"({"cursor":"","trades":[{"created_time":"2026-06-20T23:50:00Z",)"
+       R"("ticker":"KXFED-A","trade_id":"a1","yes_price_dollars":"0.5500",)"
+       R"("count_fp":"10.00","taker_outcome_side":"yes"},)"
+       R"({"created_time":"2026-06-20T23:30:00Z",)"
+       R"("ticker":"KXFED-A","trade_id":"a2","yes_price_dollars":"0.5200",)"
+       R"("count_fp":"12.00","taker_outcome_side":"yes"}]})"});
+
+  kalshi::ScannerConfig flow_only;
+  flow_only.max_stale_trade_minutes = 0;
+  flow_only.min_trades_per_hour = 0;
+  flow_only.min_spread_cents = 0;
+  flow_only.min_trade_price_range_cents = 0;
+  flow_only.min_minority_flow_ratio = 0.0;
+  kalshi::TickerScanner scanner{client, flow_only};
+  auto results = scanner.scan(kScanTopN, kTestNow);
+
+  EXPECT_EQ(results.size(), 2U)
+      << "gate off by default — one-way tape admitted";
+}
+
 TEST_F(TickerScannerTest, ShortLookbackDropsSparseTape) {
   auto [client, transport] = make_client_with_transport();
   transport->enqueue(

@@ -289,7 +289,14 @@
     `--capture` session recorded during a live slate** — then the dose is
     pinned and ClearingPriceModel (Phase 4) ships.
 
-32. [ ] **65 — two-sided-flow admission (proposed, awaiting Jacob).** Run
+32. [x] **65 — two-sided-flow admission.** *Shipped 2026-07-10 — finalists'
+    last-hour prints must have the minority taker side ≥
+    `min_minority_flow_ratio` of volume (falls back to print counts when
+    sizes are absent; 0 = off, THE DEFAULT — enable per-config). Rationale
+    hardened by run 20 + the parallel legs: one-way flow is the only
+    remaining loss channel, and even perfect pricing only treads water in
+    it (leg B of run 20: $0.00 ceiling). Demo sessions enable 0.2 in
+    config-demo.* Original: **(proposed, awaiting Jacob).** Run
     19: 57 of 58 entry fills were the same side — demo taker flow is
     near-unidirectional in most books, so round trips can't complete and
     inventory exits at cost. The trades probe already parses the tape;

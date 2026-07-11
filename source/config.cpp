@@ -172,6 +172,8 @@ AppConfig load_config(const std::filesystem::path &path) {
     config.scanner.tape_range_lookback_minutes =
         scanner_json.value("tape_range_lookback_minutes",
                            ScannerConfig::kDefaultTapeRangeLookbackMinutes);
+    config.scanner.min_minority_flow_ratio = scanner_json.value(
+        "min_minority_flow_ratio", ScannerConfig::kDefaultMinMinorityFlowRatio);
   }
 
   const auto [quotable_min, quotable_max] =

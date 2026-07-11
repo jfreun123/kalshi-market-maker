@@ -250,7 +250,8 @@ void TickerScanner::admit_finalists(
     std::chrono::system_clock::time_point now) const {
   const bool check_trades = config_.max_stale_trade_minutes > 0 ||
                             config_.min_trades_per_hour > 0 ||
-                            config_.min_trade_price_range_cents > 0;
+                            config_.min_trade_price_range_cents > 0 ||
+                            config_.min_minority_flow_ratio > 0.0;
   const bool check_book = config_.min_spread_cents > 0;
   if (!check_trades && !check_book) {
     return;
@@ -277,8 +278,11 @@ bool TickerScanner::passes_flow_admission(
   const int range_probe = config_.min_trade_price_range_cents > 0
                               ? ScannerConfig::kDefaultTapeProbeTrades
                               : 1;
+  const int flow_probe = config_.min_minority_flow_ratio > 0.0
+                             ? ScannerConfig::kDefaultTapeProbeTrades
+                             : 1;
   const int probe_limit =
-      std::max({config_.min_trades_per_hour, range_probe, 1});
+      std::max({config_.min_trades_per_hour, range_probe, flow_probe, 1});
   const auto trades = rest_.get_recent_trades(ticker, probe_limit);
   if (!trades.has_value()) {
     return true;
@@ -317,6 +321,54 @@ bool TickerScanner::passes_flow_admission(
     if (!tape_shows_price_discovery(*trades, lookback_cutoff, ticker)) {
       return false;
     }
+  }
+  if (config_.min_minority_flow_ratio > 0.0 &&
+      !tape_is_two_sided(*trades, hour_cutoff, ticker)) {
+    return false;
+  }
+  return true;
+}
+
+bool TickerScanner::tape_is_two_sided(
+    const std::vector<PublicTrade> &trades,
+    std::chrono::system_clock::time_point hour_cutoff,
+    const std::string &ticker) const {
+  double yes_volume = 0.0;
+  double no_volume = 0.0;
+  int yes_prints = 0;
+  int no_prints = 0;
+  for (const auto &trade : trades) {
+    if (trade.timestamp < hour_cutoff) {
+      break;
+    }
+    if (trade.taker_side == Side::Yes) {
+      yes_volume += trade.quantity.contracts();
+      ++yes_prints;
+    } else {
+      no_volume += trade.quantity.contracts();
+      ++no_prints;
+    }
+  }
+  const bool has_volume = (yes_volume + no_volume) > 0.0;
+  const double minority =
+      has_volume ? std::min(yes_volume, no_volume)
+                 : static_cast<double>(std::min(yes_prints, no_prints));
+  const double total = has_volume ? yes_volume + no_volume
+                                  : static_cast<double>(yes_prints + no_prints);
+  if (total <= 0.0) {
+    get_logger()->info(
+        "scanner: dropped ticker={} — no prints in the last hour to judge "
+        "flow balance",
+        ticker);
+    return false;
+  }
+  const double ratio = minority / total;
+  if (ratio < config_.min_minority_flow_ratio) {
+    get_logger()->info(
+        "scanner: dropped ticker={} — one-way flow (minority side {:.0f}% < "
+        "{:.0f}%); round trips unlikely",
+        ticker, ratio * 100.0, config_.min_minority_flow_ratio * 100.0);
+    return false;
   }
   return true;
 }
