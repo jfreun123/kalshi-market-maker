@@ -311,14 +311,18 @@
     size, and `TradeTape::minority_side_ratio` computes the live ratio —
     the gate itself (threshold + scanner wiring) awaits Jacob's confirm.
 
-33. [ ] **67 — reversion-score admission (Chakraborty–Kearns, studied
+33. [x] **67 — reversion-score admission (Chakraborty–Kearns, studied
     2026-07-11; docs/papers §5).** Their Theorem 2.1: ladder-maker profit on
     ANY path = (K − z²)/2, K = Σ|Δprice|, z = net move — so admission should
     measure exactly that. Per finalist, from trailing 1-min candles (batched
     endpoint, one call): K̂ = Σ|Δclose|, ẑ = net Δclose over the window;
     admit when K̂ ≥ κ·ẑ² (κ config) and fold the ratio into the score. The
     direct, theory-grounded form of what item 65 (flow balance) and 60a
-    (drift penalty) approximate. Off by default like 65; enable in demo.
+    (drift penalty) approximate. *Shipped 2026-07-11 — `min_reversion_kappa`
+    (0 = off) over `reversion_window_minutes` (180) of 1-min trade closes
+    via new `RestClient::get_candlesticks`; drop logs print K, κ, z²;
+    <2 traded candles in-window = drop when the gate is on. Enable ~1.0–1.5
+    in config-demo alongside the flow gate.*
 
 34. [ ] **68 — K/z² attribution split.** Add to `pnl_attribution.py`: per
     market per session, report harvested variation (K̂) vs net move (ẑ²)
