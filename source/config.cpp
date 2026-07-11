@@ -51,6 +51,10 @@ AppConfig load_config(const std::filesystem::path &path) {
   config.base_url = json_data.value("base_url", std::string{kDefaultRestUrl});
   config.ws_url = json_data.value("ws_url", std::string{kDefaultWsUrl});
   config.log_dir = json_data.value("log_dir", std::string{"logs"});
+  config.pnl_state_path =
+      json_data.value("pnl_state_path", std::string{"pnl_state.json"});
+  config.account_wide_janitorial =
+      json_data.value("account_wide_janitorial", true);
   config.target_tickers =
       json_data.value("target_tickers", std::vector<std::string>{});
 

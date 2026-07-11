@@ -316,7 +316,7 @@ int main(int argc, char *argv[]) {
     kalshi::set_panic_handler([&session]() { session.cancel_all_quotes(); });
     kalshi::install_crash_flatten_handlers();
 
-    const std::filesystem::path pnl_path{"pnl_state.json"};
+    const std::filesystem::path pnl_path{app_config.pnl_state_path};
     auto prior_pnl = load_pnl(pnl_path);
     for (const auto &[ticker, cents] : prior_pnl) {
       log->info("pnl_state loaded ticker={} prior_pnl_dollars={:.2f}", ticker,
@@ -329,7 +329,16 @@ int main(int argc, char *argv[]) {
 
     if (paper_ptr == nullptr) {
       try {
-        session.cancel_preexisting_orders(rest.get_open_orders());
+        auto stale_orders = rest.get_open_orders();
+        if (!app_config.account_wide_janitorial) {
+          std::erase_if(stale_orders,
+                        [&app_config](const kalshi::Order &order) {
+                          return std::ranges::find(app_config.target_tickers,
+                                                   order.market_ticker) ==
+                                 app_config.target_tickers.end();
+                        });
+        }
+        session.cancel_preexisting_orders(stale_orders);
       } catch (const std::exception &ex) {
         log->warn("startup: could not fetch/cancel pre-existing orders: {}",
                   ex.what());
@@ -435,7 +444,7 @@ int main(int argc, char *argv[]) {
     // throws, so it is safe to run from a destructor; it runs after join()
     // (single-threaded by then) so no lock is needed.
     ScopeGuard shutdown_guard{[&ws_client, &ws_thread, &session, &rest, &cli,
-                               &log, &analytics_logger]() {
+                               &log, &app_config, &analytics_logger]() {
       log->info("shutting down — stopping feed, cancelling all quotes");
       ws_client.stop();
       if (ws_thread.joinable()) {
@@ -450,12 +459,19 @@ int main(int argc, char *argv[]) {
         constexpr auto kShutdownRetryDelay = std::chrono::seconds{2};
         for (int attempt = 1; attempt <= kShutdownAttempts; ++attempt) {
           try {
-            const auto still_open = rest.get_open_orders();
+            auto still_open = rest.get_open_orders();
+            if (!app_config.account_wide_janitorial) {
+              const auto ours = session.tickers();
+              std::erase_if(still_open, [&ours](const kalshi::Order &order) {
+                return std::ranges::find(ours, order.market_ticker) ==
+                       ours.end();
+              });
+            }
             if (still_open.empty()) {
               break;
             }
             log->warn("shutdown: {} order(s) still resting (attempt "
-                      "{}/{}) — cancelling account-wide",
+                      "{}/{}) — cancelling",
                       still_open.size(), attempt, kShutdownAttempts);
             session.cancel_preexisting_orders(still_open);
           } catch (const std::exception &ex) {
@@ -467,7 +483,10 @@ int main(int argc, char *argv[]) {
           }
         }
         try {
-          const int closed = flatten_all_positions(rest, log, &session);
+          const auto session_tickers = session.tickers();
+          const int closed = flatten_all_positions(
+              rest, log, &session,
+              app_config.account_wide_janitorial ? nullptr : &session_tickers);
           if (closed > 0) {
             log->info("shutdown — flattened {} position(s) to end flat",
                       closed);
