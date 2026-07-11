@@ -563,6 +563,24 @@ TEST_F(WebSocketClientTest, InjectFrameDispatchesWithoutRunning) {
   EXPECT_EQ(received.yes_price_cents, kTradePrice);
 }
 
+TEST_F(WebSocketClientTest, ConnectExceptionRetriesInsteadOfDying) {
+  auto fake_ws = std::make_unique<kalshi::FakeWebSocket>();
+  kalshi::FakeWebSocket *ws_raw = fake_ws.get();
+  ws_raw->set_connect_throws(2);
+  ws_raw->enqueue_message(
+      trade_message(kTestTicker, "yes", kTradePrice, kTradeCount));
+
+  auto client = make_client(std::move(fake_ws), 3);
+
+  kalshi::PublicTrade received;
+  client.on_trade([&](const kalshi::PublicTrade &trade) { received = trade; });
+  client.run();
+
+  EXPECT_EQ(received.market_ticker, kTestTicker)
+      << "run() must survive throwing connects and deliver after retry";
+  EXPECT_GE(ws_raw->connect_count(), 3);
+}
+
 TEST_F(WebSocketClientTest, ContiguousSeqDispatchesAllDeltas) {
   auto fake_ws = std::make_unique<kalshi::FakeWebSocket>();
   kalshi::FakeWebSocket *ws_raw = fake_ws.get();

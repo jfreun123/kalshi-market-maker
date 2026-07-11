@@ -427,60 +427,66 @@ int main(int argc, char *argv[]) {
     std::signal(SIGINT, handle_signal);
     std::signal(SIGTERM, handle_signal);
 
-    std::thread ws_thread([&ws_client]() { ws_client.run(); });
+    std::thread ws_thread([&ws_client, &log]() {
+      try {
+        ws_client.run();
+      } catch (const std::exception &ex) {
+        log->critical("ws thread died: {} — requesting shutdown", ex.what());
+      }
+      g_shutdown.store(true);
+    });
 
     // Guarantees that on ANY exit from this scope — normal shutdown, a thrown
     // exception, or stack unwind — we stop the feed, join the thread, and
     // cancel every resting quote. cancel_all_quotes is best-effort and never
     // throws, so it is safe to run from a destructor; it runs after join()
     // (single-threaded by then) so no lock is needed.
-    ScopeGuard shutdown_guard{
-        [&ws_client, &ws_thread, &session, &rest, &cli, &log,
-         &analytics_logger]() {
-          log->info("shutting down — stopping feed, cancelling all quotes");
-          ws_client.stop();
-          if (ws_thread.joinable()) {
-            ws_thread.join();
-          }
-          session.cancel_all_quotes();
-          if (!cli.paper_mode) {
-            // Verify against exchange truth and retry: run 8's shutdown died
-            // mid-flatten with the network down and left live orders behind
-            // (item 53). Never assume a fired cancel landed.
-            constexpr int kShutdownAttempts = 3;
-            constexpr auto kShutdownRetryDelay = std::chrono::seconds{2};
-            for (int attempt = 1; attempt <= kShutdownAttempts; ++attempt) {
-              try {
-                const auto still_open = rest.get_open_orders();
-                if (still_open.empty()) {
-                  break;
-                }
-                log->warn("shutdown: {} order(s) still resting (attempt "
-                          "{}/{}) — cancelling account-wide",
-                          still_open.size(), attempt, kShutdownAttempts);
-                session.cancel_preexisting_orders(still_open);
-              } catch (const std::exception &ex) {
-                log->error("shutdown cancel sweep failed (attempt {}/{}): {}",
-                           attempt, kShutdownAttempts, ex.what());
-                if (attempt < kShutdownAttempts) {
-                  std::this_thread::sleep_for(kShutdownRetryDelay);
-                }
-              }
+    ScopeGuard shutdown_guard{[&ws_client, &ws_thread, &session, &rest, &cli,
+                               &log, &analytics_logger]() {
+      log->info("shutting down — stopping feed, cancelling all quotes");
+      ws_client.stop();
+      if (ws_thread.joinable()) {
+        ws_thread.join();
+      }
+      session.cancel_all_quotes();
+      if (!cli.paper_mode) {
+        // Verify against exchange truth and retry: run 8's shutdown died
+        // mid-flatten with the network down and left live orders behind
+        // (item 53). Never assume a fired cancel landed.
+        constexpr int kShutdownAttempts = 3;
+        constexpr auto kShutdownRetryDelay = std::chrono::seconds{2};
+        for (int attempt = 1; attempt <= kShutdownAttempts; ++attempt) {
+          try {
+            const auto still_open = rest.get_open_orders();
+            if (still_open.empty()) {
+              break;
             }
-            try {
-              const int closed = flatten_all_positions(rest, log, &session);
-              if (closed > 0) {
-                log->info("shutdown — flattened {} position(s) to end flat",
-                          closed);
-              }
-            } catch (const std::exception &ex) {
-              log->error("shutdown flatten failed: {}", ex.what());
+            log->warn("shutdown: {} order(s) still resting (attempt "
+                      "{}/{}) — cancelling account-wide",
+                      still_open.size(), attempt, kShutdownAttempts);
+            session.cancel_preexisting_orders(still_open);
+          } catch (const std::exception &ex) {
+            log->error("shutdown cancel sweep failed (attempt {}/{}): {}",
+                       attempt, kShutdownAttempts, ex.what());
+            if (attempt < kShutdownAttempts) {
+              std::this_thread::sleep_for(kShutdownRetryDelay);
             }
           }
-          kalshi::set_panic_handler(nullptr);
-          analytics_logger->flush();
-          log->info("shutdown complete");
-        }};
+        }
+        try {
+          const int closed = flatten_all_positions(rest, log, &session);
+          if (closed > 0) {
+            log->info("shutdown — flattened {} position(s) to end flat",
+                      closed);
+          }
+        } catch (const std::exception &ex) {
+          log->error("shutdown flatten failed: {}", ex.what());
+        }
+      }
+      kalshi::set_panic_handler(nullptr);
+      analytics_logger->flush();
+      log->info("shutdown complete");
+    }};
 
     constexpr auto kPollInterval = std::chrono::milliseconds{100};
     constexpr int kStalenessCheckInterval = 300; // 300 × 100ms = 30s

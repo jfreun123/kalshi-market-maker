@@ -495,8 +495,13 @@ void WebSocketClient::run() {
   });
 
   while (running_) {
-    ws_->connect(ws_url_, auth_headers());
-    ws_->run();
+    try {
+      ws_->connect(ws_url_, auth_headers());
+      ws_->run();
+    } catch (const std::exception &ex) {
+      get_logger()->critical(
+          "ws transport threw ({}); treating as failed attempt", ex.what());
+    }
 
     if (!running_) {
       break;
