@@ -92,6 +92,29 @@ TEST_F(AppModesTest, FlattenAllPositionsNoOpWhenFlat) {
   EXPECT_EQ(kalshi::flatten_all_positions(rest, log, nullptr), 0);
 }
 
+TEST_F(AppModesTest, FlattenScopedToTickersSkipsOtherPositions) {
+  auto transport = std::make_unique<FakeTransport>();
+  FakeTransport *const transport_raw = transport.get();
+  transport_raw->enqueue(
+      {kHttpOk, R"({"market_positions":[)"
+                R"({"ticker":"KXMINE","position_fp":"5.00",)"
+                R"("realized_pnl_dollars":"0","market_exposure_dollars":"0",)"
+                R"("resting_orders_count":0},)"
+                R"({"ticker":"KXOTHER","position_fp":"7.00",)"
+                R"("realized_pnl_dollars":"0","market_exposure_dollars":"0",)"
+                R"("resting_orders_count":0}],"cursor":""})"});
+  transport_raw->enqueue(
+      {kHttpOk,
+       R"({"order_id":"flat-1","fill_count":"5.00","remaining_count":"0.00",)"
+       R"("ts_ms":1718000000000})"});
+  kalshi::RestClient rest{kalshi::Auth{"key", kPemPrivateKey},
+                          std::move(transport), kBaseUrl};
+  auto log = kalshi::get_logger();
+  const std::vector<std::string> mine = {"KXMINE"};
+
+  EXPECT_EQ(kalshi::flatten_all_positions(rest, log, nullptr, &mine), 1);
+}
+
 TEST_F(AppModesTest, ScanTopTickersEmptyWhenNoMarketsQualify) {
   auto transport = std::make_unique<FakeTransport>();
   FakeTransport *const transport_raw = transport.get();
