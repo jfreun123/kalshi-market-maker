@@ -58,9 +58,9 @@ EOF
 PID_A=$!
 "$BIN" "$AB_DIR/config-B.json" > "$AB_DIR/B.out" 2>&1 &
 PID_B=$!
-trap 'kill -INT "$PID_A" "$PID_B" 2>/dev/null || true' INT TERM
+trap 'kill -TERM "$PID_A" "$PID_B" 2>/dev/null || true' INT TERM
 echo "run_ab: both legs live for $MINUTES minute(s) (pids $PID_A $PID_B)"
-(sleep $((MINUTES * 60)) && kill -INT "$PID_A" "$PID_B" 2>/dev/null) &
+(sleep $((MINUTES * 60)) && kill -TERM "$PID_A" "$PID_B" 2>/dev/null) &
 TIMER_PID=$!
 wait "$PID_A" || true
 wait "$PID_B" || true
