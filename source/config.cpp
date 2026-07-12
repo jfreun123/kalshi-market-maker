@@ -34,6 +34,44 @@ ValueType require_field(const nlohmann::json &object,
 constexpr auto kDefaultRestUrl = "https://trading-api.kalshi.com/trade-api/v2";
 constexpr auto kDefaultWsUrl = "wss://trading-api.kalshi.com/trade-api/ws/v2";
 
+nlohmann::json load_secrets(const nlohmann::json &config_json,
+                            const std::filesystem::path &config_path) {
+  if (!config_json.contains("secrets_path")) {
+    return nlohmann::json::object();
+  }
+  std::filesystem::path secrets_path{
+      config_json.at("secrets_path").get<std::string>()};
+  if (secrets_path.is_relative()) {
+    secrets_path = config_path.parent_path() / secrets_path;
+  }
+  std::ifstream file{secrets_path};
+  if (!file) {
+    throw std::runtime_error{"Cannot open secrets file: " +
+                             secrets_path.string()};
+  }
+  return nlohmann::json::parse(file);
+}
+
+template <typename ValueType>
+ValueType require_layered(const nlohmann::json &secrets,
+                          const nlohmann::json &config_json,
+                          const std::string &field_name) {
+  if (secrets.contains(field_name)) {
+    return secrets.at(field_name).template get<ValueType>();
+  }
+  return require_field<ValueType>(config_json, field_name);
+}
+
+std::string layered_value(const nlohmann::json &secrets,
+                          const nlohmann::json &config_json,
+                          const std::string &field_name,
+                          const std::string &fallback) {
+  if (secrets.contains(field_name)) {
+    return secrets.at(field_name).get<std::string>();
+  }
+  return config_json.value(field_name, fallback);
+}
+
 } // namespace
 
 AppConfig load_config(const std::filesystem::path &path) {
@@ -44,12 +82,15 @@ AppConfig load_config(const std::filesystem::path &path) {
 
   const nlohmann::json json_data = nlohmann::json::parse(file);
 
+  const nlohmann::json secrets = load_secrets(json_data, path);
+
   AppConfig config;
-  config.api_key = require_field<std::string>(json_data, "api_key");
+  config.api_key = require_layered<std::string>(secrets, json_data, "api_key");
   config.private_key_path =
-      require_field<std::string>(json_data, "private_key_path");
-  config.base_url = json_data.value("base_url", std::string{kDefaultRestUrl});
-  config.ws_url = json_data.value("ws_url", std::string{kDefaultWsUrl});
+      require_layered<std::string>(secrets, json_data, "private_key_path");
+  config.base_url =
+      layered_value(secrets, json_data, "base_url", kDefaultRestUrl);
+  config.ws_url = layered_value(secrets, json_data, "ws_url", kDefaultWsUrl);
   config.log_dir = json_data.value("log_dir", std::string{"logs"});
   config.pnl_state_path =
       json_data.value("pnl_state_path", std::string{"pnl_state.json"});

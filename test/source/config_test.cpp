@@ -367,3 +367,103 @@ TEST(ConfigTest, ThrowsOnNonexistentFile) {
   EXPECT_THROW(kalshi::load_config("/nonexistent/path/config.json"),
                std::runtime_error);
 }
+
+TEST(ConfigTest, SecretsFileSuppliesCredentials) {
+  const nlohmann::json secrets_json = {{"api_key", "secret-file-key"},
+                                       {"private_key_path", "/keys/demo.pem"}};
+  const auto secrets_path = write_temp_config(secrets_json);
+
+  const nlohmann::json config_json = {{"secrets_path", secrets_path.string()},
+                                      {"target_tickers", {"TICK-A"}}};
+  const auto config_path = write_temp_config(config_json);
+
+  const auto config = kalshi::load_config(config_path);
+  std::filesystem::remove(config_path);
+  std::filesystem::remove(secrets_path);
+
+  EXPECT_EQ(config.api_key, "secret-file-key");
+  EXPECT_EQ(config.private_key_path, "/keys/demo.pem");
+}
+
+TEST(ConfigTest, SecretsFileOverridesInlineCredentialsAndUrls) {
+  const nlohmann::json secrets_json = {
+      {"api_key", "fresh-secret-key"},
+      {"private_key_path", "/keys/fresh.pem"},
+      {"base_url", "https://demo-api.kalshi.co/trade-api/v2"},
+      {"ws_url", "wss://demo-api.kalshi.co/trade-api/ws/v2"}};
+  const auto secrets_path = write_temp_config(secrets_json);
+
+  nlohmann::json config_json = minimal_config_json();
+  config_json["secrets_path"] = secrets_path.string();
+  config_json["base_url"] = "https://trading-api.kalshi.com/trade-api/v2";
+  config_json["ws_url"] = "wss://trading-api.kalshi.com/trade-api/ws/v2";
+  const auto config_path = write_temp_config(config_json);
+
+  const auto config = kalshi::load_config(config_path);
+  std::filesystem::remove(config_path);
+  std::filesystem::remove(secrets_path);
+
+  EXPECT_EQ(config.api_key, "fresh-secret-key");
+  EXPECT_EQ(config.private_key_path, "/keys/fresh.pem");
+  EXPECT_EQ(config.base_url, "https://demo-api.kalshi.co/trade-api/v2");
+  EXPECT_EQ(config.ws_url, "wss://demo-api.kalshi.co/trade-api/ws/v2");
+}
+
+TEST(ConfigTest, SecretsFileWithoutUrlsLeavesConfigUrls) {
+  const nlohmann::json secrets_json = {{"api_key", "secret-file-key"},
+                                       {"private_key_path", "/keys/demo.pem"}};
+  const auto secrets_path = write_temp_config(secrets_json);
+
+  const nlohmann::json config_json = {
+      {"secrets_path", secrets_path.string()},
+      {"base_url", "https://demo-api.kalshi.co/trade-api/v2"},
+      {"target_tickers", {"TICK-A"}}};
+  const auto config_path = write_temp_config(config_json);
+
+  const auto config = kalshi::load_config(config_path);
+  std::filesystem::remove(config_path);
+  std::filesystem::remove(secrets_path);
+
+  EXPECT_EQ(config.base_url, "https://demo-api.kalshi.co/trade-api/v2");
+  EXPECT_EQ(config.ws_url, "wss://trading-api.kalshi.com/trade-api/ws/v2");
+}
+
+TEST(ConfigTest, RelativeSecretsPathResolvesAgainstConfigDirectory) {
+  const nlohmann::json secrets_json = {{"api_key", "relative-key"},
+                                       {"private_key_path", "/keys/rel.pem"}};
+  const auto secrets_path = write_temp_config(secrets_json);
+
+  const nlohmann::json config_json = {
+      {"secrets_path", secrets_path.filename().string()},
+      {"target_tickers", {"TICK-A"}}};
+  const auto config_path = write_temp_config(config_json);
+
+  const auto config = kalshi::load_config(config_path);
+  std::filesystem::remove(config_path);
+  std::filesystem::remove(secrets_path);
+
+  EXPECT_EQ(config.api_key, "relative-key");
+}
+
+TEST(ConfigTest, ThrowsWhenSecretsFileMissing) {
+  const nlohmann::json config_json = {
+      {"secrets_path", "/nonexistent/secrets.json"},
+      {"target_tickers", {"TICK-A"}}};
+  const auto config_path = write_temp_config(config_json);
+
+  EXPECT_THROW(kalshi::load_config(config_path), std::runtime_error);
+  std::filesystem::remove(config_path);
+}
+
+TEST(ConfigTest, ThrowsWhenApiKeyAbsentFromConfigAndSecrets) {
+  const nlohmann::json secrets_json = {{"private_key_path", "/keys/demo.pem"}};
+  const auto secrets_path = write_temp_config(secrets_json);
+
+  const nlohmann::json config_json = {{"secrets_path", secrets_path.string()},
+                                      {"target_tickers", {"TICK-A"}}};
+  const auto config_path = write_temp_config(config_json);
+
+  EXPECT_THROW(kalshi::load_config(config_path), std::runtime_error);
+  std::filesystem::remove(config_path);
+  std::filesystem::remove(secrets_path);
+}
