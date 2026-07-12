@@ -357,18 +357,27 @@
     that one-way books never send). Tune against attribution: the flip is
     right when drift saved exceeds taker fee + spread paid.
 
-37. [ ] **71 — evaluate crypto 15m series (KXBTC15M family) + external
-    reference feed.** ND-HFTT's venue: ~$170k notional per 15-min window,
-    ~100 book updates/s, zero maker fees on that series — production flow
-    orders of magnitude beyond what our demo scans admit. Prereqs our
-    scanner currently blocks: `min_days_to_close` excludes sub-day markets,
-    and rolling 15-min contracts need per-window ticker resolution (their
-    coordinator computes the next ticker from UTC time). The edge defense
-    there is an external leading reference (Coinbase spot leads Kalshi by
-    ~1–2s): cancel/exit when reference momentum crosses against the quote.
-    Caveats: spreads compressed to zero at times by May 2026 as makers
-    crowded in; taker fees still apply off that series; this is a
-    production-scale decision, not a demo experiment.
+37. [ ] **71 — crypto 15m series (KXBTC15M family): the always-on flow our
+    scanner structurally excludes.** ND-HFTT's venue (~$170k notional per
+    window, ~100 book updates/s, zero maker fees on that series in
+    production). **Measured on DEMO 2026-07-11 ~22:15 CT (a Friday night
+    when the sports scan admitted nothing): window 2315-15 printed 29
+    trades in 13 min (≈130/hr vs our 6/hr gate), taker split 16 yes /
+    13 no, 1,068 contracts, price range 1–56¢; prior windows 35 and 24
+    trades.** By far the most quotable flow demo has, 24/7 — invisible to
+    the scanner only because `min_days_to_close=1.0` discards sub-day
+    markets before the flow gates run. Build: (a) per-window ticker
+    resolution (compute next window from UTC; ND's coordinator pattern) +
+    session lifecycle for 15-min markets — stop quoting ~60s before close,
+    positions settle to 0/1 rather than exit; (b) quote only the 10–90¢
+    middle band at first — these markets are `tapered_deci_cent` (0.1¢
+    ticks in [0,10]¢ and [90,100]¢), so the integer-cent engine is only
+    valid mid-range until item 69 lands; (c) external reference feed
+    (Coinbase spot leads Kalshi ~1–2s) for the momentum cancel — the
+    adverse-selection defense that made ND's maker work. Risks: terminal
+    z is structural (every window converges to 0/1 — quote early/mid
+    window, flee the end); production spreads compressed to zero at times
+    by May 2026 as makers crowded in.
 
 38. [ ] **72 — validate the backtest fill model against captured tape.**
     Our --backtest fills only on strict print-through — conservative by
