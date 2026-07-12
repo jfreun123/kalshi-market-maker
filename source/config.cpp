@@ -55,6 +55,7 @@ AppConfig load_config(const std::filesystem::path &path) {
       json_data.value("pnl_state_path", std::string{"pnl_state.json"});
   config.account_wide_janitorial =
       json_data.value("account_wide_janitorial", true);
+  config.record_sessions = json_data.value("record_sessions", true);
   config.target_tickers =
       json_data.value("target_tickers", std::vector<std::string>{});
 

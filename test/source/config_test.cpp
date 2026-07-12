@@ -89,6 +89,7 @@ TEST(ConfigTest, LoadsAllFields) {
         {"tape_half_life_seconds", 45}}},
       {"pnl_state_path", "state/pnl_A.json"},
       {"account_wide_janitorial", false},
+      {"record_sessions", false},
       {"flow",
        {{"window_seconds", kFlowWindowSeconds},
         {"imbalance_ratio_threshold", kFlowRatioThreshold},
@@ -133,6 +134,7 @@ TEST(ConfigTest, LoadsAllFields) {
   EXPECT_TRUE(config.quoter.use_clearing_pricing);
   EXPECT_EQ(config.pnl_state_path, "state/pnl_A.json");
   EXPECT_FALSE(config.account_wide_janitorial);
+  EXPECT_FALSE(config.record_sessions);
   EXPECT_DOUBLE_EQ(config.quoter.clearing_tape_weight, 0.4);
   EXPECT_EQ(config.quoter.tape_half_life_seconds, 45);
   EXPECT_EQ(config.flow.window_seconds, kFlowWindowSeconds);
@@ -219,6 +221,7 @@ TEST(ConfigTest, DefaultsAppliedWhenOptionalSectionsAbsent) {
   EXPECT_FALSE(config.quoter.use_clearing_pricing);
   EXPECT_EQ(config.pnl_state_path, "pnl_state.json");
   EXPECT_TRUE(config.account_wide_janitorial);
+  EXPECT_TRUE(config.record_sessions);
   EXPECT_DOUBLE_EQ(config.quoter.clearing_tape_weight,
                    kalshi::QuoterConfig::kDefaultClearingTapeWeight);
   EXPECT_EQ(config.quoter.tape_half_life_seconds,
