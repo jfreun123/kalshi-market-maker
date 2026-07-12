@@ -40,6 +40,12 @@ int run_scan_mode(kalshi::RestClient &rest,
   const auto results = scanner.scan(kScanTopN, now);
   if (results.empty()) {
     log->warn("no markets passed scanner filters");
+    const std::filesystem::path empty_path{kScanResultsPath};
+    if (kalshi::write_scan_results(empty_path, results, now)) {
+      log->info("empty scan results written to {} — consumers must not "
+                "reuse a stale file",
+                empty_path.string());
+    }
     return 0;
   }
   log->info("scanner results (top {}):", results.size());
