@@ -24,7 +24,12 @@ AB_DIR="logs/ab-$STAMP"
 mkdir -p "$AB_DIR"
 
 echo "run_ab: scanning for live markets..."
+rm -f scan_results.json
 "$BIN" --scan config-demo.json > "$AB_DIR/scan.log" 2>&1
+if [[ ! -f scan_results.json ]]; then
+  echo "run_ab: scan produced no results file — aborting" >&2
+  exit 1
+fi
 SWAP="$SWAP" AB_DIR="$AB_DIR" python3 - <<'EOF'
 import json, os
 
