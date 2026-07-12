@@ -106,6 +106,22 @@ def main():
         print(f"  {k:<12} {totals[k]:>+8.3f}")
     print(f"  {'total':<12} {total:>+8.3f}")
     print(f"  picked-off fills: {pickoffs}/{len(fills)}")
+
+    # Item 68: the Chakraborty-Kearns split (docs/papers README section 5).
+    # A ladder maker's ceiling on any path is (K - z^2)/2: K = harvestable
+    # wiggle, z = net move. K >> z^2 and we still lost -> pricing/queue
+    # problem; K < z^2 -> selection problem (no maker could have won here).
+    print("\n== reversion split, per market (cents; theory ceiling (K-z^2)/2) ==")
+    print(f"  {'ticker':<40}{'K':>8}{'z':>7}{'z^2':>8}{'ceiling':>9}")
+    for ticker in sorted(quotes):
+        mids = [mid for _, mid, _ in quotes[ticker] if mid]
+        if len(mids) < 2:
+            continue
+        k_wiggle = sum(abs(mids[i] - mids[i - 1]) for i in range(1, len(mids)))
+        z_net = mids[-1] - mids[0]
+        ceiling = (k_wiggle - z_net * z_net) / 2.0
+        print(f"  {ticker:<40}{k_wiggle:>8.1f}{z_net:>+7.1f}"
+              f"{z_net * z_net:>8.1f}{ceiling:>+9.1f}")
     return 0
 
 
