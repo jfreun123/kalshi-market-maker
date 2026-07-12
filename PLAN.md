@@ -330,6 +330,22 @@
     live test of the (K − z²)/2 identity, and the number tells us whether a
     loss was "bad market selection" (z² blowup) vs "bad pricing" (thin K).
 
+35. [ ] **69 — per-market precision audit (Jacob, 2026-07-11: "I *think*
+    markets have different precisions. I need my quantity type to take this
+    into account.").** Evidence so far: subpenny pricing is per-market
+    (getting_started/subpenny_pricing — legacy integer-cent fields deprecated
+    2026-03-05, finer ticks near the 0/100 tails), market objects carry a
+    `price_level_structure` field we currently ignore, and fills/counts are
+    fixed-point 2dp (`count_fp` — `Quantity` stores centi-contracts). Audit
+    both axes per market: price tick size (our `int price_cents` grid and
+    every ±1-cent assumption in quoter/clamps/rounding breaks on subpenny
+    books — the Hormuz UI confusion of 2026-07-10 was this rounding in the
+    wild) and quantity step (verify 0.01 contracts is universal or make
+    `Quantity`'s granularity per-market). Deliverable: parse
+    `price_level_structure`, a per-market `MarketPrecision` carried through
+    types, and conformance tests pinning live demo behavior before any live
+    switch on a subpenny market.
+
 **Selection principle (Jacob, 2026-07-04): profitable on every market we
 CHOOSE, then scale.** Not every market can be made profitably — trending
 books, dead books, and 1c-spread deep books all bleed makers. Scaling (Gate
