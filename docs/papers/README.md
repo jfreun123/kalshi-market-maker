@@ -212,6 +212,110 @@ price-touches, not informed counterparties.
 
 ---
 
+## 6. Yang, Li & Shi (2026) — *Kalshi Order-Book Predictor: KXBTC15M* (ND-HFTT group 11)
+
+Notre Dame HFT course project (repo: matthewbelcher/ND-HFTT,
+`2026_spring/group11_project`), studied 2026-07-11. The most directly
+comparable work to ours: a multi-threaded C++ Kalshi collector + live maker,
+several hundred captured 15-min sessions of KXBTC15M ("BTC up/down in 15
+min") with a synchronized Coinbase BTC feed, a 114-session held-out backtest,
+and a 6-hour live run with real money. Four progressively refined strategies;
+the arc of what failed is worth more than the final numbers.
+
+**The four strategies (in order tried)**
+- **OBI-delta market taking:** fire when top-5 depth-weighted imbalance jumps
+  ±0.4 in 250ms. Signal is *real* (hits outnumber adverses 2:1) but the
+  average hit is +$0.0125 — under the ~2-tick round-trip taker fee
+  (`ceil(0.07·C·P·(1−P))`, worst at 50¢). Tightening the threshold cut
+  firings without raising per-trade payoff: the move distribution is too
+  tight relative to the tick.
+- **Calibrated microprice:** the standard (M, S, I) Markov lookup
+  G*[imbalance, spread] on ~2M transitions. Qualitatively correct shape, but
+  max |G*| ≈ $0.0022 — a quarter of a tick. No actionable price level exists
+  between mid and microprice, so the signal cannot become a different order.
+  Their diagnosis: microprice assumes ticks fine relative to spread; a binary
+  contract has 99 coarse ticks and the correction is finer than the grid.
+  Team note (RUNBOOK): "too much noise and each tick is too big relative to
+  the total possible price levels. Can't find deep signals."
+- **Gradient-boosted ensemble:** 16 features (multi-level OBI, depth, elapsed
+  time, BTC momentum/vol), IC ~0.28 / AUC ~0.67 on 10s forward direction.
+  Mark-to-mid simulation showed strong P&L; the honest simulator (pay the
+  spread or wait for a fill) gave essentially all of it back — as a maker
+  entry filter it hit a 17% win rate. Root cause is textbook adverse
+  selection plus horizon mismatch: the model predicts 10s ahead, but a quote
+  that fills does so in 100–500ms *conditioned on someone crossing*, by which
+  point the imbalance it conditioned on is stale. Plus March→April regime
+  drift. Their phrasing of the general trap: P&L that is "large and monotone
+  in the threshold" is "a hallmark of an unrealistic fill model rather than
+  a real edge."
+- **Two-rule maker (the winner):** post 1 tick inside the spread only when
+  level-1 OBI (±0.05) and the *sign* of 10s BTC momentum agree; cancel the
+  quote (or force-taker-exit the position) the moment BTC moves >0.01%
+  against it; 30s max-hold then forced taker exit; post-only everywhere.
+  91% win rate, +$40 net over 114 held-out sessions (qty=25), +$1.50 on a $2
+  bankroll in 6h live. "The filter doesn't need to predict price; it just
+  needs to tell us when not to quote."
+
+**Key measured facts**
+- Signal ICs at 5s (199 sessions): level-1 OBI **+0.20**, btc_mom_10s
+  **+0.14**, whole-book depth skew **−0.12** — total-book imbalance predicts
+  the *opposite* direction (a YES-heavy book is supply overhang, not YES
+  evidence). Signal agreement: 52.5% hit rate when OBI and BTC agree vs
+  41.8% opposed (+10.7pp).
+- **BTC leads Kalshi by ~1–2s** — the whole adverse-selection defense is
+  built on cancelling inside that window, faster than the takers reprice.
+- **Fill model validated empirically:** matching trade-channel prints to
+  negative top-of-book deltas within ±50ms, **95.9% of negative top-deltas
+  are real trades** (not cancels); their sim fills proportionally to quote
+  share of the level, with |delta| > 300 treated as a cancel.
+- Live ops findings: cancel returning 404 means *already filled* — they
+  freeze the state machine until the fill channel confirms (a fill arriving
+  between cancel request and response once built an unintended position that
+  burned minutes of P&L); ~20 req/s rate limit is easy to brush in
+  cancel-replace storms (they added a 1s order cooldown); KXBTC15M spreads
+  compressed March→May as new makers arrived, at times to zero — "the best
+  protection against newer makers is breadth."
+
+**Relevance to this project**
+- **Their arc independently replays our conclusion:** forecasting lost to a
+  simple maker wrapped in when-not-to-quote filters. Their two-rule gate is
+  the same species as our admission stack (flow rate, two-sided tape,
+  reversion score) — corroboration that the edge is selection, not
+  prediction.
+- **Depth-skew IC −0.12 explains our fv-replay result.** Our full-depth flat
+  clearing anchor scored *worst* (2.72¢ MAE vs micro 1.73¢) — deep levels
+  are maker inventory overhang, not fair-value evidence, and carry
+  opposite-signed information. Keeps `DepthWeighting` top-heavy; any future
+  fv work should treat depth beyond the top levels as a *contrarian* input,
+  not more evidence.
+- **The microprice grid mismatch is a standing warning:** on an integer-cent
+  book, fv precision below ~half a tick cannot change the quote. Don't tune
+  blend weights chasing sub-tick MAE (our Phase 3 tables flirted with this);
+  item 69's subpenny audit is exactly where this constraint would relax.
+- **30s max-hold forced exit attacks our one loss channel.** Our losses are
+  z² drift while warehousing one-way inventory; a hard holding-time cap
+  converts unbounded drift into a bounded taker fee + spread cost. Their
+  91%-win config paid taker fees willingly to cap z. → PLAN item 70.
+- **External-reference cancel generalizes.** Crypto series have a leading
+  truth signal (spot feed, 1–2s ahead); our scanner-picked markets mostly
+  don't, which is *why* our picked-off count is ~0 — nobody on demo is
+  faster-informed. If we ever quote production crypto 15m markets (their
+  numbers: ~$170k notional/window, ~100 book updates/s, zero maker fees on
+  that series — orders of magnitude more flow than anything our demo scans
+  admit), the reference feed + momentum cancel is table stakes. → PLAN
+  item 71.
+- **Their fill-model validation is runnable on our captures today.** We
+  record both orderbook deltas and trade prints; measuring our own
+  trade-vs-cancel ratio would tell us how conservative our strict
+  print-through backtest fills are, and their proportional delta-consumption
+  model is the natural upgrade if we're under-filling. → PLAN item 72.
+- **Cancel-404 = maybe-filled** is a race our janitorial/reprice paths also
+  run; worth verifying we never treat a 404 cancel as "order gone" without
+  reconciling against fills. Post-only we already do (`rest_client.cpp`
+  sets `post_only=true` on every quote).
+
+---
+
 ## Cross-cutting takeaways for our build
 
 - **Stay a maker, quote the mid-range, lean toward the favorite side** (Bürgi: makers only profit ≥50¢ with significance above 70¢, winning maker flow is long favorites; sub-50¢ buys need an extra edge requirement, and the closing day is a regime of its own). ⚠ *"makers win" unqualified was wrong — makers average −9.64%; the game is being in the winning subset.*
@@ -220,3 +324,4 @@ price-touches, not informed counterparties.
 - **Edge is estimation, sized by fractional Kelly, verified by Brier logging** — with Bürgi's category-conditional, time-decaying β and the honest caveat that the Kelly race numbers are illustrative.
 - **Inventory pricing in log-odds** (Berg & Proebsting) generalizes our linear skew; their rounding discipline (always favor the maker) applies verbatim to our quote rounding.
 - **Profit = (K − z²)/2** (Chakraborty & Kearns): the maker's whole game is selecting reverting books and capping net moves — volatility is revenue, trend is cost squared. Admission should measure K̂ vs ẑ² directly (item 67); inventory caps and wind-down are the z-side defenses we already ship.
+- **Simple maker + when-not-to-quote filters beat forecasting, twice now** (ND-HFTT group 11: GBM with IC 0.28 lost to a two-line rule; their depth-skew IC −0.12 says deep book levels carry *opposite*-signed information — corroborates our fv-replay). Time-boxed inventory (max-hold taker exit) is the missing z-side defense; honest fill models are non-negotiable — P&L monotone in a threshold means the simulator is lying.

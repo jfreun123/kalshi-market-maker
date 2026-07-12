@@ -349,6 +349,50 @@
     types, and conformance tests pinning live demo behavior before any live
     switch on a subpenny market.
 
+36. [ ] **70 — max-hold forced exit (ND-HFTT study, docs/papers §6).** Our
+    one loss channel is z² drift while warehousing one-way inventory; their
+    91%-win maker capped it with a hard 30s holding-time limit — passive
+    exit first, forced taker exit at the deadline, taker fee accepted as a
+    bounded cost in place of unbounded drift. Add `max_hold_seconds` (0 =
+    off): when any lot's age exceeds it, exit the remainder as a taker
+    instead of resting at reservation forever. Complements item 64's unwind
+    pricing (which lowers the exit price but still waits for a counterparty
+    that one-way books never send). Tune against attribution: the flip is
+    right when drift saved exceeds taker fee + spread paid.
+
+37. [ ] **71 — crypto 15m series (KXBTC15M family): the always-on flow our
+    scanner structurally excludes.** ND-HFTT's venue (~$170k notional per
+    window, ~100 book updates/s, zero maker fees on that series in
+    production). **Measured on DEMO 2026-07-11 ~22:15 CT (a Friday night
+    when the sports scan admitted nothing): window 2315-15 printed 29
+    trades in 13 min (≈130/hr vs our 6/hr gate), taker split 16 yes /
+    13 no, 1,068 contracts, price range 1–56¢; prior windows 35 and 24
+    trades.** By far the most quotable flow demo has, 24/7 — invisible to
+    the scanner only because `min_days_to_close=1.0` discards sub-day
+    markets before the flow gates run. Build: (a) per-window ticker
+    resolution (compute next window from UTC; ND's coordinator pattern) +
+    session lifecycle for 15-min markets — stop quoting ~60s before close,
+    positions settle to 0/1 rather than exit; (b) quote only the 10–90¢
+    middle band at first — these markets are `tapered_deci_cent` (0.1¢
+    ticks in [0,10]¢ and [90,100]¢), so the integer-cent engine is only
+    valid mid-range until item 69 lands; (c) external reference feed
+    (Coinbase spot leads Kalshi ~1–2s) for the momentum cancel — the
+    adverse-selection defense that made ND's maker work. Risks: terminal
+    z is structural (every window converges to 0/1 — quote early/mid
+    window, flee the end); production spreads compressed to zero at times
+    by May 2026 as makers crowded in.
+
+38. [ ] **72 — validate the backtest fill model against captured tape.**
+    Our --backtest fills only on strict print-through — conservative by
+    design, honesty unmeasured. ND-HFTT matched trade prints to negative
+    top-of-book deltas within ±50ms and found 95.9% of negative top-deltas
+    are real trades; their sim fills proportional to quote share of the
+    level. We already capture both channels: run the same matching on our
+    corpus to measure our print-through under-fill, and adopt proportional
+    delta-consumption if the gap is material. Guards against the opposite
+    failure too — a fill model that flatters a config would quietly rig the
+    clearing-pricing verdict (task #4 rides on these replays).
+
 **Selection principle (Jacob, 2026-07-04): profitable on every market we
 CHOOSE, then scale.** Not every market can be made profitably — trending
 books, dead books, and 1c-spread deep books all bleed makers. Scaling (Gate
