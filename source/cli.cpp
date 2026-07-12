@@ -24,6 +24,11 @@ CliArgs parse_args(std::span<char *> args) {
       if (idx + 1U < args.size() && args[idx + 1U][0] != '-') {
         result.capture_dir = std::filesystem::path{args[++idx]};
       }
+    } else if (arg == "--backtest") {
+      result.backtest_mode = true;
+      if (idx + 1U < args.size() && args[idx + 1U][0] != '-') {
+        result.backtest_path = std::filesystem::path{args[++idx]};
+      }
     } else if (arg == "--fv-replay") {
       result.fv_replay_mode = true;
       if (idx + 1U < args.size() && args[idx + 1U][0] != '-') {

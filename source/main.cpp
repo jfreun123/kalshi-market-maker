@@ -208,6 +208,11 @@ int main(int argc, char *argv[]) {
     setup_logger(std::filesystem::path{app_config.log_dir}, cli.verbose);
     auto log = kalshi::get_logger();
 
+    if (cli.backtest_mode) {
+      return kalshi::run_backtest_mode(cli.backtest_path, app_config, std::cout,
+                                       log);
+    }
+
     log->info("startup mode={} tickers={} base_url={}",
               cli.paper_mode ? "paper" : "live",
               app_config.target_tickers.size(), app_config.base_url);

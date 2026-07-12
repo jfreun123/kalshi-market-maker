@@ -6,6 +6,7 @@
 
 #include "auth.hpp"
 #include "config.hpp"
+#include "paper_transport.hpp"
 #include "rest_client.hpp"
 #include "trading_session.hpp"
 #include "websocket_client.hpp"
@@ -50,6 +51,13 @@ int run_capture_mode(const std::atomic<bool> &shutdown_requested,
                      const Auth &auth, const AppConfig &app_config,
                      const std::filesystem::path &capture_dir,
                      std::shared_ptr<spdlog::logger> &log);
+
+int simulate_maker_fills(PaperTransport &paper, TradingSession *session,
+                         const PublicTrade &print);
+
+int run_backtest_mode(const std::filesystem::path &capture_path,
+                      const AppConfig &app_config, std::ostream &out,
+                      std::shared_ptr<spdlog::logger> &log);
 
 int run_fv_replay_mode(const std::filesystem::path &capture_path,
                        std::ostream &out, std::shared_ptr<spdlog::logger> &log);

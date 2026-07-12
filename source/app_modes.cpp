@@ -7,6 +7,8 @@
 #include "ticker_scanner.hpp"
 
 #include <nlohmann/json.hpp>
+#include <openssl/evp.h>
+#include <openssl/pem.h>
 
 #include <algorithm>
 #include <atomic>
@@ -226,6 +228,194 @@ int run_flatten_mode(kalshi::RestClient &rest,
   log->info("flatten mode — closing all open positions");
   const int closed = flatten_all_positions(rest, log, nullptr);
   log->info("flatten mode — closed {} position(s)", closed);
+  return 0;
+}
+
+// ---- Backtest mode ----
+
+namespace {
+
+// Ephemeral RSA key so RestClient's request signing works against the paper
+// exchange — backtests must never need real credentials.
+std::string ephemeral_rsa_pem() {
+  constexpr unsigned int kRsaBits = 2048U;
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-cstyle-cast)
+  EVP_PKEY *pkey = EVP_RSA_gen(kRsaBits);
+  if (pkey == nullptr) {
+    return "";
+  }
+  BIO *bio = BIO_new(BIO_s_mem());
+  PEM_write_bio_PrivateKey(bio, pkey, nullptr, nullptr, 0, nullptr, nullptr);
+  char *pem_data = nullptr;
+  const long pem_len = BIO_get_mem_data(bio, &pem_data); // NOLINT(runtime/int)
+  std::string pem(pem_data, static_cast<std::size_t>(pem_len));
+  BIO_free(bio);
+  EVP_PKEY_free(pkey);
+  return pem;
+}
+
+} // namespace
+
+// Conservative print-through fill model: a recorded public print fills our
+// resting paper order only when the taker traded STRICTLY through our level
+// (at-level prints are queue-position-dependent and never simulated). The
+// print's size is consumed across crossable orders. Fills are applied to the
+// paper exchange and, when a session is given, forwarded through the same
+// on_fill path live fills take. Returns the number of orders filled.
+int simulate_maker_fills(kalshi::PaperTransport &paper,
+                         kalshi::TradingSession *session,
+                         const kalshi::PublicTrade &print) {
+  struct Crossable {
+    std::string order_id;
+    kalshi::Side side;
+    int price_cents;
+    int remaining;
+  };
+  std::vector<Crossable> crossable;
+  for (const auto &order : paper.open_orders()) {
+    if (order.market_ticker != print.market_ticker || !order.is_active()) {
+      continue;
+    }
+    bool crossed = false;
+    if (print.taker_side == kalshi::Side::Yes &&
+        order.side == kalshi::Side::No) {
+      crossed =
+          print.yes_price_cents > kalshi::complement_price(order.price_cents);
+    } else if (print.taker_side == kalshi::Side::No &&
+               order.side == kalshi::Side::Yes) {
+      crossed = print.yes_price_cents < order.price_cents;
+    }
+    if (!crossed) {
+      continue;
+    }
+    const int remaining =
+        static_cast<int>((order.quantity - order.filled_quantity).contracts());
+    if (remaining > 0) {
+      crossable.push_back({order.id, order.side, order.price_cents, remaining});
+    }
+  }
+
+  int print_remaining = static_cast<int>(print.quantity.contracts());
+  int orders_filled = 0;
+  for (const auto &target : crossable) {
+    if (print_remaining <= 0) {
+      break;
+    }
+    const int fill_qty = std::min(print_remaining, target.remaining);
+    if (fill_qty <= 0 || !paper.simulate_fill(target.order_id, fill_qty)) {
+      continue;
+    }
+    print_remaining -= fill_qty;
+    ++orders_filled;
+    if (session != nullptr) {
+      kalshi::Fill fill;
+      fill.trade_id = "sim-" + std::to_string(paper.fills().size());
+      fill.order_id = target.order_id;
+      fill.market_ticker = print.market_ticker;
+      fill.side = target.side;
+      fill.price_cents = target.price_cents;
+      fill.quantity = kalshi::Quantity::from_contracts(fill_qty);
+      fill.is_taker = false;
+      fill.timestamp = print.timestamp;
+      session->on_fill(fill);
+    }
+  }
+  return orders_filled;
+}
+
+// Replays a capture through the full production stack (parser -> session ->
+// quoter -> risk) against the paper exchange, crossing recorded prints with
+// our simulated quotes. The strategy dev loop in seconds: change config,
+// re-run, read the per-market PnL — no live slate required.
+int run_backtest_mode(const std::filesystem::path &capture_path,
+                      const kalshi::AppConfig &app_config, std::ostream &out,
+                      std::shared_ptr<spdlog::logger> &log) {
+  std::ifstream capture_file{capture_path};
+  if (!capture_file) {
+    log->critical("backtest — cannot open capture file {}",
+                  capture_path.string());
+    return 1;
+  }
+
+  auto transport = std::make_unique<kalshi::PaperTransport>();
+  kalshi::PaperTransport *paper = transport.get();
+  kalshi::RestClient rest{kalshi::Auth{"paper", ephemeral_rsa_pem()},
+                          std::move(transport), app_config.base_url};
+  kalshi::OrderManager order_mgr{rest};
+  kalshi::RiskManager risk_mgr{app_config.risk};
+  kalshi::FlowImbalanceGuard flow_guard{app_config.flow};
+  auto pricing_model = [&app_config]() -> kalshi::FairValueEngine {
+    if (app_config.quoter.use_clearing_pricing) {
+      return kalshi::FairValueEngine{
+          std::make_unique<kalshi::ClearingPriceModel>(
+              app_config.quoter.clearing_tape_weight)};
+    }
+    if (app_config.quoter.use_view_based_pricing) {
+      return kalshi::FairValueEngine{std::make_unique<kalshi::ViewBasedModel>(
+          app_config.quoter.view_debias_beta)};
+    }
+    return kalshi::FairValueEngine{std::make_unique<kalshi::HeuristicModel>()};
+  }();
+  kalshi::Quoter quoter{app_config.quoter, std::move(pricing_model), order_mgr,
+                        risk_mgr, &flow_guard};
+  kalshi::TradingSession session{{}, order_mgr, risk_mgr, quoter, &flow_guard};
+  kalshi::TradeTape trade_tape{kalshi::TradeTapeConfig{}};
+  session.set_trade_tape(&trade_tape);
+  quoter.set_trade_tape(&trade_tape);
+
+  std::unordered_map<std::string, double> realized_cents;
+  session.set_pnl_listener(
+      [&realized_cents](const kalshi::TradingSession::PnlMap &pnl) {
+        for (const auto &[ticker, cents] : pnl) {
+          realized_cents[ticker] = cents;
+        }
+      });
+
+  kalshi::WebSocketClient client{kalshi::Auth{"replay", ""},
+                                 std::make_unique<kalshi::NullWebSocket>(),
+                                 "wss://replay.invalid/ws", 0};
+  client.on_orderbook_snapshot([&session](const kalshi::Orderbook &snapshot) {
+    if (session.is_tracked(snapshot.ticker)) {
+      session.on_snapshot(snapshot);
+    } else {
+      session.add_market(snapshot);
+    }
+  });
+  client.on_orderbook_delta([&session](const std::string &ticker,
+                                       kalshi::Side side, int price_cents,
+                                       kalshi::Quantity delta) {
+    session.on_delta(ticker, side, price_cents, delta);
+  });
+  long long prints = 0;
+  int sim_fills = 0;
+  client.on_trade([&](const kalshi::PublicTrade &print) {
+    ++prints;
+    sim_fills += simulate_maker_fills(*paper, &session, print);
+    session.on_trade(print);
+  });
+
+  long long frames = 0;
+  std::string line;
+  while (std::getline(capture_file, line)) {
+    if (!line.empty()) {
+      client.inject_frame(line);
+      ++frames;
+    }
+  }
+
+  constexpr double kCentsPerDollarOut = 100.0;
+  out << std::format("backtest {}  frames={} prints={} sim_fills={}\n",
+                     capture_path.string(), frames, prints, sim_fills);
+  out << std::format("{:<42}{:>10}{:>14}\n", "ticker", "net_pos", "realized_$");
+  for (const auto &ticker : session.tickers()) {
+    const auto realized = realized_cents.contains(ticker)
+                              ? realized_cents.at(ticker) / kCentsPerDollarOut
+                              : 0.0;
+    out << std::format("{:<42}{:>10}{:>14.2f}\n", ticker,
+                       order_mgr.net_position(ticker).to_fp_string(), realized);
+  }
+  log->info("backtest — {} frames, {} prints, {} simulated fills", frames,
+            prints, sim_fills);
   return 0;
 }
 
