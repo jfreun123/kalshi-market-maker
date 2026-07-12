@@ -1,10 +1,19 @@
 {
   "secrets_path": "secrets.json",
-  "target_tickers": [],
+  "log_dir": "logs",
+  "pnl_state_path": "pnl_state.json",
+  "account_wide_janitorial": true,
+  "record_sessions": true,
+  "target_tickers": [
+    "KXCPI-26SEP-T0.3",
+    "KXCPI-26SEP-T0.1",
+    "KXCPI-26SEP-T0.4",
+    "KXCPI-26AUG-T0.3"
+  ],
   "quoter": {
     "target_spread_cents": 4,
     "reprice_threshold_cents": 1,
-    "quote_size": 10,
+    "quote_size": 5,
     "imbalance_spread_cents": 2,
     "min_spread_cents": 3,
     "use_view_based_pricing": false,
@@ -26,14 +35,13 @@
   },
   "flow": {
     "window_seconds": 300,
-    "imbalance_ratio_threshold": 2.0,
-    "min_flow_volume": 20
+    "imbalance_ratio_threshold": 2.0
   },
   "risk": {
-    "max_position_per_market": 100,
+    "max_position_per_market": 50,
     "max_open_orders_per_market": 4,
-    "max_order_size": 25,
-    "daily_loss_limit": -500.0,
+    "max_order_size": 10,
+    "daily_loss_limit": -100.0,
     "max_total_exposure_dollars": 10000.0,
     "max_total_loss_dollars": -1000.0,
     "min_quote_price_cents": 10,
@@ -41,13 +49,13 @@
     "max_drawdown_dollars": 500.0
   },
   "scanner": {
-    "min_price_cents": 15,
-    "max_price_cents": 85,
-    "min_spread_cents": 3,
-    "max_spread_cents": 10,
-    "min_volume_24h": 1000.0,
-    "min_days_to_close": 1.0,
-    "max_days_to_close": 90.0,
+    "min_price_cents": 2,
+    "max_price_cents": 98,
+    "min_spread_cents": 1,
+    "max_spread_cents": 30,
+    "min_volume_24h": 5,
+    "min_days_to_close": 0.5,
+    "max_days_to_close": 120,
     "max_stale_trade_minutes": 30,
     "rotation_minutes": 5,
     "min_trades_per_hour": 6,

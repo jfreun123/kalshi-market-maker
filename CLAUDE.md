@@ -41,12 +41,16 @@ Only suppress a clang-tidy warning (`// NOLINT(check-name)`) when you have a spe
 **NEVER write secrets to git or GitHub under any circumstances.** This includes:
 - API keys, key IDs, tokens, passwords
 - RSA private keys (`.pem` files or inline PEM strings)
-- `config.json` (contains live credentials)
+- `secrets.json` (contains live credentials)
 - `pnl_state.json` (contains financial state)
 
 These are covered by `.gitignore`. If you are ever unsure whether a file contains a secret, do not add it to a commit. If a secret is accidentally committed, treat it as compromised immediately and rotate it.
 
-Secrets live outside the repo in `/Users/jacobfreund/kalshi-demo-key/` (demo private key + source configs) and are referenced by absolute path from the gitignored `config-demo.json` / `config.json`.
+Config is split so strategy parameters can be versioned without credentials:
+- `config.json` — **committed**. Strategy/risk/scanner parameters only. It must never contain credentials; it points at the secrets file via `"secrets_path"` (relative paths resolve against the config file's directory).
+- `secrets.json` — **gitignored**. Holds `api_key`, `private_key_path`, and the environment URLs (`base_url`/`ws_url`), which take precedence over anything inline. Template: `secrets.example.json`.
+
+Private keys live outside the repo at machine-specific paths (Mac: `/Users/jacobfreund/kalshi-demo-key/`, WSL: `/home/jfreun1/kalshi-demo-private-key.pem`), referenced by absolute path from each machine's `secrets.json`. The pre-commit hook blocks staged content that looks like a credential (PEM blocks, UUID-valued `api_key`).
 
 ## Commits
 
