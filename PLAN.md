@@ -346,6 +346,41 @@
     types, and conformance tests pinning live demo behavior before any live
     switch on a subpenny market.
 
+36. [ ] **70 — max-hold forced exit (ND-HFTT study, docs/papers §6).** Our
+    one loss channel is z² drift while warehousing one-way inventory; their
+    91%-win maker capped it with a hard 30s holding-time limit — passive
+    exit first, forced taker exit at the deadline, taker fee accepted as a
+    bounded cost in place of unbounded drift. Add `max_hold_seconds` (0 =
+    off): when any lot's age exceeds it, exit the remainder as a taker
+    instead of resting at reservation forever. Complements item 64's unwind
+    pricing (which lowers the exit price but still waits for a counterparty
+    that one-way books never send). Tune against attribution: the flip is
+    right when drift saved exceeds taker fee + spread paid.
+
+37. [ ] **71 — evaluate crypto 15m series (KXBTC15M family) + external
+    reference feed.** ND-HFTT's venue: ~$170k notional per 15-min window,
+    ~100 book updates/s, zero maker fees on that series — production flow
+    orders of magnitude beyond what our demo scans admit. Prereqs our
+    scanner currently blocks: `min_days_to_close` excludes sub-day markets,
+    and rolling 15-min contracts need per-window ticker resolution (their
+    coordinator computes the next ticker from UTC time). The edge defense
+    there is an external leading reference (Coinbase spot leads Kalshi by
+    ~1–2s): cancel/exit when reference momentum crosses against the quote.
+    Caveats: spreads compressed to zero at times by May 2026 as makers
+    crowded in; taker fees still apply off that series; this is a
+    production-scale decision, not a demo experiment.
+
+38. [ ] **72 — validate the backtest fill model against captured tape.**
+    Our --backtest fills only on strict print-through — conservative by
+    design, honesty unmeasured. ND-HFTT matched trade prints to negative
+    top-of-book deltas within ±50ms and found 95.9% of negative top-deltas
+    are real trades; their sim fills proportional to quote share of the
+    level. We already capture both channels: run the same matching on our
+    corpus to measure our print-through under-fill, and adopt proportional
+    delta-consumption if the gap is material. Guards against the opposite
+    failure too — a fill model that flatters a config would quietly rig the
+    clearing-pricing verdict (task #4 rides on these replays).
+
 **Selection principle (Jacob, 2026-07-04): profitable on every market we
 CHOOSE, then scale.** Not every market can be made profitably — trending
 books, dead books, and 1c-spread deep books all bleed makers. Scaling (Gate
