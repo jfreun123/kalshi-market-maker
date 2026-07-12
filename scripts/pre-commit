@@ -7,6 +7,21 @@ set -euo pipefail
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 BUILD_DIR="$REPO_ROOT/build"
 
+# ---- secrets guard: block credential-looking content in any staged file ----
+SECRET_PATTERN='BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY|"api_key"[[:space:]]*:[[:space:]]*"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"'
+if git diff --cached --unified=0 | grep -E '^\+' | grep -qE "$SECRET_PATTERN"; then
+    echo "pre-commit: staged changes contain what looks like a credential" >&2
+    echo "(a PEM private key or a UUID-valued \"api_key\")." >&2
+    echo "Credentials belong in the gitignored secrets.json — never in git." >&2
+    exit 1
+fi
+for banned in secrets.json pnl_state.json; do
+    if git diff --cached --name-only | grep -qx "$banned"; then
+        echo "pre-commit: $banned is staged — it must never be committed." >&2
+        exit 1
+    fi
+done
+
 # Collect staged C++ files that still exist
 mapfile -t STAGED < <(git diff --cached --name-only --diff-filter=ACMR \
     | grep -E '\.(cpp|hpp)$' || true)

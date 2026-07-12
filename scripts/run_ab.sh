@@ -42,6 +42,8 @@ if len(tickers) < 4:
 set_a, set_b = [tickers[0], tickers[3]], [tickers[1], tickers[2]]
 
 base = json.load(open("config-demo.json"))
+if "secrets_path" in base:
+    base["secrets_path"] = os.path.abspath(base["secrets_path"])
 for leg, tick_set, clearing in (
     ("A", set_a, swap),
     ("B", set_b, not swap),
