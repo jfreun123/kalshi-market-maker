@@ -282,8 +282,26 @@ int main(int argc, char *argv[]) {
       return 1;
     }
 
-    kalshi::WebSocketClient ws_client{
-        auth, std::make_unique<kalshi::IxWebSocket>(), app_config.ws_url};
+    std::ofstream session_frames;
+    std::unique_ptr<kalshi::IWebSocket> ws_transport =
+        std::make_unique<kalshi::IxWebSocket>();
+    if (app_config.record_sessions) {
+      const auto frames_path =
+          std::filesystem::path{app_config.log_dir} / "session_frames.jsonl";
+      session_frames.open(frames_path, std::ios::app);
+      if (session_frames) {
+        ws_transport = std::make_unique<kalshi::CapturingWebSocket>(
+            std::move(ws_transport), session_frames);
+        log->info("session recording -> {} (backtest corpus; disable with "
+                  "record_sessions=false)",
+                  frames_path.string());
+      } else {
+        log->warn("session recording disabled — cannot open {}",
+                  frames_path.string());
+      }
+    }
+    kalshi::WebSocketClient ws_client{auth, std::move(ws_transport),
+                                      app_config.ws_url};
 
     kalshi::OrderManager order_mgr{rest};
     kalshi::RiskManager risk_mgr{app_config.risk};

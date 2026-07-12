@@ -20,6 +20,7 @@ struct AppConfig {
   std::string log_dir{"logs"};
   std::string pnl_state_path{"pnl_state.json"};
   bool account_wide_janitorial{true};
+  bool record_sessions{true};
   std::vector<std::string> target_tickers;
   QuoterConfig quoter;
   RiskLimits risk;
