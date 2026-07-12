@@ -324,11 +324,14 @@
     <2 traded candles in-window = drop when the gate is on. Enable ~1.0–1.5
     in config-demo alongside the flow gate.*
 
-34. [ ] **68 — K/z² attribution split.** Add to `pnl_attribution.py`: per
+34. [x] **68 — K/z² attribution split.** Add to `pnl_attribution.py`: per
     market per session, report harvested variation (K̂) vs net move (ẑ²)
     from the quote stream next to entry/drift/exit — every session becomes a
     live test of the (K − z²)/2 identity, and the number tells us whether a
     loss was "bad market selection" (z² blowup) vs "bad pricing" (thin K).
+    *Shipped 2026-07-11. First datapoint: the one green session (07-10 leg A)
+    ran on the only books with positive ceilings — TORRE (K−z²)/2 = +2.0c,
+    SUPE +0.5c. The identity called our winner.*
 
 35. [ ] **69 — per-market precision audit (Jacob, 2026-07-11: "I *think*
     markets have different precisions. I need my quantity type to take this
