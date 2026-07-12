@@ -256,14 +256,19 @@ TEST_F(RestClientTest, GetMarketsFollowsCursorToFetchAllPages) {
   EXPECT_EQ(markets[1].ticker, "KXETH");
 }
 
-TEST_F(RestClientTest, GetMarketsThrowsOnHttpError) {
+TEST_F(RestClientTest, GetMarketsThrowsAfterPersistentHttpErrors) {
   auto transport = std::make_unique<FakeTransport>();
   FakeTransport *const transport_raw = transport.get();
-  transport_raw->enqueue(
-      {kHttpInternalError, R"({"error":"internal server error"})"});
+  constexpr int kPageAttempts = 3;
+  for (int attempt = 0; attempt < kPageAttempts; ++attempt) {
+    transport_raw->enqueue(
+        {kHttpInternalError, R"({"error":"internal server error"})"});
+  }
   auto client = make_client(std::move(transport));
 
   EXPECT_THROW(client.get_markets(), std::runtime_error);
+  EXPECT_EQ(transport_raw->recorded_requests().size(), 3U)
+      << "persistent failure exhausts the per-page retry budget, then throws";
 }
 
 // ---- get_positions ----
@@ -738,6 +743,25 @@ TEST_F(RestClientTest, GetFillsPassesMinTsAndFollowsCursor) {
   EXPECT_NE(
       transport_raw->recorded_requests().at(1).url.find("cursor=next-page"),
       std::string::npos);
+}
+
+TEST_F(RestClientTest, GetMarketsRetriesTransientPageFailure) {
+  auto transport = std::make_unique<FakeTransport>();
+  FakeTransport *const transport_raw = transport.get();
+  transport_raw->enqueue(
+      {kHttpOk, R"({"cursor":"next","markets":[)"
+                R"({"ticker":"M1","close_time":"2026-09-01T00:00:00Z"}]})"});
+  transport_raw->enqueue_failure();
+  transport_raw->enqueue(
+      {kHttpOk, R"({"cursor":"","markets":[)"
+                R"({"ticker":"M2","close_time":"2026-09-01T00:00:00Z"}]})"});
+  auto client = make_client(std::move(transport));
+
+  const auto markets = client.get_markets();
+
+  ASSERT_EQ(markets.size(), 2U)
+      << "one transient page failure must not kill a 50-page crawl";
+  EXPECT_EQ(transport_raw->recorded_requests().size(), 3U);
 }
 
 TEST_F(RestClientTest, GetRecentTradesParsesNewestFirstWithPrices) {

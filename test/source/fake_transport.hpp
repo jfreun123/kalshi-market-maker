@@ -4,6 +4,8 @@
 
 #include <map>
 #include <queue>
+#include <set>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -19,6 +21,10 @@ public:
     std::map<std::string, std::string> headers;
     std::string body;
   };
+
+  // The next consume() throws — a transient transport failure (connection
+  // reset mid-crawl). Push in sequence with enqueue()d responses.
+  void enqueue_failure() { failure_positions_.insert(consumed_ + queued()); }
 
   void enqueue(kalshi::HttpResponse response) {
     queued_responses_.push(std::move(response));
@@ -56,6 +62,12 @@ private:
           const std::map<std::string, std::string> &headers, std::string body) {
     recorded_requests_.push_back(
         {std::move(method), std::string(url), headers, std::move(body)});
+    if (failure_positions_.contains(consumed_)) {
+      failure_positions_.erase(consumed_);
+      ++consumed_;
+      throw std::runtime_error{"fake transport: transient failure"};
+    }
+    ++consumed_;
     if (queued_responses_.empty()) {
       return {200, "{}"};
     }
@@ -64,6 +76,10 @@ private:
     return response;
   }
 
+  [[nodiscard]] std::size_t queued() const { return queued_responses_.size(); }
+
+  std::size_t consumed_{0};
+  std::set<std::size_t> failure_positions_;
   std::queue<kalshi::HttpResponse> queued_responses_;
   std::vector<RecordedRequest> recorded_requests_;
 };
