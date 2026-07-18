@@ -1,4 +1,4 @@
-#include "config.hpp"
+#include "app/config.hpp"
 
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>

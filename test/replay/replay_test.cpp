@@ -1,7 +1,7 @@
-#include "auth.hpp"
+#include "engine/orderbook.hpp"
 #include "fake_websocket.hpp"
-#include "orderbook.hpp"
-#include "websocket_client.hpp"
+#include "net/auth.hpp"
+#include "net/websocket_client.hpp"
 
 #include <gtest/gtest.h>
 #include <openssl/bio.h>

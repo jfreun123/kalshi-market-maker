@@ -1,5 +1,5 @@
 #include "fake_websocket.hpp"
-#include "websocket_client.hpp"
+#include "net/websocket_client.hpp"
 
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>

@@ -1,9 +1,9 @@
-#include "fair_value.hpp"
-#include "order_manager.hpp"
-#include "orderbook.hpp"
-#include "quoter.hpp"
-#include "risk_manager.hpp"
-#include "types.hpp"
+#include "core/types.hpp"
+#include "engine/fair_value.hpp"
+#include "engine/orderbook.hpp"
+#include "engine/risk_manager.hpp"
+#include "exchange/order_manager.hpp"
+#include "strategy/quoter.hpp"
 
 #include <benchmark/benchmark.h>
 
@@ -118,7 +118,6 @@ static void BM_FairValueEstimateWithInventory(benchmark::State &state) {
 BENCHMARK(BM_FairValueEstimateWithInventory);
 // NOLINTEND(cppcoreguidelines-avoid-non-const-global-variables,cppcoreguidelines-owning-memory)
 
-
 // ---- Quoter benchmarks ----
 
 namespace {
@@ -142,8 +141,8 @@ public:
     return open_orders_.erase(std::string{order_id}) > 0;
   }
   void cancel_all(std::string_view) override { open_orders_.clear(); }
-  std::optional<std::string> amend(std::string_view order_id,
-                                   std::string_view, kalshi::Side, int,
+  std::optional<std::string> amend(std::string_view order_id, std::string_view,
+                                   kalshi::Side, int,
                                    kalshi::Quantity) override {
     return std::string{order_id};
   }

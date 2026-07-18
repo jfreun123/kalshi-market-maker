@@ -1,5 +1,5 @@
+#include "exchange/ticker_scanner.hpp"
 #include "fake_transport.hpp"
-#include "ticker_scanner.hpp"
 
 #include <gtest/gtest.h>
 #include <openssl/bio.h>

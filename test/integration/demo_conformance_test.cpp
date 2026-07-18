@@ -1,11 +1,11 @@
-#include "auth.hpp"
-#include "config.hpp"
-#include "http_transport.hpp"
-#include "orderbook.hpp"
-#include "rest_client.hpp"
-#include "ticker_scanner.hpp"
-#include "types.hpp"
-#include "websocket_client.hpp"
+#include "app/config.hpp"
+#include "core/types.hpp"
+#include "engine/orderbook.hpp"
+#include "exchange/rest_client.hpp"
+#include "exchange/ticker_scanner.hpp"
+#include "net/auth.hpp"
+#include "net/http_transport.hpp"
+#include "net/websocket_client.hpp"
 
 #include <gtest/gtest.h>
 

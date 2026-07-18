@@ -3,14 +3,14 @@
 // (quoter_test.cpp: pricing/skew/shading; quoter_reprice_test.cpp:
 // hysteresis/fade/EMA behavior).
 
-#include "analytics.hpp"
+#include "engine/analytics.hpp"
+#include "engine/flow_imbalance.hpp"
+#include "engine/orderbook.hpp"
+#include "engine/risk_manager.hpp"
+#include "exchange/order_manager.hpp"
+#include "exchange/rest_client.hpp"
 #include "fake_transport.hpp"
-#include "flow_imbalance.hpp"
-#include "order_manager.hpp"
-#include "orderbook.hpp"
-#include "quoter.hpp"
-#include "rest_client.hpp"
-#include "risk_manager.hpp"
+#include "strategy/quoter.hpp"
 
 #include <gtest/gtest.h>
 

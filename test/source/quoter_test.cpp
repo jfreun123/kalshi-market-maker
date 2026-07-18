@@ -1,8 +1,8 @@
 #include "quoter_test_util.hpp"
 
-#include "fair_value.hpp"
-#include "pricing_model.hpp"
-#include "trade_tape.hpp"
+#include "engine/fair_value.hpp"
+#include "engine/pricing_model.hpp"
+#include "engine/trade_tape.hpp"
 
 // ---- Tests ----
 

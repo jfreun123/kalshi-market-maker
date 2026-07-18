@@ -7,9 +7,9 @@
 // path (JSON decode → type dispatch → callback). Any crash or ASAN/UBSAN
 // finding is a bug.
 
-#include "auth.hpp"
 #include "fake_websocket.hpp"
-#include "websocket_client.hpp"
+#include "net/auth.hpp"
+#include "net/websocket_client.hpp"
 
 #include <openssl/bio.h>
 #include <openssl/buffer.h>

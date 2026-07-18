@@ -2,7 +2,7 @@
 // IStrategy fake that records every call, for testing the session-to-strategy
 // seam without any quoting logic.
 
-#include "strategy.hpp"
+#include "engine/strategy.hpp"
 
 #include <string>
 #include <string_view>

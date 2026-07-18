@@ -1,5 +1,5 @@
+#include "exchange/rest_client.hpp"
 #include "fake_transport.hpp"
-#include "rest_client.hpp"
 
 #include <gtest/gtest.h>
 #include <openssl/bio.h>

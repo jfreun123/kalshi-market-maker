@@ -1,4 +1,4 @@
-#include "auth.hpp"
+#include "net/auth.hpp"
 
 #include <gtest/gtest.h>
 #include <openssl/bio.h>

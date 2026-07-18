@@ -1,13 +1,13 @@
-#include "analytics.hpp"
+#include "core/types.hpp"
+#include "engine/analytics.hpp"
+#include "engine/flow_imbalance.hpp"
+#include "engine/risk_manager.hpp"
+#include "engine/trade_tape.hpp"
+#include "engine/trading_session.hpp"
+#include "exchange/order_manager.hpp"
+#include "exchange/rest_client.hpp"
 #include "fake_transport.hpp"
-#include "flow_imbalance.hpp"
-#include "order_manager.hpp"
-#include "quoter.hpp"
-#include "rest_client.hpp"
-#include "risk_manager.hpp"
-#include "trade_tape.hpp"
-#include "trading_session.hpp"
-#include "types.hpp"
+#include "strategy/quoter.hpp"
 
 #include <gtest/gtest.h>
 

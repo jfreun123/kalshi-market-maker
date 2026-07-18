@@ -10,15 +10,15 @@
 // mismatch between the WS schema and the parser surfaces here as a broken
 // orderbook or a missing fill — directly exercising the UAT field-shape check.
 
-#include "auth.hpp"
+#include "engine/risk_manager.hpp"
+#include "engine/trading_session.hpp"
+#include "exchange/order_manager.hpp"
+#include "exchange/rest_client.hpp"
 #include "fake_websocket.hpp"
-#include "order_manager.hpp"
-#include "paper_transport.hpp"
-#include "quoter.hpp"
-#include "rest_client.hpp"
-#include "risk_manager.hpp"
-#include "trading_session.hpp"
-#include "websocket_client.hpp"
+#include "net/auth.hpp"
+#include "net/paper_transport.hpp"
+#include "net/websocket_client.hpp"
+#include "strategy/quoter.hpp"
 
 #include <gtest/gtest.h>
 #include <openssl/bio.h>
