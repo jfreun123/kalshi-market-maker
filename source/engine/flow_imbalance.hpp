@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/types.hpp"
+#include "engine/flow_imbalance_config.hpp"
 
 #include <chrono>
 #include <cstdint>
@@ -12,17 +13,6 @@
 #include <utility>
 
 namespace kalshi {
-
-struct FlowImbalanceConfig {
-  static constexpr int kDefaultWindowSeconds = 300; // 5-minute rolling window
-  static constexpr double kDefaultRatioThreshold =
-      2.0;                                         // one side ≥ 2× the other
-  static constexpr int kDefaultMinFlowVolume = 20; // ignore thin/noisy samples
-
-  int window_seconds = kDefaultWindowSeconds;
-  double imbalance_ratio_threshold = kDefaultRatioThreshold;
-  int min_flow_volume = kDefaultMinFlowVolume;
-};
 
 // Tracks the bot's recent fill volume per side, per ticker, over a rolling time
 // window. Heavy one-sided flow — the bot accumulating mostly YES or mostly NO —
