@@ -8,8 +8,8 @@ namespace kalshi {
 
 namespace {
 
-auto find_level(std::vector<Level> &levels, int price_cents)
-    -> std::vector<Level>::iterator {
+auto find_level(std::vector<Level> &levels,
+                int price_cents) -> std::vector<Level>::iterator {
   auto level_pos = std::lower_bound(
       levels.begin(), levels.end(), Level{price_cents, Quantity{}},
       [](const Level &level, const Level &target) {
@@ -21,8 +21,8 @@ auto find_level(std::vector<Level> &levels, int price_cents)
   return levels.end();
 }
 
-auto insertion_point(std::vector<Level> &levels, int price_cents)
-    -> std::vector<Level>::iterator {
+auto insertion_point(std::vector<Level> &levels,
+                     int price_cents) -> std::vector<Level>::iterator {
   return std::lower_bound(levels.begin(), levels.end(),
                           Level{price_cents, Quantity{}},
                           [](const Level &level, const Level &target) {

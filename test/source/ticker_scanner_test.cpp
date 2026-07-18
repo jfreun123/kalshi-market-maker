@@ -870,8 +870,12 @@ TEST_F(TickerScannerTest, RevertingTapePassesReversionGate) {
   transport->enqueue(
       {kHttpOk, make_markets_response({kMarketGoodA, kMarketGoodB})});
   transport->enqueue({kHttpOk, R"({"incentive_programs":[],"cursor":""})"});
-  transport->enqueue({kHttpOk, R"({"candlesticks":[{"end_period_ts":1,"price":{"close_dollars":"0.5000"}},{"end_period_ts":2,"price":{"close_dollars":"0.5300"}},{"end_period_ts":3,"price":{"close_dollars":"0.5000"}},{"end_period_ts":4,"price":{"close_dollars":"0.5300"}}]})"});
-  transport->enqueue({kHttpOk, R"({"candlesticks":[{"end_period_ts":1,"price":{"close_dollars":"0.5000"}},{"end_period_ts":2,"price":{"close_dollars":"0.5300"}},{"end_period_ts":3,"price":{"close_dollars":"0.5000"}},{"end_period_ts":4,"price":{"close_dollars":"0.5300"}}]})"});
+  transport->enqueue(
+      {kHttpOk,
+       R"({"candlesticks":[{"end_period_ts":1,"price":{"close_dollars":"0.5000"}},{"end_period_ts":2,"price":{"close_dollars":"0.5300"}},{"end_period_ts":3,"price":{"close_dollars":"0.5000"}},{"end_period_ts":4,"price":{"close_dollars":"0.5300"}}]})"});
+  transport->enqueue(
+      {kHttpOk,
+       R"({"candlesticks":[{"end_period_ts":1,"price":{"close_dollars":"0.5000"}},{"end_period_ts":2,"price":{"close_dollars":"0.5300"}},{"end_period_ts":3,"price":{"close_dollars":"0.5000"}},{"end_period_ts":4,"price":{"close_dollars":"0.5300"}}]})"});
 
   kalshi::ScannerConfig reversion_only;
   reversion_only.max_stale_trade_minutes = 0;
@@ -891,8 +895,12 @@ TEST_F(TickerScannerTest, TrendingTapeDroppedByReversionGate) {
   transport->enqueue(
       {kHttpOk, make_markets_response({kMarketGoodA, kMarketGoodB})});
   transport->enqueue({kHttpOk, R"({"incentive_programs":[],"cursor":""})"});
-  transport->enqueue({kHttpOk, R"({"candlesticks":[{"end_period_ts":1,"price":{"close_dollars":"0.5000"}},{"end_period_ts":2,"price":{"close_dollars":"0.5300"}},{"end_period_ts":3,"price":{"close_dollars":"0.5600"}},{"end_period_ts":4,"price":{"close_dollars":"0.5900"}}]})"});
-  transport->enqueue({kHttpOk, R"({"candlesticks":[{"end_period_ts":1,"price":{"close_dollars":"0.5000"}},{"end_period_ts":2,"price":{"close_dollars":"0.5300"}},{"end_period_ts":3,"price":{"close_dollars":"0.5600"}},{"end_period_ts":4,"price":{"close_dollars":"0.5900"}}]})"});
+  transport->enqueue(
+      {kHttpOk,
+       R"({"candlesticks":[{"end_period_ts":1,"price":{"close_dollars":"0.5000"}},{"end_period_ts":2,"price":{"close_dollars":"0.5300"}},{"end_period_ts":3,"price":{"close_dollars":"0.5600"}},{"end_period_ts":4,"price":{"close_dollars":"0.5900"}}]})"});
+  transport->enqueue(
+      {kHttpOk,
+       R"({"candlesticks":[{"end_period_ts":1,"price":{"close_dollars":"0.5000"}},{"end_period_ts":2,"price":{"close_dollars":"0.5300"}},{"end_period_ts":3,"price":{"close_dollars":"0.5600"}},{"end_period_ts":4,"price":{"close_dollars":"0.5900"}}]})"});
 
   kalshi::ScannerConfig reversion_only;
   reversion_only.max_stale_trade_minutes = 0;

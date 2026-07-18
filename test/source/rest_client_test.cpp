@@ -820,15 +820,13 @@ TEST_F(RestClientTest, GetCandlesticksParsesClosesAndSkipsNulls) {
   auto transport = std::make_unique<FakeTransport>();
   FakeTransport *const transport_raw = transport.get();
   transport_raw->enqueue(
-      {kHttpOk,
-       R"({"candlesticks":[)"
-       R"({"end_period_ts":1,"price":{"close_dollars":"0.5000"}},)"
-       R"({"end_period_ts":2,"price":{}},)"
-       R"({"end_period_ts":3,"price":{"close_dollars":"0.5300"}}]})"});
+      {kHttpOk, R"({"candlesticks":[)"
+                R"({"end_period_ts":1,"price":{"close_dollars":"0.5000"}},)"
+                R"({"end_period_ts":2,"price":{}},)"
+                R"({"end_period_ts":3,"price":{"close_dollars":"0.5300"}}]})"});
   auto client = make_client(std::move(transport));
 
-  const auto candles =
-      client.get_candlesticks("KXT-26SEP-A", 1'000, 2'000);
+  const auto candles = client.get_candlesticks("KXT-26SEP-A", 1'000, 2'000);
 
   ASSERT_TRUE(candles.has_value());
   ASSERT_EQ(candles->size(), 3U);
@@ -847,8 +845,8 @@ TEST_F(RestClientTest, GetCandlesticksNulloptOnHttpError) {
   transport->enqueue({500, "oops"});
   auto client = make_client(std::move(transport));
 
-  EXPECT_FALSE(client.get_candlesticks("KXT-26SEP-A", 1'000, 2'000)
-                   .has_value());
+  EXPECT_FALSE(
+      client.get_candlesticks("KXT-26SEP-A", 1'000, 2'000).has_value());
 }
 
 TEST_F(RestClientTest, GetRecentTradesEmptyVectorWhenNeverTraded) {
