@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Candle-tier fair-value backtest on production data (BETTER_PRICING.md
+"""Candle-tier fair-value backtest on production data (docs/BETTER_PRICING.md
 Phase 3, PLAN item 66).
 
 Usage:

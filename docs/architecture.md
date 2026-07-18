@@ -84,6 +84,6 @@ sequenceDiagram
   channel; `TradeTape` keeps a rolling per-market window of prints (own fills
   excluded by trade_id) exposing time-decayed VWAP, print count, and the
   minority-taker-side ratio — the inputs for clearing-price fair value and
-  two-sided-flow admission ([BETTER_PRICING.md](../BETTER_PRICING.md)).
+  two-sided-flow admission ([BETTER_PRICING.md](BETTER_PRICING.md)).
 - **Incentive-aware selection** — the scanner joins active Liquidity Incentive
   pools into ranking, biasing toward markets that pay for resting size.

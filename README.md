@@ -64,11 +64,17 @@ ctest --preset=dev
 
 ## Configuration
 
-Copy `config.example.json` (it shows every knob at its default) and fill in
-credentials:
+Config is split so strategy parameters can be versioned without credentials:
+
+- `config.json` — **committed**, credential-free. Strategy/risk/scanner
+  parameters only; it points at the secrets file via `"secrets_path"`
+  (relative paths resolve against the config file's directory).
+- `secrets.json` — **gitignored**. Holds `api_key`, `private_key_path`, and
+  the environment URLs (`base_url`/`ws_url`), which take precedence over
+  anything inline:
 
 ```bash
-cp config.example.json config.json
+cp secrets.example.json secrets.json   # fill in api_key + private_key_path
 ```
 
 - `target_tickers` — normally leave **empty**: at startup the session scans all
@@ -88,8 +94,11 @@ cp config.example.json config.json
   penny-wide book or a determined (expired-event) market never gets adopted.
   Liquidity gates are hard requirements — score only ranks markets that pass.
 
-Config files with real credentials (`config.json`, `config-demo.json`) are
-gitignored. Secrets policy: see `CLAUDE.md`.
+`secrets.json` and `pnl_state.json` are gitignored, and the pre-commit hook
+blocks staged content that looks like a credential. Private keys live outside
+the repo at machine-specific paths. Secrets policy: see `CLAUDE.md`. The run
+scripts (`run_demo.sh` etc.) expect a local `config-demo.json` — typically a
+copy of `config.json` with machine-local overrides.
 
 Generate an RSA key pair for API authentication:
 
@@ -121,10 +130,10 @@ bash scripts/run_demo.sh --clean 5
 ./build/source/kalshi_mm --flatten config.json
 
 # Record a live session for replay (no orders; Ctrl-C to stop)
-./build/source/kalshi_mm --capture capture/demo-run config-demo.json
+./build/source/kalshi_mm --capture capture/demo-run config.json
 ```
 
-Demo environment: point `base_url` / `ws_url` at
+Demo environment: point `base_url` / `ws_url` in `secrets.json` at
 `https://demo-api.kalshi.co/trade-api/v2` and
 `wss://demo-api.kalshi.co/trade-api/ws/v2` (see `docs/KALSHI_API_REFERENCE.md`
 for all hosts). Production and demo credentials are not interchangeable.
@@ -144,8 +153,9 @@ Each session writes `logs/analytics_<date>.jsonl` (quote decisions, fills with
 fees and inventory, HTTP RTTs). Offline:
 
 ```bash
-python3 scripts/analyze_fills.py logs/analytics_*.jsonl     # markout @30s/@5min, effective spread
-python3 scripts/pnl_attribution.py logs/analytics_*.jsonl   # entry_edge / drift / exit_cost + picked-off detector
+python3 scripts/analyze_fills.py logs/analytics_*.jsonl     # markout @500ms–@5min, signed edge, edge by inventory level
+python3 scripts/pnl_attribution.py logs/analytics_*.jsonl   # entry_edge / drift / exit_cost + picked-off detector + K/z² split
+python3 scripts/settlement_join.py logs/analytics_*.jsonl   # ground-truth PnL at settlement + fv-vs-mid Brier + calibration
 python3 scripts/latency_report.py logs/analytics_*.jsonl    # p50/p95/max RTT per endpoint class
 ```
 

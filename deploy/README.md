@@ -49,10 +49,12 @@ git clone git@github.com:jfreun123/kalshi-market-maker.git
 cd kalshi-market-maker
 bash deploy/setup.sh
 
-# Configure (NEVER commit these):
-cp config.example.json config.json
-#   - edit base_url/ws_url (demo vs prod), add your RSA key path
+# Configure (secrets.json is gitignored — NEVER commit it):
+cp secrets.example.json secrets.json
+#   - edit base_url/ws_url (demo vs prod), api_key, private_key_path
 #   - copy your .pem onto the box, e.g. ~/kalshi-private-key.pem
+#   (the committed config.json holds strategy params and points at
+#    secrets.json via secrets_path)
 
 # Smoke test:
 ./build/source/kalshi_mm --paper config.json
