@@ -250,3 +250,90 @@ TEST(PortfolioTest, ReconcileIgnoresZeroExchangePositions) {
   EXPECT_TRUE(result.in_sync);
   EXPECT_TRUE(result.diffs.empty());
 }
+
+namespace {
+constexpr kalshi::Quantity kLeftoverShort =
+    kalshi::Quantity::from_contracts(-10);
+constexpr kalshi::Quantity kLeftoverPartial =
+    kalshi::Quantity::from_contracts(-7);
+} // namespace
+
+TEST(PortfolioTest, ReconcileBaselinedLeftoverInUntradedMarketIsNotDrift) {
+  FakeOrderManager order_mgr;
+
+  const std::vector<kalshi::MarketPosition> exchange = {
+      exchange_pos("KXLEFTOVER-26-T1", kLeftoverShort)};
+  const std::vector<kalshi::MarketPosition> baseline = {
+      exchange_pos("KXLEFTOVER-26-T1", kLeftoverShort)};
+
+  const auto result = kalshi::reconcile(order_mgr, {}, exchange, baseline);
+
+  EXPECT_TRUE(result.in_sync);
+  EXPECT_TRUE(result.diffs.empty());
+}
+
+TEST(PortfolioTest, ReconcileDetectsChangeFromBaselinedLeftover) {
+  FakeOrderManager order_mgr;
+
+  const std::vector<kalshi::MarketPosition> exchange = {
+      exchange_pos("KXLEFTOVER-26-T1", kLeftoverPartial)};
+  const std::vector<kalshi::MarketPosition> baseline = {
+      exchange_pos("KXLEFTOVER-26-T1", kLeftoverShort)};
+
+  const auto result = kalshi::reconcile(order_mgr, {}, exchange, baseline);
+
+  EXPECT_FALSE(result.in_sync);
+  ASSERT_EQ(result.diffs.size(), 1U);
+  EXPECT_EQ(result.diffs.at(0).ticker, "KXLEFTOVER-26-T1");
+  EXPECT_EQ(result.diffs.at(0).exchange_position, kLeftoverPartial);
+  EXPECT_EQ(result.diffs.at(0).baseline_position, kLeftoverShort);
+}
+
+TEST(PortfolioTest, ReconcileVanishedBaselinePositionIsDrift) {
+  FakeOrderManager order_mgr;
+
+  const std::vector<kalshi::MarketPosition> baseline = {
+      exchange_pos("KXSETTLED-26-T1", kLeftoverShort)};
+
+  const auto result = kalshi::reconcile(order_mgr, {}, {}, baseline);
+
+  EXPECT_FALSE(result.in_sync);
+  ASSERT_EQ(result.diffs.size(), 1U);
+  EXPECT_EQ(result.diffs.at(0).ticker, "KXSETTLED-26-T1");
+  EXPECT_EQ(result.diffs.at(0).exchange_position, kalshi::Quantity{});
+}
+
+TEST(PortfolioTest, ReconcileBaselineDoesNotExcuseTradedTicker) {
+  FakeOrderManager order_mgr;
+
+  const std::vector<kalshi::MarketPosition> exchange = {
+      exchange_pos("KXTRADED-26-T1", kLeftoverShort)};
+  const std::vector<kalshi::MarketPosition> baseline = {
+      exchange_pos("KXTRADED-26-T1", kLeftoverShort)};
+
+  const auto result =
+      kalshi::reconcile(order_mgr, {"KXTRADED-26-T1"}, exchange, baseline);
+
+  EXPECT_FALSE(result.in_sync);
+  ASSERT_EQ(result.diffs.size(), 1U);
+  EXPECT_EQ(result.diffs.at(0).ticker, "KXTRADED-26-T1");
+  EXPECT_EQ(result.diffs.at(0).local_position, kalshi::Quantity{});
+  EXPECT_EQ(result.diffs.at(0).exchange_position, kLeftoverShort);
+}
+
+TEST(PortfolioTest, ReconcileTradedTickerFillsMatchWithUnrelatedBaseline) {
+  FakeOrderManager order_mgr;
+  order_mgr.positions["KXTRADED-26-T1"] = kLocalYes;
+
+  const std::vector<kalshi::MarketPosition> exchange = {
+      exchange_pos("KXTRADED-26-T1", kLocalYes),
+      exchange_pos("KXLEFTOVER-26-T1", kLeftoverShort)};
+  const std::vector<kalshi::MarketPosition> baseline = {
+      exchange_pos("KXLEFTOVER-26-T1", kLeftoverShort)};
+
+  const auto result =
+      kalshi::reconcile(order_mgr, {"KXTRADED-26-T1"}, exchange, baseline);
+
+  EXPECT_TRUE(result.in_sync);
+  EXPECT_TRUE(result.diffs.empty());
+}
