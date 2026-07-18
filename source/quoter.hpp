@@ -4,6 +4,7 @@
 #include "order_manager_iface.hpp"
 #include "orderbook.hpp"
 #include "risk_manager.hpp"
+#include "strategy.hpp"
 
 #include <chrono>
 #include <functional>
@@ -116,7 +117,7 @@ struct QuoterConfig {
 // orderbook mid, a half-spread, and inventory skew. An order is replaced only
 // when its price drifts by more than reprice_threshold_cents AND it has rested
 // at least min_rest_ms — both guards exist to avoid churn oscillators.
-class Quoter {
+class Quoter : public IStrategy {
 public:
   using Clock = std::function<std::chrono::steady_clock::time_point()>;
 
@@ -131,12 +132,12 @@ public:
          IOrderManager &order_mgr, RiskManager &risk_mgr,
          const FlowImbalanceGuard *flow_guard = nullptr, Clock clock = {});
 
-  void update(std::string_view ticker, const LocalOrderbook &book);
+  void update(std::string_view ticker, const LocalOrderbook &book) override;
 
   // Wind-down mode (item 56): quote only the side that reduces inventory —
   // exit as a maker instead of paying the taker flatten at session end. The
   // accumulating side is cancelled; a flat market places nothing.
-  void set_reduce_only(bool reduce_only);
+  void set_reduce_only(bool reduce_only) override;
 
   // Optional analytics tap: when set, every update() emits a quote-decision
   // event (PLAN item 31). Must outlive the Quoter; nullptr disables.
@@ -148,17 +149,18 @@ public:
   // tracked own-quote ids would otherwise be stale, so it would try to cancel
   // dead ids
   // and never re-quote once the feed recovers.
-  void reset_quotes();
+  void reset_quotes() override;
 
   // Forget a single tracked quote whose order left the book (e.g. it fully
   // filled). Without this the quoter believes the side is still quoted and
   // never re-places it — the side goes dark after its first complete fill.
-  void forget_order(std::string_view ticker, std::string_view order_id);
+  void forget_order(std::string_view ticker,
+                    std::string_view order_id) override;
 
   // Forget every tracked quote on one market after its resting orders were
   // cancelled out-of-band (e.g. the feed-liveness gate): the quoter re-places
   // both sides on the market's next update instead of tracking dead ids.
-  void forget_ticker(std::string_view ticker);
+  void forget_ticker(std::string_view ticker) override;
 
 private:
   // Our own resting quote pair on one market: which orders are ours and the

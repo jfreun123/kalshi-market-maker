@@ -3,8 +3,8 @@
 #include "order_manager_iface.hpp"
 #include "orderbook.hpp"
 #include "portfolio.hpp"
-#include "quoter.hpp"
 #include "risk_manager.hpp"
+#include "strategy.hpp"
 #include "types.hpp"
 
 #include <chrono>
@@ -17,6 +17,8 @@
 
 namespace kalshi {
 
+class AnalyticsLogger;
+class FlowImbalanceGuard;
 class TradeTape;
 
 // Owns the domain reactions of the market-making loop: live orderbook state and
@@ -47,7 +49,7 @@ public:
   // clock defaults to steady_clock::now; injected in tests to drive cooldowns.
   TradingSession(
       std::vector<std::string> tickers, IOrderManager &order_mgr,
-      RiskManager &risk_mgr, Quoter &quoter,
+      RiskManager &risk_mgr, IStrategy &strategy,
       FlowImbalanceGuard *flow_guard = nullptr, Clock clock = {},
       std::chrono::milliseconds error_cooldown = kDefaultErrorCooldown);
 
@@ -157,7 +159,7 @@ private:
   std::vector<std::string> tickers_;
   IOrderManager &order_mgr_;
   RiskManager &risk_mgr_;
-  Quoter &quoter_;
+  IStrategy &strategy_;
   FlowImbalanceGuard *flow_guard_{nullptr};
   AnalyticsLogger *analytics_{nullptr};
   TradeTape *trade_tape_{nullptr};
