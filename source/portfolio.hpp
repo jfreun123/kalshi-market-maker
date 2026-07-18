@@ -48,6 +48,7 @@ struct PositionDiff {
   std::string ticker;
   Quantity local_position{};
   Quantity exchange_position{};
+  Quantity baseline_position{};
 };
 
 // Result of reconciling local positions against the exchange's authoritative
@@ -59,12 +60,18 @@ struct Reconciliation {
 
 // Compares local net positions (from order_mgr, over the tracked ticker
 // universe) against the exchange's positions. Checks the union of the tracked
-// tickers and any ticker the exchange reports a non-zero position in (catching
-// positions we don't know about). Exchange entries with position 0 are ignored.
+// tickers and any ticker the exchange or baseline reports a non-zero position
+// in (catching positions we don't know about). Exchange entries with position
+// 0 are ignored. baseline_positions are pre-session leftovers (e.g. from
+// another machine on the same account): outside the tracked universe the
+// expected exchange position is baseline + local, so an unchanged leftover is
+// not drift but any movement in it is. Inside the tracked universe the
+// baseline is ignored — a traded ticker must be fully explained by our fills.
 [[nodiscard]] Reconciliation
 reconcile(const IOrderManager &order_mgr,
           const std::vector<std::string> &tickers,
-          const std::vector<MarketPosition> &exchange_positions);
+          const std::vector<MarketPosition> &exchange_positions,
+          const std::vector<MarketPosition> &baseline_positions = {});
 
 // Pure read-model. Aggregates positions, realized and unrealized PnL, and
 // capital at risk from an IOrderManager across a supplied set of tickers,

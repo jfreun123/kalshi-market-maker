@@ -26,11 +26,11 @@ namespace kalshi {
 int run_scan_mode(RestClient &rest, const ScannerConfig &scanner_config,
                   std::shared_ptr<spdlog::logger> &log);
 
-bool reconcile_against_exchange(RestClient &rest,
-                                const IOrderManager &order_mgr,
-                                const std::vector<std::string> &tickers,
-                                RiskManager *risk_mgr,
-                                std::shared_ptr<spdlog::logger> &log);
+bool reconcile_against_exchange(
+    RestClient &rest, const IOrderManager &order_mgr,
+    const std::vector<std::string> &tickers, RiskManager *risk_mgr,
+    std::shared_ptr<spdlog::logger> &log,
+    const std::vector<MarketPosition> &baseline = {});
 
 int run_reconcile_mode(RestClient &rest,
                        const std::vector<std::string> &tickers,

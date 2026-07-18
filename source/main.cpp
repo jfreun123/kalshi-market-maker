@@ -368,6 +368,24 @@ int main(int argc, char *argv[]) {
       }
     }
 
+    std::vector<kalshi::MarketPosition> reconcile_baseline;
+    if (paper_ptr == nullptr) {
+      try {
+        reconcile_baseline = rest.get_positions();
+        for (const auto &position : reconcile_baseline) {
+          if (!position.position.is_zero()) {
+            log->warn("startup baseline position ticker={} net={} — excused "
+                      "from reconcile drift unless it moves",
+                      position.ticker, position.position.to_fp_string());
+          }
+        }
+      } catch (const std::exception &ex) {
+        log->warn("startup: could not fetch baseline positions ({}); "
+                  "pre-existing positions will reconcile as drift",
+                  ex.what());
+      }
+    }
+
     for (const auto &ticker : app_config.target_tickers) {
       // Contain per-ticker startup failures (closed/invalid market, transient
       // REST error): skip that ticker rather than aborting the whole session.
@@ -573,8 +591,8 @@ int main(int argc, char *argv[]) {
       // Reconcile against the exchange's authoritative positions. Skipped in
       // paper mode (no real exchange positions to compare against).
       if (paper_ptr == nullptr && poll_count % kReconcileInterval == 0) {
-        reconcile_against_exchange(rest, order_mgr, app_config.target_tickers,
-                                   &risk_mgr, log);
+        reconcile_against_exchange(rest, order_mgr, session.tickers(),
+                                   &risk_mgr, log, reconcile_baseline);
       }
     }
 

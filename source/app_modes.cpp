@@ -76,11 +76,11 @@ int run_scan_mode(kalshi::RestClient &rest,
 // Fetches the exchange's authoritative positions and compares them to local
 // accounting. On drift, logs every mismatch; if risk_mgr is non-null (live
 // trading) it trips kModelDiverge to halt all quoting. Returns true if in sync.
-bool reconcile_against_exchange(kalshi::RestClient &rest,
-                                const kalshi::IOrderManager &order_mgr,
-                                const std::vector<std::string> &tickers,
-                                kalshi::RiskManager *risk_mgr,
-                                std::shared_ptr<spdlog::logger> &log) {
+bool reconcile_against_exchange(
+    kalshi::RestClient &rest, const kalshi::IOrderManager &order_mgr,
+    const std::vector<std::string> &tickers, kalshi::RiskManager *risk_mgr,
+    std::shared_ptr<spdlog::logger> &log,
+    const std::vector<kalshi::MarketPosition> &baseline) {
   std::vector<kalshi::MarketPosition> exchange;
   try {
     exchange = rest.get_positions();
@@ -89,7 +89,7 @@ bool reconcile_against_exchange(kalshi::RestClient &rest,
     return false;
   }
 
-  const auto result = kalshi::reconcile(order_mgr, tickers, exchange);
+  const auto result = kalshi::reconcile(order_mgr, tickers, exchange, baseline);
   if (result.in_sync) {
     log->info("reconcile: in sync ({} exchange positions checked)",
               exchange.size());
@@ -102,9 +102,10 @@ bool reconcile_against_exchange(kalshi::RestClient &rest,
   }
 
   for (const auto &diff : result.diffs) {
-    log->critical("reconcile DRIFT ticker={} local={} exchange={}", diff.ticker,
-                  diff.local_position.to_fp_string(),
-                  diff.exchange_position.to_fp_string());
+    log->critical("reconcile DRIFT ticker={} local={} exchange={} baseline={}",
+                  diff.ticker, diff.local_position.to_fp_string(),
+                  diff.exchange_position.to_fp_string(),
+                  diff.baseline_position.to_fp_string());
   }
   if (risk_mgr != nullptr) {
     risk_mgr->set(kalshi::Constraint::kModelDiverge);
