@@ -64,6 +64,14 @@ target_compile_definitions(replay_test PRIVATE
 )
 gtest_discover_tests(replay_test)
 
+# ---- Layer-include lint ----
+
+add_test(
+    NAME layer_include_lint
+    COMMAND python3 ${PROJECT_SOURCE_DIR}/scripts/check_layer_includes.py
+            ${PROJECT_SOURCE_DIR}/source
+)
+
 # ---- Integration tests ----
 #
 # Replay full captured/synthetic exchange sessions through the production
