@@ -226,7 +226,16 @@ WebSocketClient::WebSocketClient(Auth auth,
       reconnect_delay_{reconnect_delay} {}
 
 void WebSocketClient::subscribe(std::string_view ticker) {
-  subscribed_tickers_.emplace_back(ticker);
+  std::string ticker_name{ticker};
+  const std::lock_guard<std::mutex> lock{subscribe_mtx_};
+  if (std::find(subscribed_tickers_.begin(), subscribed_tickers_.end(),
+                ticker_name) != subscribed_tickers_.end()) {
+    return;
+  }
+  subscribed_tickers_.push_back(ticker_name);
+  if (connected_) {
+    send_subscribe(ticker_name);
+  }
 }
 
 void WebSocketClient::on_orderbook_snapshot(SnapshotCallback callback) {
@@ -298,8 +307,12 @@ void WebSocketClient::handle_connect() {
   consecutive_connect_failures_ = 0;
   last_seq_by_sid_.clear();
   send_subscribe_fills();
-  for (const auto &ticker : subscribed_tickers_) {
-    send_subscribe(ticker);
+  {
+    const std::lock_guard<std::mutex> lock{subscribe_mtx_};
+    connected_ = true;
+    for (const auto &ticker : subscribed_tickers_) {
+      send_subscribe(ticker);
+    }
   }
   if (has_connected_once_ && reconnect_callback_) {
     reconnect_callback_();
@@ -489,6 +502,10 @@ void WebSocketClient::run() {
   ws_->on_heartbeat([this]() { handle_heartbeat(); });
   ws_->on_disconnect([this]() {
     get_logger()->warn("websocket disconnected url={}", ws_url_);
+    {
+      const std::lock_guard<std::mutex> lock{subscribe_mtx_};
+      connected_ = false;
+    }
     if (disconnect_callback_) {
       disconnect_callback_();
     }

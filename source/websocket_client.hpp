@@ -8,6 +8,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -177,6 +178,10 @@ private:
   int next_msg_id_{1};
   int consecutive_connect_failures_{0};
   bool has_connected_once_{false};
+  // Guards subscribed_tickers_ and connected_: subscribe() is called from the
+  // main loop (rotation) while handle_connect/disconnect run on the WS thread.
+  std::mutex subscribe_mtx_;
+  bool connected_{false};
   std::vector<std::string> subscribed_tickers_;
   std::map<long long, long long> last_seq_by_sid_;
 

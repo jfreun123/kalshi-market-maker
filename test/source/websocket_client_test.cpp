@@ -252,6 +252,55 @@ TEST_F(WebSocketClientTest, TwoMarketSubscribesSendThreeMessages) {
   EXPECT_EQ(ws_raw->sent_messages().size(), kFillPlusTwoMarkets);
 }
 
+TEST_F(WebSocketClientTest, LateSubscribeSendsImmediatelyWhileConnected) {
+  auto fake_ws = std::make_unique<kalshi::FakeWebSocket>();
+  kalshi::FakeWebSocket *ws_raw = fake_ws.get();
+
+  auto client = make_client(std::move(fake_ws));
+  client.subscribe(kTestTicker);
+  client.run();
+  ASSERT_EQ(ws_raw->sent_messages().size(), kFillPlusOneMarket);
+
+  client.subscribe("KXADOPTED");
+
+  ASSERT_EQ(ws_raw->sent_messages().size(), kFillPlusTwoMarkets)
+      << "a market adopted mid-session must be subscribed on the live "
+         "connection, not silently deferred to the next reconnect";
+  const auto late_sub = nlohmann::json::parse(ws_raw->sent_messages().back());
+  EXPECT_EQ(late_sub["cmd"], "subscribe");
+  EXPECT_EQ(late_sub["params"]["market_tickers"][0], "KXADOPTED");
+}
+
+TEST_F(WebSocketClientTest, LateSubscribeWhileDisconnectedDefersToConnect) {
+  auto fake_ws = std::make_unique<kalshi::FakeWebSocket>();
+  kalshi::FakeWebSocket *ws_raw = fake_ws.get();
+  ws_raw->trigger_disconnect();
+
+  auto client = make_client(std::move(fake_ws));
+  client.run();
+  const auto sent_while_connected = ws_raw->sent_messages().size();
+
+  client.subscribe("KXADOPTED");
+
+  EXPECT_EQ(ws_raw->sent_messages().size(), sent_while_connected)
+      << "no live connection — the subscribe waits for the next connect";
+}
+
+TEST_F(WebSocketClientTest, DuplicateSubscribeSendsNoSecondCommand) {
+  auto fake_ws = std::make_unique<kalshi::FakeWebSocket>();
+  kalshi::FakeWebSocket *ws_raw = fake_ws.get();
+
+  auto client = make_client(std::move(fake_ws));
+  client.subscribe(kTestTicker);
+  client.run();
+  ASSERT_EQ(ws_raw->sent_messages().size(), kFillPlusOneMarket);
+
+  client.subscribe(kTestTicker);
+
+  EXPECT_EQ(ws_raw->sent_messages().size(), kFillPlusOneMarket)
+      << "re-adopting an already-subscribed market must not double-subscribe";
+}
+
 TEST_F(WebSocketClientTest, ConnectUsesConfiguredUrl) {
   auto fake_ws = std::make_unique<kalshi::FakeWebSocket>();
   kalshi::FakeWebSocket *ws_raw = fake_ws.get();
