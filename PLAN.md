@@ -23,6 +23,11 @@
   foreseeable future.
 - **Boundary**: host health (clock sync, disk, OS) is ops' job, not bot code
   (item 46 closed unmerged on this principle).
+- **Hosting gate (2026-07-18)**: no L1/EC2 spend until either the bot is
+  demonstrably profitable on the current machine, or the measurement backbone
+  proves latency is where the money is lost (attribution shows losses
+  concentrated in adverse selection / stale-quote fills that the ~294ms→Ohio
+  RTT cut would plausibly fix).
 
 ## Now (ordered)
 
@@ -38,10 +43,11 @@
    p50/p95/max per endpoint. Mac baseline (2026-07-04): order-path ~294ms,
    orderbook ~76ms, general GETs p50 184ms — the numbers L1 must beat.*
 3. [ ] **L1 — EC2 in Kalshi's region** (t4g.small ~$12/mo; NOT a trading-VPS
-   product). **Region answered by Kalshi Institutional (Brad, 2026-07-11):
-   us-east-2 (Ohio) is the recommended lowest-latency region** — no probe
-   needed. Rerun the L0 session from Ohio; fold host into Phase 32
-   supervision. Same email: rate-limit tiers above Advanced are Premier
+   product). **Blocked by the Hosting gate above** — needs current-machine
+   profitability or latency-loss proof first. **Region answered by Kalshi
+   Institutional (Brad, 2026-07-11): us-east-2 (Ohio) is the recommended
+   lowest-latency region** — no probe needed. Rerun the L0 session from Ohio;
+   fold host into Phase 32 supervision. Same email: rate-limit tiers above Advanced are Premier
    (1k/1k per sec), Paragon (2k/2k), Prime (4k/4k), unlocked by volume
    share and reviewed daily — the write-budget ladder for items 54/L3.
 4. [x] **L2 = item 44 — Amend + Decrease Order V2.** *Done — semantics
