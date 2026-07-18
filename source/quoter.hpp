@@ -155,6 +155,11 @@ public:
   // never re-places it — the side goes dark after its first complete fill.
   void forget_order(std::string_view ticker, std::string_view order_id);
 
+  // Forget every tracked quote on one market after its resting orders were
+  // cancelled out-of-band (e.g. the feed-liveness gate): the quoter re-places
+  // both sides on the market's next update instead of tracking dead ids.
+  void forget_ticker(std::string_view ticker);
+
 private:
   // Our own resting quote pair on one market: which orders are ours and the
   // price we quoted them at (what the reprice threshold compares against).

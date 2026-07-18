@@ -447,6 +447,10 @@ Quoter::book_without_own_quotes(const OwnQuote &own,
 }
 
 // NOLINTNEXTLINE(bugprone-easily-swappable-parameters) - ticker vs order id
+void Quoter::forget_ticker(std::string_view ticker) {
+  own_quotes_.erase(std::string{ticker});
+}
+
 void Quoter::forget_order(std::string_view ticker, std::string_view order_id) {
   auto own_it = own_quotes_.find(std::string{ticker});
   if (own_it == own_quotes_.end()) {

@@ -12,6 +12,7 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace kalshi {
@@ -120,6 +121,13 @@ public:
   // Log the per-ticker status and the whole-book portfolio aggregate.
   void log_status() const;
 
+  // ---- Feed liveness ----
+  // A healthy subscription always delivers at least its initial WS snapshot
+  // within seconds. A market whose book has NEVER ticked past this grace has
+  // no live feed (e.g. a silently failed subscribe): its resting quotes are
+  // stale free options and are cancelled until a WS message arrives.
+  static constexpr std::chrono::seconds kFeedConfirmGrace{30};
+
   // ---- Read-model access ----
 
   [[nodiscard]] const OrderbookMap &orderbooks() const { return ob_map_; }
@@ -144,6 +152,7 @@ public:
 
 private:
   [[nodiscard]] MarkMap build_marks() const;
+  [[nodiscard]] bool feed_confirmed(const std::string &ticker) const;
 
   std::vector<std::string> tickers_;
   IOrderManager &order_mgr_;
@@ -158,6 +167,9 @@ private:
       cooldown_until_;
   std::unordered_map<std::string, std::chrono::steady_clock::time_point>
       last_book_update_;
+  std::unordered_map<std::string, std::chrono::steady_clock::time_point>
+      seeded_at_;
+  std::unordered_set<std::string> feed_dead_;
   OrderbookMap ob_map_;
   PnlMap prior_pnl_;
   PnlListener pnl_listener_;

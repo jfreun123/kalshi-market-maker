@@ -102,9 +102,9 @@ private:
   [[nodiscard]] bool
   passes_flow_admission(const std::string &ticker,
                         std::chrono::system_clock::time_point now) const;
-  [[nodiscard]] bool passes_reversion_admission(
-      const std::string &ticker,
-      std::chrono::system_clock::time_point now) const;
+  [[nodiscard]] bool
+  passes_reversion_admission(const std::string &ticker,
+                             std::chrono::system_clock::time_point now) const;
   [[nodiscard]] bool
   tape_is_two_sided(const std::vector<PublicTrade> &trades,
                     std::chrono::system_clock::time_point hour_cutoff,

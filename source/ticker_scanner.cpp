@@ -268,8 +268,7 @@ void TickerScanner::admit_finalists(
     if (check_book && !passes_book_admission(candidate.ticker)) {
       continue;
     }
-    if (check_reversion &&
-        !passes_reversion_admission(candidate.ticker, now)) {
+    if (check_reversion && !passes_reversion_admission(candidate.ticker, now)) {
       continue;
     }
     admitted.push_back(std::move(candidate));

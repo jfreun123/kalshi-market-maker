@@ -757,3 +757,33 @@ TEST_F(QuoterTest, ClearingModelLeansQuotesTowardTapePrints) {
             std::string::npos)
       << transport.recorded_requests()[1].body;
 }
+
+TEST_F(QuoterTest, ForgetTickerRequotesBothSidesAfterOutOfBandCancel) {
+  auto transport_ptr = std::make_unique<FakeTransport>();
+  FakeTransport &transport = *transport_ptr;
+  for (const auto &order_id : {kOrderId1, kOrderId2, kOrderId3, kOrderId4}) {
+    transport.enqueue(
+        {kHttpOk,
+         order_json(order_id, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  }
+  kalshi::RestClient rest{kalshi::Auth{kApiKey, kPemPrivateKey},
+                          std::move(transport_ptr), kBaseUrl};
+  kalshi::OrderManager order_mgr{rest};
+  kalshi::RiskManager risk_mgr{kalshi::RiskLimits{}};
+  kalshi::Quoter quoter{kalshi::QuoterConfig{}, order_mgr, risk_mgr};
+
+  quoter.update(kTicker, make_ob(kYesBid52, kNoBid52));
+  ASSERT_EQ(transport.recorded_requests().size(), 2U);
+
+  quoter.forget_ticker(kTicker);
+  quoter.update(kTicker, make_ob(kYesBid52, kNoBid52));
+
+  ASSERT_EQ(transport.recorded_requests().size(), 4U)
+      << "forgotten ticker must re-place both sides instead of believing its "
+         "cancelled orders still rest";
+  for (const auto &request : transport.recorded_requests()) {
+    EXPECT_EQ(request.method, "POST")
+        << "forget is bookkeeping only — the orders were cancelled "
+           "out-of-band";
+  }
+}

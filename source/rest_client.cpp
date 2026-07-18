@@ -49,7 +49,7 @@ void check_response(const HttpResponse &resp) {
 // Parses "2025-01-01T00:00:00Z" into a system_clock time_point.
 auto parse_iso8601(const std::string &time_str)
     -> std::chrono::system_clock::time_point {
-  struct std::tm time_struct{};
+  struct std::tm time_struct {};
   // NOLINTNEXTLINE(modernize-use-nullptr) — strptime returns char*
   if (strptime(time_str.c_str(), "%Y-%m-%dT%H:%M:%S", &time_struct) ==
       nullptr) {
@@ -646,10 +646,9 @@ RestClient::get_candlesticks(std::string_view ticker,
   const std::string endpoint =
       "/series/" + series + "/markets/" + ticker_str + "/candlesticks";
   const std::string path = path_prefix_ + endpoint;
-  const std::string url = base_url_ + endpoint +
-                          "?start_ts=" + std::to_string(start_ts_seconds) +
-                          "&end_ts=" + std::to_string(end_ts_seconds) +
-                          "&period_interval=1";
+  const std::string url =
+      base_url_ + endpoint + "?start_ts=" + std::to_string(start_ts_seconds) +
+      "&end_ts=" + std::to_string(end_ts_seconds) + "&period_interval=1";
   try {
     auto headers = auth_.sign("GET", path);
     auto resp = transport_->get(url, headers);
@@ -661,8 +660,8 @@ RestClient::get_candlesticks(std::string_view ticker,
       const auto price = candle.value("price", nlohmann::json::object());
       if (price.contains("close_dollars") &&
           !price.at("close_dollars").is_null()) {
-        parsed.close_cents =
-            parse_dollars_to_cents(price.at("close_dollars").get<std::string>());
+        parsed.close_cents = parse_dollars_to_cents(
+            price.at("close_dollars").get<std::string>());
       }
       candles.push_back(parsed);
     }

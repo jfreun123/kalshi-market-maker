@@ -229,6 +229,126 @@ TEST_F(TradingSessionTest, BookAgeTracksTimeSinceLastBookUpdate) {
   EXPECT_EQ(session.book_age(kTicker).value(), std::chrono::seconds{0});
 }
 
+namespace {
+constexpr auto kJustPastGrace =
+    kalshi::TradingSession::kFeedConfirmGrace + std::chrono::seconds{1};
+constexpr auto kJustWithinGrace =
+    kalshi::TradingSession::kFeedConfirmGrace - std::chrono::seconds{1};
+constexpr auto kLongQuietSpell = std::chrono::minutes{30};
+} // namespace
+
+TEST_F(TradingSessionTest, NeverTickedFeedCancelsQuotesAfterGrace) {
+  auto clock_now = std::make_shared<std::chrono::steady_clock::time_point>(
+      std::chrono::steady_clock::now());
+  kalshi::TradingSession session{std::vector<std::string>{kTicker},
+                                 order_mgr_,
+                                 risk_mgr_,
+                                 quoter_,
+                                 nullptr,
+                                 [clock_now] { return *clock_now; }};
+  transport_.enqueue({kHttpOk, order_json(kOrderId1, kDefaultQuoteSize)});
+  transport_.enqueue({kHttpOk, order_json(kOrderId2, kDefaultQuoteSize)});
+  session.seed_orderbook(make_orderbook(kTicker, kYesBid, kNoBid, kObQty));
+  ASSERT_EQ(count_method(transport_, "POST"), 2);
+
+  *clock_now += kJustPastGrace;
+  session.enforce_quote_safety();
+
+  EXPECT_EQ(count_method(transport_, "DELETE"), 2)
+      << "no WS message ever arrived — quotes must not rest on a dead feed";
+}
+
+TEST_F(TradingSessionTest, NeverTickedFeedKeepsQuotesWithinGrace) {
+  auto clock_now = std::make_shared<std::chrono::steady_clock::time_point>(
+      std::chrono::steady_clock::now());
+  kalshi::TradingSession session{std::vector<std::string>{kTicker},
+                                 order_mgr_,
+                                 risk_mgr_,
+                                 quoter_,
+                                 nullptr,
+                                 [clock_now] { return *clock_now; }};
+  transport_.enqueue({kHttpOk, order_json(kOrderId1, kDefaultQuoteSize)});
+  transport_.enqueue({kHttpOk, order_json(kOrderId2, kDefaultQuoteSize)});
+  session.seed_orderbook(make_orderbook(kTicker, kYesBid, kNoBid, kObQty));
+
+  *clock_now += kJustWithinGrace;
+  session.enforce_quote_safety();
+
+  EXPECT_EQ(count_method(transport_, "DELETE"), 0)
+      << "the subscription is still within its confirmation grace period";
+}
+
+TEST_F(TradingSessionTest, QuietConfirmedFeedIsNeverFeedCancelled) {
+  auto clock_now = std::make_shared<std::chrono::steady_clock::time_point>(
+      std::chrono::steady_clock::now());
+  kalshi::TradingSession session{std::vector<std::string>{kTicker},
+                                 order_mgr_,
+                                 risk_mgr_,
+                                 quoter_,
+                                 nullptr,
+                                 [clock_now] { return *clock_now; }};
+  transport_.enqueue({kHttpOk, order_json(kOrderId1, kDefaultQuoteSize)});
+  transport_.enqueue({kHttpOk, order_json(kOrderId2, kDefaultQuoteSize)});
+  session.seed_orderbook(make_orderbook(kTicker, kYesBid, kNoBid, kObQty));
+  session.on_snapshot(make_orderbook(kTicker, kYesBid, kNoBid, kObQty));
+
+  *clock_now += kLongQuietSpell;
+  session.enforce_quote_safety();
+
+  EXPECT_EQ(count_method(transport_, "DELETE"), 0)
+      << "a confirmed feed that goes quiet is an idle market, not a dead one";
+}
+
+TEST_F(TradingSessionTest, RequoteIdleSkipsNeverTickedFeedAfterGrace) {
+  auto clock_now = std::make_shared<std::chrono::steady_clock::time_point>(
+      std::chrono::steady_clock::now());
+  kalshi::TradingSession session{std::vector<std::string>{kTicker},
+                                 order_mgr_,
+                                 risk_mgr_,
+                                 quoter_,
+                                 nullptr,
+                                 [clock_now] { return *clock_now; }};
+  transport_.enqueue({kHttpOk, order_json(kOrderId1, kDefaultQuoteSize)});
+  transport_.enqueue({kHttpOk, order_json(kOrderId2, kDefaultQuoteSize)});
+  session.seed_orderbook(make_orderbook(kTicker, kYesBid, kNoBid, kObQty));
+
+  *clock_now += kJustPastGrace;
+  session.enforce_quote_safety();
+  const int posts_after_cancel = count_method(transport_, "POST");
+
+  session.requote_idle_markets();
+
+  EXPECT_EQ(count_method(transport_, "POST"), posts_after_cancel)
+      << "idle requoting must not re-place quotes on a feed that never "
+         "confirmed";
+}
+
+TEST_F(TradingSessionTest, FeedArrivalAfterDeadFeedCancelResumesQuoting) {
+  auto clock_now = std::make_shared<std::chrono::steady_clock::time_point>(
+      std::chrono::steady_clock::now());
+  kalshi::TradingSession session{std::vector<std::string>{kTicker},
+                                 order_mgr_,
+                                 risk_mgr_,
+                                 quoter_,
+                                 nullptr,
+                                 [clock_now] { return *clock_now; }};
+  transport_.enqueue({kHttpOk, order_json(kOrderId1, kDefaultQuoteSize)});
+  transport_.enqueue({kHttpOk, order_json(kOrderId2, kDefaultQuoteSize)});
+  session.seed_orderbook(make_orderbook(kTicker, kYesBid, kNoBid, kObQty));
+
+  *clock_now += kJustPastGrace;
+  session.enforce_quote_safety();
+  ASSERT_EQ(count_method(transport_, "DELETE"), 2);
+
+  transport_.enqueue({kHttpOk, order_json(kOrderId1, kDefaultQuoteSize)});
+  transport_.enqueue({kHttpOk, order_json(kOrderId2, kDefaultQuoteSize)});
+  session.on_delta(kTicker, kalshi::Side::Yes, kSubBboDeltaPrice,
+                   kSubBboDeltaQty);
+
+  EXPECT_EQ(count_method(transport_, "POST"), 4)
+      << "once the feed finally ticks, the market re-quotes from a live book";
+}
+
 TEST_F(TradingSessionTest, OrderbooksAccessorReflectsSnapshot) {
   session_.on_snapshot(make_orderbook(kTicker, kYesBid, kNoBid, kObQty));
 

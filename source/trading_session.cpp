@@ -40,6 +40,10 @@ TradingSession::TradingSession(std::vector<std::string> tickers,
 void TradingSession::on_snapshot(const Orderbook &snapshot) {
   ob_map_[snapshot.ticker].apply_snapshot(snapshot);
   last_book_update_[snapshot.ticker] = clock_();
+  if (feed_dead_.erase(snapshot.ticker) > 0) {
+    get_logger()->info("feed confirmed ticker={} — quoting re-enabled",
+                       snapshot.ticker);
+  }
   get_logger()->info("snapshot ticker={} yes_levels={} no_levels={}",
                      snapshot.ticker, snapshot.yes.size(), snapshot.no.size());
 }
@@ -49,6 +53,9 @@ void TradingSession::on_delta(const std::string &ticker, Side side,
   auto &book = ob_map_[ticker];
   book.apply_delta(side, price_cents, qty);
   last_book_update_[ticker] = clock_();
+  if (feed_dead_.erase(ticker) > 0) {
+    get_logger()->info("feed confirmed ticker={} — quoting re-enabled", ticker);
+  }
   if (!is_tracked(ticker)) {
     return;
   }
@@ -258,6 +265,9 @@ void TradingSession::requote_idle_markets() {
     return;
   }
   for (const auto &[ticker, book] : ob_map_) {
+    if (!feed_confirmed(ticker)) {
+      continue;
+    }
     bool has_resting_order = false;
     for (const auto &order_entry : order_mgr_.open_orders()) {
       if (order_entry.second.market_ticker == ticker) {
@@ -286,7 +296,36 @@ void TradingSession::requote_idle_markets() {
 void TradingSession::enforce_quote_safety() {
   if (risk_mgr_.is_halted()) {
     cancel_all_quotes();
+    return;
   }
+  for (const auto &ticker : tickers_) {
+    if (feed_confirmed(ticker) || feed_dead_.contains(ticker)) {
+      continue;
+    }
+    feed_dead_.insert(ticker);
+    get_logger()->critical(
+        "no live feed ticker={} — book never ticked within {}s of seeding; "
+        "cancelling quotes until the feed confirms",
+        ticker, kFeedConfirmGrace.count());
+    try {
+      order_mgr_.cancel_all(ticker);
+    } catch (const std::exception &ex) {
+      get_logger()->error("feed-dead cancel failed ticker={}: {}", ticker,
+                          ex.what());
+    }
+    quoter_.forget_ticker(ticker);
+  }
+}
+
+bool TradingSession::feed_confirmed(const std::string &ticker) const {
+  if (last_book_update_.contains(ticker)) {
+    return true;
+  }
+  const auto seeded = seeded_at_.find(ticker);
+  if (seeded == seeded_at_.end()) {
+    return true;
+  }
+  return clock_() - seeded->second <= kFeedConfirmGrace;
 }
 
 void TradingSession::cancel_preexisting_orders(
@@ -314,6 +353,8 @@ void TradingSession::seed_orderbook(const Orderbook &snapshot) {
   get_logger()->info("seeding orderbook ticker={}", snapshot.ticker);
   auto &book = ob_map_[snapshot.ticker];
   book.apply_snapshot(snapshot);
+  seeded_at_[snapshot.ticker] = clock_();
+  feed_dead_.erase(snapshot.ticker);
   // Contain quoting failures (e.g. the exchange rejecting an initial quote that
   // would cross a tight book): seeding one market must never abort startup. The
   // book is still recorded, so the live feed can quote it later.
