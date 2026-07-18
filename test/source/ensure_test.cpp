@@ -1,6 +1,6 @@
-#include "ensure.hpp"
+#include "core/ensure.hpp"
 
-#include "logger.hpp"
+#include "core/logger.hpp"
 
 #include <gtest/gtest.h>
 #include <spdlog/sinks/ostream_sink.h>

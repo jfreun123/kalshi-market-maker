@@ -195,7 +195,7 @@ Testing layers (unit / replay / demo-conformance / capture):
 
 ```
 kalshi-market-maker/
-├── source/            # library + kalshi_mm entry point (main.cpp, app_modes, cli)
+├── source/            # layered libraries: core/ net/ engine/ exchange/ strategy/ tooling/ app/
 ├── test/
 │   ├── source/        # unit tests (one file per component, fakes for all I/O)
 │   ├── integration/   # replay_session_test (hermetic) + demo_conformance_test (live demo)

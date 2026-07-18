@@ -1,10 +1,10 @@
-#include "app_modes.hpp"
+#include "app/app_modes.hpp"
 
+#include "core/logger.hpp"
+#include "engine/risk_manager.hpp"
+#include "exchange/order_manager.hpp"
 #include "fake_transport.hpp"
-#include "logger.hpp"
-#include "order_manager.hpp"
-#include "paper_transport.hpp"
-#include "risk_manager.hpp"
+#include "net/paper_transport.hpp"
 
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>

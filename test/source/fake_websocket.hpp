@@ -1,6 +1,6 @@
 #pragma once
 
-#include "websocket_client.hpp"
+#include "net/websocket_client.hpp"
 
 #include <map>
 #include <stdexcept>

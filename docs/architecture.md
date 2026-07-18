@@ -1,5 +1,34 @@
 # Architecture
 
+## Module layers
+
+Sources live in `source/<layer>/` with one static library per layer; the
+dependency DAG below is enforced at link time (and by the include lint).
+Includes are layer-prefixed (`#include "engine/orderbook.hpp"`) so every
+cross-layer dependency is visible at the top of each file. `kalshi_lib` is an
+INTERFACE aggregator over all layers; `kalshi_mm` links it.
+
+```mermaid
+graph TD
+    APP["app/<br/>config · app_modes · main"] --> EXCHANGE
+    APP --> STRATEGY
+    APP --> TOOLING
+    STRATEGY["strategy/<br/>quoter (IStrategy impl)"] --> ENGINE
+    EXCHANGE["exchange/<br/>rest_client · order_manager ·<br/>ticker_scanner · scan_output"] --> ENGINE
+    EXCHANGE --> NET
+    TOOLING["tooling/<br/>fv_backtest"] --> ENGINE
+    ENGINE["engine/<br/>orderbook · trade_tape · pricing ·<br/>portfolio · risk · trading_session ·<br/>IOrderManager · IStrategy"] --> CORE
+    NET["net/<br/>auth · http · websocket · capture"] --> CORE
+    CORE["core/<br/>types · quantity · logger ·<br/>ensure · cli · rate_limiter"]
+    style CORE fill:#555
+    style NET fill:#555
+```
+
+The reuse boundary: `engine/` + `core/` are venue- and strategy-agnostic. A
+new strategy is a second `strategy/`-style library implementing `IStrategy`;
+a new venue is a second `exchange/`-style library implementing `IOrderManager`
+and feeding the session's snapshot/delta/fill reactions.
+
 ## Data Flow
 
 `main.cpp` wires the WebSocket callbacks to a `TradingSession`, which owns the

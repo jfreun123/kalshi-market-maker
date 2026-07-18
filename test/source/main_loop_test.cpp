@@ -1,11 +1,11 @@
+#include "engine/orderbook.hpp"
+#include "engine/risk_manager.hpp"
+#include "exchange/order_manager.hpp"
+#include "exchange/rest_client.hpp"
 #include "fake_transport.hpp"
 #include "fake_websocket.hpp"
-#include "order_manager.hpp"
-#include "orderbook.hpp"
-#include "quoter.hpp"
-#include "rest_client.hpp"
-#include "risk_manager.hpp"
-#include "websocket_client.hpp"
+#include "net/websocket_client.hpp"
+#include "strategy/quoter.hpp"
 
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>

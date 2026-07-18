@@ -1,11 +1,11 @@
-#include "strategy.hpp"
+#include "engine/strategy.hpp"
 
+#include "core/types.hpp"
+#include "engine/risk_manager.hpp"
+#include "engine/trading_session.hpp"
 #include "fake_order_manager.hpp"
 #include "fake_strategy.hpp"
-#include "quoter.hpp"
-#include "risk_manager.hpp"
-#include "trading_session.hpp"
-#include "types.hpp"
+#include "strategy/quoter.hpp"
 
 #include <gtest/gtest.h>
 

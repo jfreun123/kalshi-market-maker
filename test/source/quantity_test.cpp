@@ -1,4 +1,4 @@
-#include "quantity.hpp"
+#include "core/quantity.hpp"
 
 #include <cstdint>
 #include <gtest/gtest.h>

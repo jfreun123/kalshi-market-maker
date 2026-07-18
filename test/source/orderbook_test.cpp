@@ -1,5 +1,5 @@
-#include "orderbook.hpp"
-#include "quantity.hpp"
+#include "core/quantity.hpp"
+#include "engine/orderbook.hpp"
 
 #include <gtest/gtest.h>
 

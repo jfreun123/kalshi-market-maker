@@ -1,6 +1,6 @@
-#include "paper_transport.hpp"
+#include "net/paper_transport.hpp"
 
-#include "types.hpp"
+#include "core/types.hpp"
 
 #include <nlohmann/json.hpp>
 

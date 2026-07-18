@@ -1,7 +1,7 @@
+#include "engine/risk_manager.hpp"
+#include "exchange/order_manager.hpp"
+#include "exchange/rest_client.hpp"
 #include "fake_transport.hpp"
-#include "order_manager.hpp"
-#include "rest_client.hpp"
-#include "risk_manager.hpp"
 
 #include <gtest/gtest.h>
 
