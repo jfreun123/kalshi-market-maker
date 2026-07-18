@@ -175,7 +175,13 @@
     `status=open` server-side, cap pagination, and/or cache market metadata
     between runs with incremental refresh. Not latency-critical yet;
     becomes waste on the VM and on every rotation re-scan.
-25. [ ] **59 — short-horizon markout (external review).** Add 500ms / 1s /
+25. [~] **59 — short-horizon markout (external review).** *Script half done —
+    `analyze_fills.py` reports markout@500ms/1s/5s alongside 30s/5min, a
+    signed per-fill edge (mid-native − price), and aggregates edge + markout
+    by pre-fill inventory bucket (0 / ≤10 / ≤20 / >20 contracts) — the
+    run-13 "does fill quality rot as we accumulate" question, answerable per
+    session. Remaining: avg-entry/mark/edge in the per-fill status log
+    (folds into item 45).* Original scope: Add 500ms / 1s /
     5s horizons to `analyze_fills.py` alongside 30s/5min — the fast
     horizons separate "quoting too aggressive" (instant reversion) from
     genuine adverse selection (slow drift). Also aggregate edge by

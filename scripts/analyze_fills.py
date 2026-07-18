@@ -4,10 +4,14 @@
 Usage: python3 scripts/analyze_fills.py logs/analytics.jsonl [more.jsonl ...]
 
 For every fill event, joins the mid-price series from quote events on the same
-ticker to compute markout (mark at +30s and +5min, side-native cents per
-contract: positive = the market moved our way after the fill) and effective
-spread (2 x |price - mid| at fill). Prints a per-fill table and per-ticker /
-overall summaries. Markout is the Gate 1 evaluation metric (see
+ticker to compute markout (mark at +500ms/+1s/+5s/+30s/+5min, side-native
+cents per contract: positive = the market moved our way after the fill), the
+signed fill edge (mid-native minus price: positive = filled inside value),
+and effective spread (2 x |price - mid| at fill). The fast horizons separate
+"quoting too aggressive" (instant reversion) from genuine adverse selection
+(slow drift). Prints a per-fill table, per-ticker / overall summaries, and
+edge + markout aggregated by pre-fill inventory level (does fill quality
+deteriorate as we accumulate?). Markout is the Gate 1 evaluation metric (see
 docs/PRE_LIVE_CHECKLIST.md) and must never feed back into quoting.
 """
 
@@ -16,7 +20,19 @@ import sys
 from bisect import bisect_right
 from collections import defaultdict
 
-MARKOUT_HORIZONS_MS = {"30s": 30_000, "5min": 300_000}
+MARKOUT_HORIZONS_MS = {
+    "500ms": 500,
+    "1s": 1_000,
+    "5s": 5_000,
+    "30s": 30_000,
+    "5min": 300_000,
+}
+INVENTORY_BUCKETS = [
+    ("flat (0)", lambda level: level == 0.0),
+    ("0-10", lambda level: 0.0 < level <= 10.0),
+    ("10-20", lambda level: 10.0 < level <= 20.0),
+    (">20", lambda level: level > 20.0),
+]
 
 
 def load_events(paths):
@@ -67,12 +83,19 @@ def analyze(quotes, fills):
             "qty": fill["qty"],
             "is_taker": fill["is_taker"],
             "eff_spread": None,
+            "edge": None,
+            "pre_inventory": None,
             "markout": {},
         }
         if mid_now:
             row["eff_spread"] = 2.0 * abs(
                 fill["price"] - side_native(mid_now, fill["side"])
             )
+            row["edge"] = side_native(mid_now, fill["side"]) - fill["price"]
+        inventory_after = fill.get("inventory_after")
+        if inventory_after is not None:
+            signed_qty = fill["qty"] if fill["side"] == "yes" else -fill["qty"]
+            row["pre_inventory"] = abs(inventory_after - signed_qty)
         for label, horizon in MARKOUT_HORIZONS_MS.items():
             mid_later = mid_at(series, fill["ts_ms"] + horizon)
             if mid_later is not None:
@@ -104,6 +127,38 @@ def summarize(rows, label):
     spreads = [(row["eff_spread"], row["qty"]) for row in rows if row["eff_spread"]]
     mean_spread = weighted_mean(spreads)
     print(f"  eff_spread: {mean_spread:.2f}c" if spreads else "  eff_spread: n/a")
+    edges = [(row["edge"], row["qty"]) for row in rows if row["edge"] is not None]
+    mean_edge = weighted_mean(edges)
+    print(f"  fill_edge: {mean_edge:+.2f}c" if edges else "  fill_edge: n/a")
+
+
+def format_cell(value, width):
+    return f"{value:>+{width}.2f}" if value is not None else f"{'n/a':>{width}}"
+
+
+def summarize_by_inventory(rows):
+    print("\n== fills by pre-fill inventory level (contracts) ==")
+    print(f"{'bucket':<10} {'fills':>6} {'edge':>7} {'m@1s':>7} {'m@30s':>7} "
+          f"{'m@5min':>7}")
+    for label, contains in INVENTORY_BUCKETS:
+        bucket_rows = [
+            row for row in rows
+            if row["pre_inventory"] is not None and contains(row["pre_inventory"])
+        ]
+        if not bucket_rows:
+            continue
+        edge = weighted_mean([
+            (row["edge"], row["qty"]) for row in bucket_rows
+            if row["edge"] is not None
+        ])
+        cells = [format_cell(edge, 7)]
+        for horizon in ("1s", "30s", "5min"):
+            markouts = weighted_mean([
+                (row["markout"][horizon], row["qty"]) for row in bucket_rows
+                if horizon in row["markout"]
+            ])
+            cells.append(format_cell(markouts, 7))
+        print(f"{label:<10} {len(bucket_rows):>6} {' '.join(cells)}")
 
 
 def main():
@@ -117,19 +172,14 @@ def main():
         return 0
 
     print(f"{'ts_ms':>14} {'ticker':<34} {'side':<4} {'price':>5} {'qty':>7} "
-          f"{'taker':<5} {'m@30s':>7} {'m@5min':>7} {'espr':>6}")
+          f"{'taker':<5} {'edge':>6} {'m@1s':>7} {'m@30s':>7} {'m@5min':>7}")
     for row in rows:
-        m30 = row["markout"].get("30s")
-        m5 = row["markout"].get("5min")
+        cells = [format_cell(row["edge"], 6)]
+        for horizon in ("1s", "30s", "5min"):
+            cells.append(format_cell(row["markout"].get(horizon), 7))
         print(f"{row['ts_ms']:>14} {row['ticker']:<34} {row['side']:<4} "
               f"{row['price']:>5} {row['qty']:>7.2f} {str(row['is_taker']):<5} "
-              f"{m30:>+7.2f}" if m30 is not None else
-              f"{row['ts_ms']:>14} {row['ticker']:<34} {row['side']:<4} "
-              f"{row['price']:>5} {row['qty']:>7.2f} {str(row['is_taker']):<5} "
-              f"{'n/a':>7}", end="")
-        print(f" {m5:>+7.2f}" if m5 is not None else f" {'n/a':>7}", end="")
-        espr = row["eff_spread"]
-        print(f" {espr:>6.2f}" if espr is not None else f" {'n/a':>6}")
+              f"{' '.join(cells)}")
 
     by_ticker = defaultdict(list)
     for row in rows:
@@ -140,6 +190,7 @@ def main():
     if maker_rows:
         summarize(maker_rows, "ALL MAKER FILLS")
     summarize(rows, "ALL FILLS")
+    summarize_by_inventory(rows)
     return 0
 
 
