@@ -142,6 +142,15 @@
     method) on our capture corpus to measure print-through under-fill;
     adopt proportional delta-consumption if the gap is material — guards
     the clearing-pricing verdict from a flattering fill model.
+25. [~] **76 — modularization refactor (Jacob, 2026-07-18): layered modules,
+    swappable strategy — ACTIVE FOCUS.** End state: `engine/` (session, risk,
+    execution interface, pricing, market data) reusable with any strategy or
+    venue; Quoter is one `IStrategy` implementation. Sequence: IOrderManager
+    interface split (PR 1) → IStrategy seam (PR 2) → layer directories +
+    per-layer CMake targets with build-enforced DAG (PR 3) → include lint
+    (PR 4) → config-struct extraction (PR 5, after item 75). Explicitly
+    skipped: rest_client/quoter splits (quoter is about to be rewritten for
+    the one-sided-flow problem), ADR-007 process split.
 
 **Selection principle (Jacob, 2026-07-04): profitable on every market we
 CHOOSE, then scale.** Not every market can be made profitably — trending
