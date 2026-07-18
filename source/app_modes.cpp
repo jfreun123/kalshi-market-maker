@@ -3,6 +3,7 @@
 #include "capture.hpp"
 #include "fv_backtest.hpp"
 #include "logger.hpp"
+#include "order_manager.hpp"
 #include "scan_output.hpp"
 #include "ticker_scanner.hpp"
 
