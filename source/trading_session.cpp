@@ -28,11 +28,11 @@ double prior_pnl_for(const TradingSession::PnlMap &prior_pnl,
 
 TradingSession::TradingSession(std::vector<std::string> tickers,
                                IOrderManager &order_mgr, RiskManager &risk_mgr,
-                               Quoter &quoter, FlowImbalanceGuard *flow_guard,
-                               Clock clock,
+                               IStrategy &strategy,
+                               FlowImbalanceGuard *flow_guard, Clock clock,
                                std::chrono::milliseconds error_cooldown)
     : tickers_{std::move(tickers)}, order_mgr_{order_mgr}, risk_mgr_{risk_mgr},
-      quoter_{quoter}, flow_guard_{flow_guard},
+      strategy_{strategy}, flow_guard_{flow_guard},
       clock_{clock ? std::move(clock)
                    : Clock{[] { return std::chrono::steady_clock::now(); }}},
       error_cooldown_{error_cooldown} {}
@@ -69,7 +69,7 @@ void TradingSession::on_delta(const std::string &ticker, Side side,
   }
 
   try {
-    quoter_.update(ticker, book);
+    strategy_.update(ticker, book);
   } catch (const std::exception &ex) {
     cooldown_until_[ticker] = clock_() + error_cooldown_;
     get_logger()->error("quoter error ticker={}: {} — cooling down {}ms",
@@ -94,7 +94,7 @@ void TradingSession::on_fill(const Fill &fill) {
     return;
   }
   if (!order_mgr_.open_orders().contains(fill.order_id)) {
-    quoter_.forget_order(fill.market_ticker, fill.order_id);
+    strategy_.forget_order(fill.market_ticker, fill.order_id);
   }
   risk_mgr_.update(order_mgr_, tickers_);
   if (flow_guard_ != nullptr) {
@@ -226,7 +226,7 @@ void TradingSession::cancel_all_quotes() {
   // Resync the quoter to "no resting quotes". Its live-order ids point at the
   // orders we just cancelled; without this it would try to cancel dead ids and
   // never re-quote when the feed recovers.
-  quoter_.reset_quotes();
+  strategy_.reset_quotes();
 }
 
 void TradingSession::add_market(const Orderbook &snapshot) {
@@ -284,7 +284,7 @@ void TradingSession::requote_idle_markets() {
     }
     get_logger()->debug("requote idle ticker={}", ticker);
     try {
-      quoter_.update(ticker, book);
+      strategy_.update(ticker, book);
     } catch (const std::exception &ex) {
       cooldown_until_[ticker] = clock_() + error_cooldown_;
       get_logger()->error("requote idle error ticker={}: {} — cooling down",
@@ -313,7 +313,7 @@ void TradingSession::enforce_quote_safety() {
       get_logger()->error("feed-dead cancel failed ticker={}: {}", ticker,
                           ex.what());
     }
-    quoter_.forget_ticker(ticker);
+    strategy_.forget_ticker(ticker);
   }
 }
 
@@ -359,7 +359,7 @@ void TradingSession::seed_orderbook(const Orderbook &snapshot) {
   // would cross a tight book): seeding one market must never abort startup. The
   // book is still recorded, so the live feed can quote it later.
   try {
-    quoter_.update(snapshot.ticker, book);
+    strategy_.update(snapshot.ticker, book);
   } catch (const std::exception &ex) {
     get_logger()->error("seed quote error ticker={}: {}", snapshot.ticker,
                         ex.what());
