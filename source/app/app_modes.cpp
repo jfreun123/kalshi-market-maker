@@ -1,10 +1,13 @@
 #include "app/app_modes.hpp"
 
 #include "core/logger.hpp"
+#include "engine/fair_value.hpp"
+#include "engine/flow_imbalance.hpp"
 #include "exchange/order_manager.hpp"
 #include "exchange/scan_output.hpp"
 #include "exchange/ticker_scanner.hpp"
 #include "net/capture.hpp"
+#include "strategy/quoter.hpp"
 #include "tooling/fv_backtest.hpp"
 
 #include <nlohmann/json.hpp>

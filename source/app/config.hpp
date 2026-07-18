@@ -1,9 +1,9 @@
 #pragma once
 
-#include "engine/flow_imbalance.hpp"
-#include "engine/risk_manager.hpp"
-#include "exchange/ticker_scanner.hpp"
-#include "strategy/quoter.hpp"
+#include "engine/flow_imbalance_config.hpp"
+#include "engine/risk_limits.hpp"
+#include "exchange/scanner_config.hpp"
+#include "strategy/quoter_config.hpp"
 
 #include <filesystem>
 #include <string>
