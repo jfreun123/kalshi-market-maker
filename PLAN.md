@@ -68,9 +68,17 @@
 8. [ ] **Phase 32 minimum — unattended supervision** (launchd/systemd on the
    L1 host, logrotate, Telegram alert on halt/error) — required for the 30h
    soak.
-9. [ ] **31a/31c — finish the measurement backbone**: settlement join + Brier
+9. [~] **31a/31c — finish the measurement backbone**: settlement join + Brier
    scoring (quote stream already persisted); PnL attribution split (spread vs
-   mark-to-market vs inventory vs fees).
+   mark-to-market vs inventory vs fees). *31a done —
+   `scripts/settlement_join.py` revalues every fill at the settled outcome
+   (ground-truth PnL vs the marked figure; the delta is the carried-inventory
+   mark error) and Brier-scores fv / mid / micro time-weighted against the
+   outcome: fv beating mid = beliefs add information; fv losing = pricing
+   problem, not latency — the Hosting-gate discriminator. Calibration buckets
+   accumulate across sessions; outcomes cached in
+   `logs/settlement_results.json`. Verified on hand-computed fixtures + a
+   live settled prod market. 31c residual (fees term) tracked in item 22.*
 10. [ ] **51 — panic pull tier (Jacob to confirm)**: on a catastrophic jump
     (≥ `panic_jump_cents`, e.g. 8), cancel the toxic side instantly — no
     confirmation, no rest floor, no re-quote until the book settles.
