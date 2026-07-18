@@ -70,18 +70,22 @@ bash .git/hooks/pre-commit
 
 ## Configuration & environment variables
 
-Runtime credentials and endpoints are read from a JSON config file, not from
-environment variables:
+Runtime configuration is read from JSON files, not environment variables.
+Strategy parameters live in the **committed, credential-free** `config.json`;
+credentials live in the **gitignored** `secrets.json` it points at via
+`"secrets_path"`:
 
 ```bash
-cp config.example.json config.json   # fill in api_key + private_key_path
+cp secrets.example.json secrets.json   # fill in api_key + private_key_path
 ```
 
 The only environment variable the project reads is `KALSHI_DEMO_CONFIG`, used
 by the demo conformance tests (built with `-DKALSHI_DEMO_TESTS=ON`) to locate a
 demo-environment config file; it defaults to `config-demo.json` in the repo
-root.
+root (a local copy of `config.json` with machine overrides).
 
-Config files containing real credentials (`config.json`, `config-demo.json`)
-are gitignored; never commit them. Demo credentials and key material live
-outside the repo in `/Users/jacobfreund/kalshi-demo-key/`.
+`secrets.json` and `pnl_state.json` are gitignored; never commit them — the
+pre-commit hook also blocks staged credential-shaped content. Private keys
+live outside the repo at machine-specific paths (Mac:
+`/Users/jacobfreund/kalshi-demo-key/`, WSL:
+`/home/jfreun1/kalshi-demo-private-key.pem`).

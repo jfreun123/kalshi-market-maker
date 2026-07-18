@@ -69,11 +69,13 @@ From the Mac:
 scp -i ~/Downloads/kalshi-mm.pem -r \
   /Users/jacobfreund/kalshi-demo-key ubuntu@<ip>:~/kalshi-demo-key
 scp -i ~/Downloads/kalshi-mm.pem \
-  /Users/jacobfreund/kalshi-market-maker/config-demo.json ubuntu@<ip>:~/kalshi-market-maker/
+  /Users/jacobfreund/kalshi-market-maker/secrets.json ubuntu@<ip>:~/kalshi-market-maker/
 ```
 
-Then on the instance, edit `config-demo.json` so `private_key_path` points at
-`/home/ubuntu/kalshi-demo-key/<key>.pem`.
+Then on the instance, edit `secrets.json` so `private_key_path` points at
+`/home/ubuntu/kalshi-demo-key/<key>.pem` (the committed `config.json` finds
+it via `secrets_path`; create a local `config-demo.json` copy for the run
+scripts).
 
 ## 5. First session + the L1 comparison
 
