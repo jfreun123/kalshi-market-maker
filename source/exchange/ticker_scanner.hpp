@@ -52,6 +52,8 @@ private:
 
   RestClient &rest_;
   ScannerConfig config_;
+  mutable std::vector<Market> cached_markets_;
+  mutable std::chrono::system_clock::time_point cache_fetched_at_;
 };
 
 } // namespace kalshi

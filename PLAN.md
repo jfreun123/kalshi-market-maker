@@ -162,25 +162,21 @@
     fill-prob data). Exact FKK form: move rung i→j iff (ticks gained)·d >
     c·Δ(expected wait), waits growing geometrically in queue depth — 79
     fits the curve.
-17. [ ] **58 — scanner startup efficiency.** Startup scans ~70k markets for
-    ~30s before quoting. Query `status=open` server-side is already used;
-    cap pagination and/or cache market metadata between runs with
-    incremental refresh. Becomes real waste on every rotation re-scan.
-18. [ ] **23 — ceil-per-order maker-fee model** (inert while demo maker
+17. [ ] **23 — ceil-per-order maker-fee model** (inert while demo maker
     fills are free) · **3 — passive clamp vs fresher BBO** (D1 residual).
-19. [ ] **54 — batch CreateOrders.** V2 batch create/cancel; batch seeds and
+18. [ ] **54 — batch CreateOrders.** V2 batch create/cancel; batch seeds and
     layered quotes into one request. Sequence after L3 so batching composes
     with the non-blocking order path.
-20. [ ] **55 — demo conformance suite in CI** (nightly + manual dispatch,
+19. [ ] **55 — demo conformance suite in CI** (nightly + manual dispatch,
     not per-PR; needs demo creds as Actions secrets; non-required job — red
     means schema drift or demo outage, both alert-worthy). Skips are
     failures (Jacob): tests self-find a market; only missing creds may skip.
-21. [ ] **69 — per-market precision audit.** Subpenny pricing is per-market
+20. [ ] **69 — per-market precision audit.** Subpenny pricing is per-market
     (`price_level_structure`, ignored today); quantities are fixed-point 2dp.
     Audit price-tick and quantity-step per market, carry a `MarketPrecision`
     through types, pin live demo behavior in conformance tests before any
     live switch on a subpenny market.
-22. [~] **70 — max-hold forced exit** (`max_hold_seconds`, 0 = off): passive
+21. [~] **70 — max-hold forced exit** (`max_hold_seconds`, 0 = off): passive
     exit first, forced taker exit at the deadline — bounded fee in place of
     unbounded z² drift (ND-HFTT pattern; docs/papers §6). Tune against
     attribution: right when drift saved exceeds taker fee + spread paid.
@@ -190,7 +186,7 @@
     10s main-loop sweep force-flattens aged tickers via the item-74
     retrying flatten with CARRIED residual logging. Flip once
     attribution says drift saved > taker fee + spread paid.*
-23. [ ] **71 — crypto 15m series (KXBTC15M family).** Measured on demo
+22. [ ] **71 — crypto 15m series (KXBTC15M family).** Measured on demo
     2026-07-11: ~130 trades/hr, two-sided, 24/7 — the most quotable flow
     demo has, excluded only by `min_days_to_close`. Build: per-window ticker
     resolution + 15-min session lifecycle (stop quoting ~60s before close;
@@ -198,7 +194,7 @@
     (tapered_deci_cent tails); external reference feed (Coinbase leads
     ~1–2s) for the momentum cancel. Risk: terminal z is structural — quote
     early/mid window, flee the end.
-24. [~] **72 — validate the backtest fill model against captured tape.**
+23. [~] **72 — validate the backtest fill model against captured tape.**
     Match trade prints to negative top-of-book deltas (±50ms, ND-HFTT
     method) on our capture corpus to measure print-through under-fill;
     adopt proportional delta-consumption if the gap is material — guards
@@ -245,6 +241,11 @@ refactors (R1–R4, R7) never block the gates.
 
 ## Done since the 2026-07-05 refresh (validation notes in the archive)
 
+58 scanner listing cache — one long-lived `TickerScanner` (main owns
+it) caches the ~70k-market listing for `market_cache_minutes` (default
+30; 0 = off): rotation re-scans reuse the listing as a coarse candidate
+filter while every finalist still passes fresh book/tape admission —
+kills the ~30s crawl on every 5-minute rotation (07-19) ·
 45+59 decision-oriented logging — quote analytics events now carry the
 "why" per placement (reservation value, base/fee half-spread, imbalance
 widen, flow lean, drift lean); per-side reprice reasons stay in the

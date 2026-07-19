@@ -1047,3 +1047,57 @@ TEST_F(TickerScannerTest, SingleRecentTradeFailsTapeRangeCheck) {
       << "fewer than two recent trades cannot demonstrate price discovery";
   EXPECT_EQ(results.front().ticker, "KXFED-A");
 }
+
+namespace {
+
+int count_markets_listing_requests(const FakeTransport &transport) {
+  int matches = 0;
+  for (const auto &request : transport.recorded_requests()) {
+    if (request.url.find("/markets?") != std::string::npos) {
+      ++matches;
+    }
+  }
+  return matches;
+}
+
+} // namespace
+
+TEST_F(TickerScannerTest, MarketListingCachedAcrossScansWithinTtl) {
+  auto [client, transport] = make_client_with_transport();
+  transport->enqueue({kHttpOk, make_markets_response({kMarketGoodA})});
+  kalshi::TickerScanner scanner{client};
+
+  const auto first = scanner.scan(kScanTopN, kTestNow);
+  const int listing_requests = count_markets_listing_requests(*transport);
+  const auto second =
+      scanner.scan(kScanTopN, kTestNow + std::chrono::minutes{5});
+
+  EXPECT_EQ(first.size(), 1U);
+  EXPECT_EQ(second.size(), 1U);
+  EXPECT_EQ(count_markets_listing_requests(*transport), listing_requests)
+      << "listing reused from cache inside the TTL";
+
+  transport->enqueue(
+      {kHttpOk, make_markets_response({kMarketGoodA, kMarketGoodB})});
+  constexpr auto kPastTtl = std::chrono::minutes{31};
+  const auto third = scanner.scan(kScanTopN, kTestNow + kPastTtl);
+
+  EXPECT_EQ(third.size(), 2U) << "TTL elapsed — listing refetched";
+  EXPECT_GT(count_markets_listing_requests(*transport), listing_requests);
+}
+
+TEST_F(TickerScannerTest, MarketListingCacheDisabledByZeroTtl) {
+  auto [client, transport] = make_client_with_transport();
+  transport->enqueue({kHttpOk, make_markets_response({kMarketGoodA})});
+  kalshi::ScannerConfig no_cache;
+  no_cache.market_cache_minutes = 0;
+  kalshi::TickerScanner scanner{client, no_cache};
+
+  const auto first = scanner.scan(kScanTopN, kTestNow);
+  const int listing_requests = count_markets_listing_requests(*transport);
+  transport->enqueue({kHttpOk, make_markets_response({kMarketGoodA})});
+  const auto second = scanner.scan(kScanTopN, kTestNow);
+
+  EXPECT_EQ(first.size(), second.size());
+  EXPECT_GT(count_markets_listing_requests(*transport), listing_requests);
+}

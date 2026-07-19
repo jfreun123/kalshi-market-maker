@@ -7,6 +7,7 @@
 #include "app/config.hpp"
 #include "engine/trading_session.hpp"
 #include "exchange/rest_client.hpp"
+#include "exchange/ticker_scanner.hpp"
 #include "net/auth.hpp"
 #include "net/paper_transport.hpp"
 #include "net/websocket_client.hpp"
@@ -61,7 +62,7 @@ int flatten_all_positions(
 
 int run_flatten_mode(RestClient &rest, std::shared_ptr<spdlog::logger> &log);
 
-std::vector<std::string> scan_top_tickers(RestClient &rest,
+std::vector<std::string> scan_top_tickers(TickerScanner &scanner,
                                           const AppConfig &app_config,
                                           std::shared_ptr<spdlog::logger> &log);
 
@@ -80,9 +81,9 @@ int run_backtest_mode(const std::filesystem::path &capture_path,
 int run_fv_replay_mode(const std::filesystem::path &capture_path,
                        std::ostream &out, std::shared_ptr<spdlog::logger> &log);
 
-void rotate_markets(RestClient &rest, TradingSession &session,
-                    WebSocketClient &ws_client, const AppConfig &app_config,
-                    std::mutex &engine_mtx,
+void rotate_markets(TickerScanner &scanner, RestClient &rest,
+                    TradingSession &session, WebSocketClient &ws_client,
+                    const AppConfig &app_config, std::mutex &engine_mtx,
                     std::shared_ptr<spdlog::logger> &log);
 
 } // namespace kalshi

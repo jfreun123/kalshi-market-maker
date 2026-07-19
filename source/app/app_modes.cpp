@@ -172,9 +172,9 @@ bool reconcile_against_exchange(
 // Scans for the top live markets exactly as the trading session does at
 // startup — one shared selection path for run, capture, and rotation modes.
 std::vector<std::string>
-scan_top_tickers(kalshi::RestClient &rest, const kalshi::AppConfig &app_config,
+scan_top_tickers(kalshi::TickerScanner &scanner,
+                 const kalshi::AppConfig &app_config,
                  std::shared_ptr<spdlog::logger> &log) {
-  kalshi::TickerScanner scanner{rest, app_config.scanner};
   std::vector<std::string> tickers;
   for (const auto &pick : scanner.scan(app_config.scanner.trade_top_n)) {
     tickers.push_back(pick.ticker);
@@ -189,12 +189,12 @@ scan_top_tickers(kalshi::RestClient &rest, const kalshi::AppConfig &app_config,
 // snapshot fetches run WITHOUT the engine lock (they are seconds of REST);
 // only session mutations take it. Markets holding a position or resting
 // orders are never rotated out.
-void rotate_markets(kalshi::RestClient &rest, kalshi::TradingSession &session,
+void rotate_markets(kalshi::TickerScanner &scanner, kalshi::RestClient &rest,
+                    kalshi::TradingSession &session,
                     kalshi::WebSocketClient &ws_client,
                     const kalshi::AppConfig &app_config, std::mutex &engine_mtx,
                     std::shared_ptr<spdlog::logger> &log) {
   try {
-    kalshi::TickerScanner scanner{rest, app_config.scanner};
     const auto picks = scanner.scan(app_config.scanner.trade_top_n);
     std::vector<std::string> pick_tickers;
     pick_tickers.reserve(picks.size());
@@ -574,7 +574,8 @@ int run_capture_mode(const std::atomic<bool> &shutdown_requested,
               app_config.scanner.trade_top_n);
     kalshi::RestClient scan_rest{
         auth, std::make_unique<kalshi::HttpTransport>(), app_config.base_url};
-    tickers = scan_top_tickers(scan_rest, app_config, log);
+    kalshi::TickerScanner capture_scanner{scan_rest, app_config.scanner};
+    tickers = scan_top_tickers(capture_scanner, app_config, log);
   }
   if (tickers.empty()) {
     log->critical("capture mode — scanner found no live markets and "
