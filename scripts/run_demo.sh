@@ -23,6 +23,13 @@ if [[ "$CLEAN" -eq 1 ]]; then
   echo "run_demo: logs archived to logs/archive/$stamp"
 fi
 
+if [[ ! -f config-demo.json ]]; then
+  echo "run_demo: config-demo.json not found (the canonical local config" >&2
+  echo "for demo sessions, gitignored). Bootstrap it with:" >&2
+  echo "  cp config.example.json config-demo.json   # then set secrets_path" >&2
+  exit 1
+fi
+
 ./build/source/kalshi_mm config-demo.json &
 BOT_PID=$!
 trap 'kill -INT "$BOT_PID" 2>/dev/null || true' INT TERM

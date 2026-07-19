@@ -4,12 +4,7 @@
   "pnl_state_path": "pnl_state.json",
   "account_wide_janitorial": true,
   "record_sessions": true,
-  "target_tickers": [
-    "KXCPI-26SEP-T0.3",
-    "KXCPI-26SEP-T0.1",
-    "KXCPI-26SEP-T0.4",
-    "KXCPI-26AUG-T0.3"
-  ],
+  "target_tickers": [],
   "quoter": {
     "target_spread_cents": 4,
     "reprice_threshold_cents": 1,
