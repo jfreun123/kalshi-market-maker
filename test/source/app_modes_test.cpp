@@ -467,8 +467,9 @@ TEST_F(AppModesTest, ScanTopTickersEmptyWhenNoMarketsQualify) {
                           std::move(transport), kBaseUrl};
   auto log = kalshi::get_logger();
   const kalshi::AppConfig app_config;
+  kalshi::TickerScanner scanner{rest, app_config.scanner};
 
-  const auto tickers = kalshi::scan_top_tickers(rest, app_config, log);
+  const auto tickers = kalshi::scan_top_tickers(scanner, app_config, log);
 
   EXPECT_TRUE(tickers.empty());
 }

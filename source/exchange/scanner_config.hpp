@@ -51,6 +51,11 @@ struct ScannerConfig {
   // Prints fetched by the admission probe when the tape-range check alone
   // needs samples.
   static constexpr int kDefaultTapeProbeTrades = 8;
+  // Market-listing cache TTL (item 58): the ~70k-market listing crawl costs
+  // ~30s and repeats on every rotation re-scan. Within the TTL a scan reuses
+  // the cached listing (coarse candidate filter only — every finalist still
+  // passes fresh book/tape admission checks). 0 disables.
+  static constexpr int kDefaultMarketCacheMinutes = 30;
 
   int min_price_cents{kDefaultMinPriceCents};
   int max_price_cents{kDefaultMaxPriceCents};
@@ -69,6 +74,7 @@ struct ScannerConfig {
   double min_minority_flow_ratio{kDefaultMinMinorityFlowRatio};
   double min_reversion_kappa{kDefaultMinReversionKappa};
   int reversion_window_minutes{kDefaultReversionWindowMinutes};
+  int market_cache_minutes{kDefaultMarketCacheMinutes};
   // When non-empty, scan fetches each event series separately instead of
   // using the global /markets listing (which returns zero-volume junk).
   std::vector<std::string> event_series{};

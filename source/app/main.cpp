@@ -274,11 +274,12 @@ int main(int argc, char *argv[]) {
 
     // Market selection is the session's own job (the rotation loop re-scans
     // anyway); config target_tickers survives only as a manual override.
+    kalshi::TickerScanner market_scanner{rest, app_config.scanner};
     if (app_config.target_tickers.empty()) {
       log->info("selecting top {} live market(s) at startup",
                 app_config.scanner.trade_top_n);
       app_config.target_tickers =
-          kalshi::scan_top_tickers(rest, app_config, log);
+          kalshi::scan_top_tickers(market_scanner, app_config, log);
     }
     if (app_config.target_tickers.empty()) {
       log->critical("scanner found no tradable live markets — try later or "
@@ -609,7 +610,8 @@ int main(int argc, char *argv[]) {
       // and it takes the lock itself only for the brief session mutations.
       if (paper_ptr == nullptr && rotation_ticks > 0 &&
           poll_count % rotation_ticks == 0) {
-        rotate_markets(rest, session, ws_client, app_config, engine_mtx, log);
+        rotate_markets(market_scanner, rest, session, ws_client, app_config,
+                       engine_mtx, log);
       }
 
       // Hold the engine lock only for the work, never across the sleep.

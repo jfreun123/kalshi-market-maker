@@ -163,7 +163,15 @@ TickerScanner::TickerScanner(RestClient &rest, ScannerConfig config)
 std::vector<MarketScore>
 TickerScanner::scan(int top_n,
                     std::chrono::system_clock::time_point now) const {
-  const auto markets = fetch_markets(rest_, config_.event_series);
+  const bool cache_fresh =
+      config_.market_cache_minutes > 0 && !cached_markets_.empty() &&
+      now - cache_fetched_at_ <
+          std::chrono::minutes{config_.market_cache_minutes};
+  if (!cache_fresh) {
+    cached_markets_ = fetch_markets(rest_, config_.event_series);
+    cache_fetched_at_ = now;
+  }
+  const auto &markets = cached_markets_;
 
   std::vector<MarketScore> candidates;
   candidates.reserve(markets.size());
