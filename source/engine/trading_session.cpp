@@ -77,7 +77,7 @@ void TradingSession::on_delta(const std::string &ticker, Side side,
   }
 }
 
-void TradingSession::on_fill(const Fill &fill) {
+bool TradingSession::on_fill(const Fill &fill) {
   if (trade_tape_ != nullptr) {
     trade_tape_->record_own_fill(fill.trade_id);
   }
@@ -86,12 +86,12 @@ void TradingSession::on_fill(const Fill &fill) {
         "fill for untracked ticker={} ignored (another session's fill on "
         "this account, or a market never adopted)",
         fill.market_ticker);
-    return;
+    return false;
   }
   if (!order_mgr_.record_fill(fill)) {
     get_logger()->debug("duplicate fill ignored ticker={} trade_id={}",
                         fill.market_ticker, fill.trade_id);
-    return;
+    return false;
   }
   if (!order_mgr_.open_orders().contains(fill.order_id)) {
     strategy_.forget_order(fill.market_ticker, fill.order_id);
@@ -128,6 +128,7 @@ void TradingSession::on_fill(const Fill &fill) {
   if (pnl_listener_) {
     pnl_listener_(carried_totals());
   }
+  return true;
 }
 
 void TradingSession::set_analytics(AnalyticsLogger *analytics) {

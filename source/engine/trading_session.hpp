@@ -61,7 +61,9 @@ public:
   void on_delta(const std::string &ticker, Side side, int price_cents,
                 Quantity qty);
   // Record a fill, refresh per-market risk, and notify the PnL listener.
-  void on_fill(const Fill &fill);
+  // Returns true when the fill was newly recorded; false for duplicates and
+  // untracked tickers (lets backfill replays count what actually landed).
+  bool on_fill(const Fill &fill);
   // Feed a public print to the trade tape (no-op without a tape).
   void on_trade(const PublicTrade &trade);
 

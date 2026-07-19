@@ -77,6 +77,34 @@ int run_scan_mode(kalshi::RestClient &rest,
 
 // ---- Reconciliation against the exchange ----
 
+int backfill_fills(kalshi::RestClient &rest, kalshi::TradingSession &session,
+                   long long min_ts_seconds,
+                   std::chrono::system_clock::time_point *advance,
+                   std::shared_ptr<spdlog::logger> &log) {
+  std::vector<kalshi::Fill> fetched;
+  try {
+    fetched = rest.get_fills(min_ts_seconds);
+  } catch (const std::exception &ex) {
+    log->error("fill backfill: fetch failed: {}", ex.what());
+    return -1;
+  }
+  int replayed = 0;
+  for (const auto &fill : fetched) {
+    if (!session.is_tracked(fill.market_ticker)) {
+      continue;
+    }
+    if (session.on_fill(fill)) {
+      ++replayed;
+    }
+    if (advance != nullptr) {
+      *advance = std::max(*advance, fill.timestamp);
+    }
+  }
+  log->info("fill backfill: fetched={} newly_recorded={}", fetched.size(),
+            replayed);
+  return replayed;
+}
+
 // Fetches the exchange's authoritative positions and compares them to local
 // accounting. On drift, logs every mismatch; if risk_mgr is non-null (live
 // trading) it trips kModelDiverge to halt all quoting. Returns true if in sync.
@@ -84,25 +112,45 @@ bool reconcile_against_exchange(
     kalshi::RestClient &rest, const kalshi::IOrderManager &order_mgr,
     const std::vector<std::string> &tickers, kalshi::RiskManager *risk_mgr,
     std::shared_ptr<spdlog::logger> &log,
-    const std::vector<kalshi::MarketPosition> &baseline) {
-  std::vector<kalshi::MarketPosition> exchange;
-  try {
-    exchange = rest.get_positions();
-  } catch (const std::exception &ex) {
-    log->error("reconcile: failed to fetch exchange positions: {}", ex.what());
-    return false;
-  }
-
-  const auto result = kalshi::reconcile(order_mgr, tickers, exchange, baseline);
-  if (result.in_sync) {
-    log->info("reconcile: in sync ({} exchange positions checked)",
-              exchange.size());
-    if (risk_mgr != nullptr &&
-        risk_mgr->is_set(kalshi::Constraint::kModelDiverge)) {
-      risk_mgr->clear(kalshi::Constraint::kModelDiverge);
-      log->info("reconcile back in sync — drift halt cleared");
+    const std::vector<kalshi::MarketPosition> &baseline,
+    const std::function<int()> &backfill) {
+  constexpr int kComparePasses = 2;
+  kalshi::Reconciliation result;
+  for (int pass = 1; pass <= kComparePasses; ++pass) {
+    std::vector<kalshi::MarketPosition> exchange;
+    try {
+      exchange = rest.get_positions();
+    } catch (const std::exception &ex) {
+      log->error("reconcile: failed to fetch exchange positions: {}",
+                 ex.what());
+      if (pass == 1) {
+        return false;
+      }
+      break;
     }
-    return true;
+
+    result = kalshi::reconcile(order_mgr, tickers, exchange, baseline);
+    if (result.in_sync) {
+      log->info("reconcile: in sync ({} exchange positions checked)",
+                exchange.size());
+      if (risk_mgr != nullptr &&
+          risk_mgr->is_set(kalshi::Constraint::kModelDiverge)) {
+        risk_mgr->clear(kalshi::Constraint::kModelDiverge);
+        log->info("reconcile back in sync — drift halt cleared");
+      }
+      return true;
+    }
+
+    if (pass == 1 && backfill) {
+      log->warn("reconcile drift ({} mismatch(es)) — backfilling fills "
+                "before halting",
+                result.diffs.size());
+      const int replayed = backfill();
+      if (replayed >= 0) {
+        continue;
+      }
+    }
+    break;
   }
 
   for (const auto &diff : result.diffs) {
