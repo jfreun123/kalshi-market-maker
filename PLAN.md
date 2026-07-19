@@ -173,25 +173,21 @@
     ~30s before quoting. Query `status=open` server-side is already used;
     cap pagination and/or cache market metadata between runs with
     incremental refresh. Becomes real waste on every rotation re-scan.
-20. [ ] **75 — committed `config.json` should ship `target_tickers: []`**
-    (self-selection is the documented default; the four pinned CPI tickers
-    are stale) and the run scripts should agree on one canonical local
-    config name (`config-demo.json` today, absent on fresh clones).
-21. [ ] **23 — ceil-per-order maker-fee model** (inert while demo maker
+20. [ ] **23 — ceil-per-order maker-fee model** (inert while demo maker
     fills are free) · **3 — passive clamp vs fresher BBO** (D1 residual).
-22. [ ] **54 — batch CreateOrders.** V2 batch create/cancel; batch seeds and
+21. [ ] **54 — batch CreateOrders.** V2 batch create/cancel; batch seeds and
     layered quotes into one request. Sequence after L3 so batching composes
     with the non-blocking order path.
-23. [ ] **55 — demo conformance suite in CI** (nightly + manual dispatch,
+22. [ ] **55 — demo conformance suite in CI** (nightly + manual dispatch,
     not per-PR; needs demo creds as Actions secrets; non-required job — red
     means schema drift or demo outage, both alert-worthy). Skips are
     failures (Jacob): tests self-find a market; only missing creds may skip.
-24. [ ] **69 — per-market precision audit.** Subpenny pricing is per-market
+23. [ ] **69 — per-market precision audit.** Subpenny pricing is per-market
     (`price_level_structure`, ignored today); quantities are fixed-point 2dp.
     Audit price-tick and quantity-step per market, carry a `MarketPrecision`
     through types, pin live demo behavior in conformance tests before any
     live switch on a subpenny market.
-25. [~] **70 — max-hold forced exit** (`max_hold_seconds`, 0 = off): passive
+24. [~] **70 — max-hold forced exit** (`max_hold_seconds`, 0 = off): passive
     exit first, forced taker exit at the deadline — bounded fee in place of
     unbounded z² drift (ND-HFTT pattern; docs/papers §6). Tune against
     attribution: right when drift saved exceeds taker fee + spread paid.
@@ -201,7 +197,7 @@
     10s main-loop sweep force-flattens aged tickers via the item-74
     retrying flatten with CARRIED residual logging. Flip once
     attribution says drift saved > taker fee + spread paid.*
-26. [ ] **71 — crypto 15m series (KXBTC15M family).** Measured on demo
+25. [ ] **71 — crypto 15m series (KXBTC15M family).** Measured on demo
     2026-07-11: ~130 trades/hr, two-sided, 24/7 — the most quotable flow
     demo has, excluded only by `min_days_to_close`. Build: per-window ticker
     resolution + 15-min session lifecycle (stop quoting ~60s before close;
@@ -209,7 +205,7 @@
     (tapered_deci_cent tails); external reference feed (Coinbase leads
     ~1–2s) for the momentum cancel. Risk: terminal z is structural — quote
     early/mid window, flee the end.
-27. [ ] **72 — validate the backtest fill model against captured tape.**
+26. [ ] **72 — validate the backtest fill model against captured tape.**
     Match trade prints to negative top-of-book deltas (±50ms, ND-HFTT
     method) on our capture corpus to measure print-through under-fill;
     adopt proportional delta-consumption if the gap is material — guards
@@ -250,6 +246,10 @@ refactors (R1–R4, R7) never block the gates.
 
 ## Done since the 2026-07-05 refresh (validation notes in the archive)
 
+75 config hygiene — committed `config.json` ships `target_tickers: []`
+(self-selection default; the four pinned CPI tickers were stale) and
+`run_demo.sh` bootstraps a missing `config-demo.json` with a copy hint
+(all run scripts already agree on that canonical name) (07-19) ·
 L3 async order dispatch — `EventPump`: WS callbacks reduce to a
 queue-mutex push; a single consumer thread drains in arrival order and
 applies to the session under the engine lock, so the socket thread is
