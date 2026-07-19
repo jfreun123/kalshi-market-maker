@@ -85,6 +85,19 @@ struct QuoterConfig {
   // widened to cover it so net-of-fee edge stays positive. 0 = no maker fee
   // (default — set to your market's actual rate, e.g. 0.07).
   double maker_fee_rate = 0.0;
+  // Drift lean (item 60a): when the DriftEstimator's slope is significant
+  // (|t| >= the threshold), shift fair value by gain × slope(c/min), weighted
+  // by tape confirmation (prints in window / confirm_prints, capped at 1 —
+  // drift on a thin tape is only partially trusted) and clamped to ±max.
+  // Gain 0 disables (default until a matched A/B validates the flip).
+  static constexpr double kDefaultDriftLeanGain = 0.0;
+  static constexpr double kDefaultDriftLeanMaxCents = 2.0;
+  static constexpr double kDefaultDriftTStatThreshold = 2.0;
+  static constexpr int kDefaultDriftConfirmPrints = 5;
+  double drift_lean_gain = kDefaultDriftLeanGain;
+  double drift_lean_max_cents = kDefaultDriftLeanMaxCents;
+  double drift_t_stat_threshold = kDefaultDriftTStatThreshold;
+  int drift_confirm_prints = kDefaultDriftConfirmPrints;
 };
 
 } // namespace kalshi

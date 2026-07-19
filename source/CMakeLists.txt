@@ -35,7 +35,8 @@ kalshi_add_layer(kalshi_engine
     engine/orderbook.cpp engine/trade_tape.cpp engine/flow_imbalance.cpp
     engine/pricing_model.cpp engine/fair_value.cpp engine/theo_grid.cpp
     engine/analytics.cpp engine/portfolio.cpp engine/risk_manager.cpp
-    engine/trading_session.cpp engine/event_pump.cpp)
+    engine/trading_session.cpp engine/event_pump.cpp
+    engine/drift_estimator.cpp)
 target_link_libraries(kalshi_engine PUBLIC kalshi_core
                                             nlohmann_json::nlohmann_json)
 

@@ -5,6 +5,7 @@
 #include "core/ensure.hpp"
 #include "core/logger.hpp"
 #include "engine/analytics.hpp"
+#include "engine/drift_estimator.hpp"
 #include "engine/flow_imbalance.hpp"
 
 #include <algorithm>
@@ -304,11 +305,15 @@ void Quoter::update(std::string_view ticker, const LocalOrderbook &book) {
           : config_.fv_ema_alpha * micro +
                 (1.0 - config_.fv_ema_alpha) * ema_it->second;
   fv_ema_[ticker_str] = smoothed_micro;
+  const auto wall_now = std::chrono::system_clock::now();
+  if (drift_estimator_ != nullptr) {
+    drift_estimator_->add_sample(ticker_str, wall_now, mid);
+  }
   std::optional<double> tape_vwap;
   if (trade_tape_ != nullptr) {
     tape_vwap = trade_tape_->vwap_cents(
         ticker_str, std::chrono::seconds{config_.tape_half_life_seconds},
-        std::chrono::system_clock::now());
+        wall_now);
   }
   const double fair_val = fv_engine_.estimate(FairValueInput{
       smoothed_micro, kDefaultTimeToCloseHours, 0, {}, tape_vwap});
@@ -343,6 +348,29 @@ void Quoter::update(std::string_view ticker, const LocalOrderbook &book) {
     if (taker_side.has_value()) {
       leaned_val += (*taker_side == Side::Yes) ? config_.flow_lean_cents
                                                : -config_.flow_lean_cents;
+    }
+  }
+  if (config_.drift_lean_gain > 0.0 && drift_estimator_ != nullptr) {
+    const auto drift = drift_estimator_->signal(ticker_str, wall_now);
+    if (drift.has_value() &&
+        std::abs(drift->t_stat) >= config_.drift_t_stat_threshold) {
+      double confirmation = 1.0;
+      if (trade_tape_ != nullptr && config_.drift_confirm_prints > 0) {
+        confirmation =
+            std::min(1.0, static_cast<double>(
+                              trade_tape_->print_count(ticker_str, wall_now)) /
+                              config_.drift_confirm_prints);
+      }
+      const double drift_lean = std::clamp(
+          config_.drift_lean_gain * drift->slope_cents_per_minute *
+              confirmation,
+          -config_.drift_lean_max_cents, config_.drift_lean_max_cents);
+      leaned_val += drift_lean;
+      get_logger()->debug(
+          "drift lean ticker={} slope={:.2f}c/min t={:.1f} confirm={:.2f} "
+          "lean={:+.2f}c",
+          ticker, drift->slope_cents_per_minute, drift->t_stat, confirmation,
+          drift_lean);
     }
   }
   const double reservation_val =
@@ -409,6 +437,10 @@ void Quoter::set_reduce_only(bool reduce_only) { reduce_only_ = reduce_only; }
 
 void Quoter::set_analytics(AnalyticsLogger *analytics) {
   analytics_ = analytics;
+}
+
+void Quoter::set_drift_estimator(DriftEstimator *estimator) {
+  drift_estimator_ = estimator;
 }
 
 void Quoter::set_trade_tape(const TradeTape *trade_tape) {

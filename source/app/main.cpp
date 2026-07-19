@@ -4,6 +4,7 @@
 #include "core/ensure.hpp"
 #include "core/logger.hpp"
 #include "engine/analytics.hpp"
+#include "engine/drift_estimator.hpp"
 #include "engine/event_pump.hpp"
 #include "engine/fair_value.hpp"
 #include "engine/flow_imbalance.hpp"
@@ -335,6 +336,8 @@ int main(int argc, char *argv[]) {
     kalshi::TradeTape trade_tape{kalshi::TradeTapeConfig{}};
     session.set_trade_tape(&trade_tape);
     quoter.set_trade_tape(&trade_tape);
+    kalshi::DriftEstimator drift_estimator{kalshi::DriftEstimatorConfig{}};
+    quoter.set_drift_estimator(&drift_estimator);
 
     quoter.set_analytics(&analytics);
     session.set_analytics(&analytics);
