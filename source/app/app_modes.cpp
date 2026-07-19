@@ -254,6 +254,8 @@ int flatten_all_positions(kalshi::RestClient &rest,
                           std::shared_ptr<spdlog::logger> &log,
                           kalshi::TradingSession *session,
                           const std::vector<std::string> *only_tickers) {
+  constexpr int kFlattenAttempts = 3;
+  constexpr auto kFlattenRetryDelay = std::chrono::milliseconds{500};
   int closed = 0;
   for (const auto &position : rest.get_positions()) {
     if (position.position.is_zero()) {
@@ -264,17 +266,39 @@ int flatten_all_positions(kalshi::RestClient &rest,
             only_tickers->end()) {
       continue;
     }
-    try {
-      const auto order = rest.flatten(position.ticker, position.position);
-      log->info("flatten ticker={} net={} filled={} order_id={}",
-                position.ticker, position.position.to_fp_string(),
-                order.filled_quantity.to_fp_string(), order.id);
-      if (session != nullptr) {
-        session->record_flatten(order);
+    const bool long_yes = position.position.is_positive();
+    kalshi::Quantity remaining =
+        long_yes ? position.position : -position.position;
+    for (int attempt = 1;
+         attempt <= kFlattenAttempts && remaining.is_positive(); ++attempt) {
+      if (attempt > 1) {
+        std::this_thread::sleep_for(kFlattenRetryDelay);
       }
+      try {
+        const auto order =
+            rest.flatten(position.ticker, long_yes ? remaining : -remaining);
+        log->info("flatten ticker={} net={} attempt={}/{} filled={} "
+                  "order_id={}",
+                  position.ticker, position.position.to_fp_string(), attempt,
+                  kFlattenAttempts, order.filled_quantity.to_fp_string(),
+                  order.id);
+        if (session != nullptr) {
+          session->record_flatten(order);
+        }
+        remaining -= order.filled_quantity;
+      } catch (const std::exception &ex) {
+        log->error("flatten ticker={} attempt={}/{} failed: {}",
+                   position.ticker, attempt, kFlattenAttempts, ex.what());
+      }
+    }
+    if (remaining.is_positive()) {
+      log->critical(
+          "flatten CARRIED ticker={} residual={} of net={} — position rides "
+          "to settlement unmanaged",
+          position.ticker, (long_yes ? remaining : -remaining).to_fp_string(),
+          position.position.to_fp_string());
+    } else {
       ++closed;
-    } catch (const std::exception &ex) {
-      log->error("flatten ticker={} failed: {}", position.ticker, ex.what());
     }
   }
   return closed;
