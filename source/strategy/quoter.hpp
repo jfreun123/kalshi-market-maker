@@ -19,6 +19,7 @@ namespace kalshi {
 class FlowImbalanceGuard; // widen the spread under adverse one-sided flow
 class AnalyticsLogger;    // JSONL quote/fill events for offline measurement
 class TradeTape;          // rolling public-print window (clearing-price fv)
+class DriftEstimator;     // rolling mid-drift slope + t-stat (item 60a)
 
 // LMSR log-odds inventory skew (Berg & Proebsting pp.49-56): the reservation
 // price shifts a constant amount per contract in log-odds space, so the skew
@@ -64,6 +65,10 @@ public:
   // event (PLAN item 31). Must outlive the Quoter; nullptr disables.
   void set_analytics(AnalyticsLogger *analytics);
   void set_trade_tape(const TradeTape *trade_tape);
+  // Optional drift lean input (item 60a): the quoter feeds every update's mid
+  // into the estimator and, when drift_lean_gain > 0 and the slope is
+  // significant, leans fair value with it. Must outlive the Quoter.
+  void set_drift_estimator(DriftEstimator *estimator);
 
   // Forget all tracked resting quotes. Call this after the resting orders have
   // been cancelled out-of-band (risk halt, disconnect, shutdown): the quoter's
@@ -122,6 +127,7 @@ private:
   std::unordered_map<std::string, double> fv_ema_;
   AnalyticsLogger *analytics_{nullptr};
   const TradeTape *trade_tape_{nullptr};
+  DriftEstimator *drift_estimator_{nullptr};
   bool reduce_only_{false};
   std::unordered_map<std::string, OwnQuote> own_quotes_;
   LocalOrderbook scratch_book_;

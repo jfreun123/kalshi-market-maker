@@ -1,5 +1,6 @@
 #include "quoter_test_util.hpp"
 
+#include "engine/drift_estimator.hpp"
 #include "engine/fair_value.hpp"
 #include "engine/pricing_model.hpp"
 #include "engine/trade_tape.hpp"
@@ -786,4 +787,77 @@ TEST_F(QuoterTest, ForgetTickerRequotesBothSidesAfterOutOfBandCancel) {
         << "forget is bookkeeping only — the orders were cancelled "
            "out-of-band";
   }
+}
+
+TEST_F(QuoterTest, DriftLeanShiftsQuotesWhenSignificantAndEnabled) {
+  auto transport_ptr = std::make_unique<FakeTransport>();
+  FakeTransport &transport = *transport_ptr;
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId1, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId2, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  kalshi::RestClient rest{kalshi::Auth{kApiKey, kPemPrivateKey},
+                          std::move(transport_ptr), kBaseUrl};
+  kalshi::OrderManager order_mgr{rest};
+  kalshi::RiskManager risk_mgr{kalshi::RiskLimits{}};
+  kalshi::QuoterConfig config;
+  constexpr double kDriftGain = 0.25;
+  config.drift_lean_gain = kDriftGain;
+  kalshi::Quoter quoter{config, order_mgr, risk_mgr};
+
+  kalshi::DriftEstimator drift_estimator{kalshi::DriftEstimatorConfig{}};
+  constexpr int kWarmSamples = 13;
+  constexpr int kWarmSpacingSeconds = 5;
+  constexpr double kWarmSlopeCentsPerSecond = 0.1;
+  const auto now = std::chrono::system_clock::now();
+  for (int index = 0; index < kWarmSamples; ++index) {
+    const int seconds_ago = (kWarmSamples - 1 - index) * kWarmSpacingSeconds;
+    drift_estimator.add_sample(kTicker, now - std::chrono::seconds{seconds_ago},
+                               52.0 - kWarmSlopeCentsPerSecond * seconds_ago);
+  }
+  quoter.set_drift_estimator(&drift_estimator);
+
+  quoter.update(kTicker, make_ob(kYesBid52, kNoBid52));
+
+  const std::string &bid_body = transport.recorded_requests().at(0).body;
+  const std::string &ask_body = transport.recorded_requests().at(1).body;
+  EXPECT_NE(bid_body.find(R"("price":"0.5100")"), std::string::npos)
+      << bid_body;
+  EXPECT_NE(ask_body.find(R"("price":"0.5600")"), std::string::npos)
+      << ask_body;
+}
+
+TEST_F(QuoterTest, DriftLeanOffByDefaultLeavesQuotesUnchanged) {
+  auto transport_ptr = std::make_unique<FakeTransport>();
+  FakeTransport &transport = *transport_ptr;
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId1, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId2, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  kalshi::RestClient rest{kalshi::Auth{kApiKey, kPemPrivateKey},
+                          std::move(transport_ptr), kBaseUrl};
+  kalshi::OrderManager order_mgr{rest};
+  kalshi::RiskManager risk_mgr{kalshi::RiskLimits{}};
+  kalshi::Quoter quoter{kalshi::QuoterConfig{}, order_mgr, risk_mgr};
+
+  kalshi::DriftEstimator drift_estimator{kalshi::DriftEstimatorConfig{}};
+  constexpr int kWarmSamples = 13;
+  constexpr int kWarmSpacingSeconds = 5;
+  constexpr double kWarmSlopeCentsPerSecond = 0.1;
+  const auto now = std::chrono::system_clock::now();
+  for (int index = 0; index < kWarmSamples; ++index) {
+    const int seconds_ago = (kWarmSamples - 1 - index) * kWarmSpacingSeconds;
+    drift_estimator.add_sample(kTicker, now - std::chrono::seconds{seconds_ago},
+                               52.0 - kWarmSlopeCentsPerSecond * seconds_ago);
+  }
+  quoter.set_drift_estimator(&drift_estimator);
+
+  quoter.update(kTicker, make_ob(kYesBid52, kNoBid52));
+
+  const std::string &bid_body = transport.recorded_requests().at(0).body;
+  EXPECT_NE(bid_body.find(std::string(kBidPriceMid52)), std::string::npos);
 }

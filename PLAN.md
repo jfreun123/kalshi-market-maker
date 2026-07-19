@@ -60,7 +60,13 @@
 6. [ ] **51 — panic pull tier (Jacob to confirm)**: on a catastrophic jump
    (≥ `panic_jump_cents`, e.g. 8), cancel the toxic side instantly — no
    confirmation, no rest floor, no re-quote until the book settles.
-7. [ ] **60 — regression calibration.** (a) **Drift estimator — build
+7. [~] **60 — regression calibration.** *60a shipped 07-19:
+    `DriftEstimator` (rolling OLS slope + t-stat per market) feeds a
+    significance-gated, tape-confirmation-weighted fair-value lean in the
+    Quoter — `drift_lean_gain` default 0 (OFF) until a run-20-style
+    matched A/B validates the flip; scanner-side |slope| penalty is
+    already covered by the κ-admission (K/z², item 67).*
+    (a) **Drift estimator — build
     first, no fill history needed**: significance-gated rolling regression
     (slope + t-stat) of the smoothed mid on the quote stream; scale the flow
     lean (`clamp(k·slope·horizon, ±max)`) and penalize |slope| in the

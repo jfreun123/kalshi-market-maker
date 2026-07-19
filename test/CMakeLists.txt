@@ -16,6 +16,7 @@ endfunction()
 
 kalshi_add_test(types_test source/types_test.cpp)
 kalshi_add_test(event_pump_test source/event_pump_test.cpp)
+kalshi_add_test(drift_estimator_test source/drift_estimator_test.cpp)
 kalshi_add_test(cli_test source/cli_test.cpp)
 kalshi_add_test(quantity_test source/quantity_test.cpp)
 kalshi_add_test(ensure_test source/ensure_test.cpp)

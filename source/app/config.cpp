@@ -145,6 +145,14 @@ AppConfig load_config(const std::filesystem::path &path) {
         "inventory_cap_lots", QuoterConfig::kDefaultInventoryCapLots);
     config.quoter.unwind_edge_cents = quoter_json.value(
         "unwind_edge_cents", QuoterConfig::kDefaultUnwindEdgeCents);
+    config.quoter.drift_lean_gain = quoter_json.value(
+        "drift_lean_gain", QuoterConfig::kDefaultDriftLeanGain);
+    config.quoter.drift_lean_max_cents = quoter_json.value(
+        "drift_lean_max_cents", QuoterConfig::kDefaultDriftLeanMaxCents);
+    config.quoter.drift_t_stat_threshold = quoter_json.value(
+        "drift_t_stat_threshold", QuoterConfig::kDefaultDriftTStatThreshold);
+    config.quoter.drift_confirm_prints = quoter_json.value(
+        "drift_confirm_prints", QuoterConfig::kDefaultDriftConfirmPrints);
   }
 
   // The imbalance guard should engage once roughly one full quote of one-sided
