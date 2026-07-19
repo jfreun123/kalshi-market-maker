@@ -56,8 +56,15 @@ TEST(AnalyticsLoggerTest, QuoteDecisionEmitsOneParseableJsonLine) {
   CollectingSink sink;
   kalshi::AnalyticsLogger analytics{sink.as_sink(), fixed_clock()};
 
-  analytics.quote_decision(
-      {kTicker, kMid, kMicro, kFairValue, kBid, kAsk, kInventory, true});
+  constexpr double kReservation = 51.5;
+  constexpr int kBaseHalf = 2;
+  constexpr int kFeeHalf = 1;
+  constexpr int kImbalanceWiden = 2;
+  constexpr double kFlowLean = 1.0;
+  constexpr double kDriftLean = -0.5;
+  analytics.quote_decision({kTicker, kMid, kMicro, kFairValue, kBid, kAsk,
+                            kInventory, true, kReservation, kBaseHalf, kFeeHalf,
+                            kImbalanceWiden, kFlowLean, kDriftLean});
 
   ASSERT_EQ(sink.lines.size(), 1U);
   const auto parsed = nlohmann::json::parse(sink.lines.front());
@@ -71,6 +78,12 @@ TEST(AnalyticsLoggerTest, QuoteDecisionEmitsOneParseableJsonLine) {
   EXPECT_EQ(parsed.at("ask"), kAsk);
   EXPECT_DOUBLE_EQ(parsed.at("inventory"), kInventory);
   EXPECT_EQ(parsed.at("imbalanced"), true);
+  EXPECT_DOUBLE_EQ(parsed.at("resv"), kReservation);
+  EXPECT_EQ(parsed.at("half_base"), kBaseHalf);
+  EXPECT_EQ(parsed.at("half_fee"), kFeeHalf);
+  EXPECT_EQ(parsed.at("widen"), kImbalanceWiden);
+  EXPECT_DOUBLE_EQ(parsed.at("lean_flow"), kFlowLean);
+  EXPECT_DOUBLE_EQ(parsed.at("lean_drift"), kDriftLean);
 }
 
 TEST(AnalyticsLoggerTest, FillEmitsJsonLineWithMarketContext) {

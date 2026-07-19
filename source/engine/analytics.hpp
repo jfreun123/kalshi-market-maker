@@ -23,6 +23,12 @@ struct QuoteDecision {
   int ask_cents{0};
   double inventory_contracts{0.0};
   bool flow_imbalanced{false};
+  double reservation_cents{0.0};
+  int base_half_spread_cents{0};
+  int fee_half_cents{0};
+  int imbalance_widen_cents{0};
+  double flow_lean_cents{0.0};
+  double drift_lean_cents{0.0};
 };
 
 class AnalyticsLogger {
