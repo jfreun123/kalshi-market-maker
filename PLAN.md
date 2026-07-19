@@ -205,11 +205,17 @@
     (tapered_deci_cent tails); external reference feed (Coinbase leads
     ~1–2s) for the momentum cancel. Risk: terminal z is structural — quote
     early/mid window, flee the end.
-26. [ ] **72 — validate the backtest fill model against captured tape.**
+26. [~] **72 — validate the backtest fill model against captured tape.**
     Match trade prints to negative top-of-book deltas (±50ms, ND-HFTT
     method) on our capture corpus to measure print-through under-fill;
     adopt proportional delta-consumption if the gap is material — guards
     the clearing-pricing verdict from a flattering fill model.
+    *Script shipped 07-19 (`scripts/fill_model_check.py`, fixture-validated):
+    68.8% of print volume executes AT the BBO (4,190 prints; delta-match
+    87.9% confirms tape/book alignment) — the strict print-through model
+    ignores two-thirds of flow. Verdict: adopt proportional
+    delta-consumption in `simulate_maker_fills` BEFORE trusting the item-66
+    clearing-pricing A/B; that model change is the remaining half.*
 **Selection principle (Jacob, 2026-07-04): profitable on every market we
 CHOOSE, then scale.** Not every market can be made profitably — trending
 books, dead books, and 1c-spread deep books all bleed makers. The bar: only
