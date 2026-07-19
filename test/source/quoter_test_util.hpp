@@ -153,6 +153,30 @@ kalshi::LocalOrderbook make_ob(int yes_bid_cents, int no_bid_cents) {
   return book;
 }
 
+[[maybe_unused]] int count_method(const FakeTransport &transport,
+                                  const std::string &method) {
+  int matches = 0;
+  for (const auto &request : transport.recorded_requests()) {
+    if (request.method == method) {
+      ++matches;
+    }
+  }
+  return matches;
+}
+
+[[maybe_unused]] int count_side_posts(const FakeTransport &transport,
+                                      const std::string &side) {
+  const std::string marker = "\"side\":\"" + side + "\"";
+  int matches = 0;
+  for (const auto &request : transport.recorded_requests()) {
+    if (request.method == "POST" &&
+        request.body.find(marker) != std::string::npos) {
+      ++matches;
+    }
+  }
+  return matches;
+}
+
 // Records a single fill directly into an OrderManager (no REST call needed).
 [[maybe_unused]] void record_position_fill(kalshi::OrderManager &order_mgr,
                                            const std::string &order_id,

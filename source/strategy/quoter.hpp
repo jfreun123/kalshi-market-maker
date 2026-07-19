@@ -101,6 +101,8 @@ private:
     std::chrono::steady_clock::time_point ask_placed_at;
     bool bid_fade_pending{false};
     bool ask_fade_pending{false};
+    std::chrono::steady_clock::time_point bid_panic_until;
+    std::chrono::steady_clock::time_point ask_panic_until;
   };
 
   // Returns {bid_cents, ask_cents} with bid ∈ [1,98] and ask ∈ [2,99].

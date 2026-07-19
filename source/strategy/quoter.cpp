@@ -112,6 +112,9 @@ void Quoter::refresh_bid(const std::string &ticker, OwnQuote &own,
                          int desired_bid,
                          std::chrono::steady_clock::time_point now) {
   if (own.bid_order_id.empty()) {
+    if (now < own.bid_panic_until) {
+      return;
+    }
     // Self-cross guard: don't place bid if it would match our own resting ask.
     if (!own.ask_order_id.empty() && desired_bid >= own.quoted_ask_cents) {
       return;
@@ -127,6 +130,21 @@ void Quoter::refresh_bid(const std::string &ticker, OwnQuote &own,
     own.bid_placed_at = now;
   } else if (std::abs(own.quoted_bid_cents - desired_bid) >
              config_.reprice_threshold_cents) {
+    if (config_.panic_jump_cents > 0 &&
+        own.quoted_bid_cents - desired_bid >= config_.panic_jump_cents) {
+      if (!release_order(own.bid_order_id)) {
+        return;
+      }
+      own.bid_order_id.clear();
+      own.bid_fade_pending = false;
+      own.bid_panic_until =
+          now + std::chrono::milliseconds{config_.panic_settle_ms};
+      get_logger()->critical(
+          "panic pull ticker={} side=bid quoted={} desired={} — cancelled "
+          "instantly, quiet for {}ms",
+          ticker, own.quoted_bid_cents, desired_bid, config_.panic_settle_ms);
+      return;
+    }
     const bool adverse_jump =
         own.quoted_bid_cents - desired_bid >= config_.theo_jump_cents;
     if (adverse_jump && !own.bid_fade_pending) {
@@ -196,6 +214,9 @@ void Quoter::refresh_ask(const std::string &ticker, OwnQuote &own,
                          std::chrono::steady_clock::time_point now) {
   const int no_price = complement_price(desired_ask);
   if (own.ask_order_id.empty()) {
+    if (now < own.ask_panic_until) {
+      return;
+    }
     // Self-cross guard: don't place ask if it would match our own resting bid.
     if (!own.bid_order_id.empty() && desired_ask <= own.quoted_bid_cents) {
       return;
@@ -211,6 +232,21 @@ void Quoter::refresh_ask(const std::string &ticker, OwnQuote &own,
     own.ask_placed_at = now;
   } else if (std::abs(own.quoted_ask_cents - desired_ask) >
              config_.reprice_threshold_cents) {
+    if (config_.panic_jump_cents > 0 &&
+        desired_ask - own.quoted_ask_cents >= config_.panic_jump_cents) {
+      if (!release_order(own.ask_order_id)) {
+        return;
+      }
+      own.ask_order_id.clear();
+      own.ask_fade_pending = false;
+      own.ask_panic_until =
+          now + std::chrono::milliseconds{config_.panic_settle_ms};
+      get_logger()->critical(
+          "panic pull ticker={} side=ask quoted={} desired={} — cancelled "
+          "instantly, quiet for {}ms",
+          ticker, own.quoted_ask_cents, desired_ask, config_.panic_settle_ms);
+      return;
+    }
     const bool adverse_jump =
         desired_ask - own.quoted_ask_cents >= config_.theo_jump_cents;
     if (adverse_jump && !own.ask_fade_pending) {
