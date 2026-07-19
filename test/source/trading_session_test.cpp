@@ -349,6 +349,22 @@ TEST_F(TradingSessionTest, FeedArrivalAfterDeadFeedCancelResumesQuoting) {
       << "once the feed finally ticks, the market re-quotes from a live book";
 }
 
+TEST_F(TradingSessionTest, OnFillReportsRecordedVsDuplicateVsUntracked) {
+  auto fill = make_fill(kFillOrderId, kTicker, kalshi::Side::Yes, kHighYesPrice,
+                        kOneLot);
+  fill.trade_id = "backfill-trade-1";
+
+  EXPECT_TRUE(session_.on_fill(fill));
+  EXPECT_FALSE(session_.on_fill(fill));
+
+  auto untracked = make_fill(kFillOrderId, "KXNOTOURS", kalshi::Side::Yes,
+                             kHighYesPrice, kOneLot);
+  untracked.trade_id = "backfill-trade-2";
+
+  EXPECT_FALSE(session_.on_fill(untracked));
+  EXPECT_TRUE(order_mgr_.net_position("KXNOTOURS").is_zero());
+}
+
 TEST_F(TradingSessionTest, OrderbooksAccessorReflectsSnapshot) {
   session_.on_snapshot(make_orderbook(kTicker, kYesBid, kNoBid, kObQty));
 

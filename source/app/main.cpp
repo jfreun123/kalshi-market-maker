@@ -386,6 +386,15 @@ int main(int argc, char *argv[]) {
       }
     }
 
+    // Fill-backfill floor: captured before the first order can exist. Never
+    // earlier — replaying a pre-session fill onto a baseline-excused position
+    // would fabricate drift (tracked tickers must be explained by session
+    // fills alone).
+    const long long session_start_seconds =
+        std::chrono::duration_cast<std::chrono::seconds>(
+            std::chrono::system_clock::now().time_since_epoch())
+            .count();
+
     for (const auto &ticker : app_config.target_tickers) {
       // Contain per-ticker startup failures (closed/invalid market, transient
       // REST error): skip that ticker rather than aborting the whole session.
@@ -446,32 +455,18 @@ int main(int argc, char *argv[]) {
     // Fills that land while the WS is down are never re-pushed; without a
     // backfill the local model silently diverges until reconcile halts on
     // kModelDiverge (demo finding D10). The dedup by trade_id makes the
-    // overlap window replay-safe.
+    // overlap window replay-safe; tracked-set filtering lives in
+    // backfill_fills so rotation-adopted markets are covered too.
     ws_client.on_reconnect([&rest, &session, &engine_mtx, last_fill_time,
-                            &app_config, &log]() {
+                            session_start_seconds, &log]() {
       constexpr std::chrono::seconds kBackfillOverlap{60};
       const std::lock_guard<std::mutex> lock{engine_mtx};
-      const long long min_ts =
+      const long long min_ts = std::max<long long>(
+          session_start_seconds,
           std::chrono::duration_cast<std::chrono::seconds>(
               (*last_fill_time - kBackfillOverlap).time_since_epoch())
-              .count();
-      try {
-        const auto missed = rest.get_fills(min_ts);
-        int replayed = 0;
-        for (const auto &fill : missed) {
-          const auto &tickers = app_config.target_tickers;
-          if (std::ranges::find(tickers, fill.market_ticker) == tickers.end()) {
-            continue;
-          }
-          *last_fill_time = std::max(*last_fill_time, fill.timestamp);
-          session.on_fill(fill);
-          ++replayed;
-        }
-        log->info("reconnect fill backfill: fetched={} replayed={}",
-                  missed.size(), replayed);
-      } catch (const std::exception &ex) {
-        log->error("reconnect fill backfill failed: {}", ex.what());
-      }
+              .count());
+      kalshi::backfill_fills(rest, session, min_ts, last_fill_time.get(), log);
     });
 
     std::signal(SIGINT, handle_signal);
@@ -589,10 +584,18 @@ int main(int argc, char *argv[]) {
         session.log_status();
       }
       // Reconcile against the exchange's authoritative positions. Skipped in
-      // paper mode (no real exchange positions to compare against).
+      // paper mode (no real exchange positions to compare against). On drift,
+      // the hook replays session fills the WS never delivered (run 22) so a
+      // recoverable divergence heals instead of halting for good (item 73).
       if (paper_ptr == nullptr && poll_count % kReconcileInterval == 0) {
-        reconcile_against_exchange(rest, order_mgr, session.tickers(),
-                                   &risk_mgr, log, reconcile_baseline);
+        reconcile_against_exchange(
+            rest, order_mgr, session.tickers(), &risk_mgr, log,
+            reconcile_baseline,
+            [&rest, &session, session_start_seconds, last_fill_time, &log]() {
+              return kalshi::backfill_fills(rest, session,
+                                            session_start_seconds,
+                                            last_fill_time.get(), log);
+            });
       }
     }
 

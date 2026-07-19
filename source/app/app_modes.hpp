@@ -14,7 +14,9 @@
 #include <spdlog/spdlog.h>
 
 #include <atomic>
+#include <chrono>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <ostream>
@@ -26,11 +28,27 @@ namespace kalshi {
 int run_scan_mode(RestClient &rest, const ScannerConfig &scanner_config,
                   std::shared_ptr<spdlog::logger> &log);
 
+// Fetches fills from the exchange since min_ts_seconds and replays the ones
+// for tracked markets through the session's fill path (idempotent — the WS
+// fill channel drops fills during disconnects and, per run 22, sometimes
+// while connected). Returns the number of fills newly recorded, or -1 when
+// the fetch failed. advance (optional) is pushed forward to the latest
+// tracked fill timestamp seen. Caller must hold the engine lock.
+int backfill_fills(RestClient &rest, TradingSession &session,
+                   long long min_ts_seconds,
+                   std::chrono::system_clock::time_point *advance,
+                   std::shared_ptr<spdlog::logger> &log);
+
+// On drift, when a backfill hook is provided, it runs once (returning newly
+// recorded fills, or -1 on fetch failure) and positions are re-fetched and
+// re-compared before halting — missed WS fills then heal in place instead of
+// halting the session for good (item 73).
 bool reconcile_against_exchange(
     RestClient &rest, const IOrderManager &order_mgr,
     const std::vector<std::string> &tickers, RiskManager *risk_mgr,
     std::shared_ptr<spdlog::logger> &log,
-    const std::vector<MarketPosition> &baseline = {});
+    const std::vector<MarketPosition> &baseline = {},
+    const std::function<int()> &backfill = {});
 
 int run_reconcile_mode(RestClient &rest,
                        const std::vector<std::string> &tickers,

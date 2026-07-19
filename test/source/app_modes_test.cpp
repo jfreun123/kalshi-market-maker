@@ -3,6 +3,7 @@
 #include "core/logger.hpp"
 #include "engine/risk_manager.hpp"
 #include "exchange/order_manager.hpp"
+#include "fake_strategy.hpp"
 #include "fake_transport.hpp"
 #include "net/paper_transport.hpp"
 
@@ -83,6 +84,147 @@ TEST_F(AppModesTest, ReconcileDriftHaltsQuoting) {
   EXPECT_FALSE(kalshi::reconcile_against_exchange(rest, order_mgr, {kTicker},
                                                   &risk_mgr, log));
   EXPECT_TRUE(risk_mgr.is_set(kalshi::Constraint::kModelDiverge));
+}
+
+namespace {
+
+constexpr int kDriftContracts = 7;
+constexpr int kBackfillPriceCents = 50;
+constexpr long long kDupFillEpochSeconds = 1'783'125'300LL;
+constexpr long long kNewFillEpochSeconds = 1'783'125'395LL;
+constexpr long long kBackfillMinTs = 1'783'125'000LL;
+
+const std::string kDriftedPositionsBody =
+    R"({"market_positions":[{"ticker":"KXTEST","position_fp":"7.00",)"
+    R"("realized_pnl_dollars":"0","market_exposure_dollars":"0",)"
+    R"("resting_orders_count":0}],"cursor":""})";
+
+kalshi::Fill make_backfill_fill(const std::string &trade_id,
+                                long long epoch_seconds) {
+  kalshi::Fill fill;
+  fill.trade_id = trade_id;
+  fill.order_id = "order-backfill";
+  fill.market_ticker = kTicker;
+  fill.side = kalshi::Side::Yes;
+  fill.price_cents = kBackfillPriceCents;
+  fill.quantity = kalshi::Quantity::from_contracts(kDriftContracts);
+  fill.timestamp = std::chrono::system_clock::time_point{
+      std::chrono::seconds{epoch_seconds}};
+  return fill;
+}
+
+std::string rest_fill_json(const std::string &trade_id,
+                           const std::string &ticker, long long epoch_seconds,
+                           const std::string &count_fp) {
+  return R"({"trade_id":")" + trade_id +
+         R"(","order_id":"order-backfill","market_ticker":")" + ticker +
+         R"(","outcome_side":"yes","side":"yes","yes_price_dollars":"0.5000",)"
+         R"("no_price_dollars":"0.5000","count_fp":")" +
+         count_fp + R"(","fee_cost":"0.000000","is_taker":false,"ts":)" +
+         std::to_string(epoch_seconds) + "}";
+}
+
+} // namespace
+
+TEST_F(AppModesTest, ReconcileDriftBackfillRecoversWithoutHalt) {
+  auto transport = std::make_unique<FakeTransport>();
+  FakeTransport *const transport_raw = transport.get();
+  transport_raw->enqueue({kHttpOk, kDriftedPositionsBody});
+  transport_raw->enqueue({kHttpOk, kDriftedPositionsBody});
+  kalshi::RestClient rest{kalshi::Auth{"key", kPemPrivateKey},
+                          std::move(transport), kBaseUrl};
+  kalshi::OrderManager order_mgr{rest};
+  kalshi::RiskManager risk_mgr{kalshi::RiskLimits{}};
+  auto log = kalshi::get_logger();
+  int backfill_calls = 0;
+  const auto backfill = [&order_mgr, &backfill_calls]() {
+    ++backfill_calls;
+    return order_mgr.record_fill(
+               make_backfill_fill("drift-fill-1", kNewFillEpochSeconds))
+               ? 1
+               : 0;
+  };
+
+  EXPECT_TRUE(kalshi::reconcile_against_exchange(rest, order_mgr, {kTicker},
+                                                 &risk_mgr, log, {}, backfill));
+  EXPECT_FALSE(risk_mgr.is_set(kalshi::Constraint::kModelDiverge));
+  EXPECT_EQ(backfill_calls, 1);
+  EXPECT_EQ(transport_raw->recorded_requests().size(), 2U);
+}
+
+TEST_F(AppModesTest, ReconcileDriftStillDivergedAfterBackfillHalts) {
+  auto transport = std::make_unique<FakeTransport>();
+  FakeTransport *const transport_raw = transport.get();
+  transport_raw->enqueue({kHttpOk, kDriftedPositionsBody});
+  transport_raw->enqueue({kHttpOk, kDriftedPositionsBody});
+  kalshi::RestClient rest{kalshi::Auth{"key", kPemPrivateKey},
+                          std::move(transport), kBaseUrl};
+  kalshi::OrderManager order_mgr{rest};
+  kalshi::RiskManager risk_mgr{kalshi::RiskLimits{}};
+  auto log = kalshi::get_logger();
+  const auto backfill = []() { return 0; };
+
+  EXPECT_FALSE(kalshi::reconcile_against_exchange(
+      rest, order_mgr, {kTicker}, &risk_mgr, log, {}, backfill));
+  EXPECT_TRUE(risk_mgr.is_set(kalshi::Constraint::kModelDiverge));
+  EXPECT_EQ(transport_raw->recorded_requests().size(), 2U);
+}
+
+TEST_F(AppModesTest, ReconcileDriftBackfillFetchFailureHaltsImmediately) {
+  auto transport = std::make_unique<FakeTransport>();
+  FakeTransport *const transport_raw = transport.get();
+  transport_raw->enqueue({kHttpOk, kDriftedPositionsBody});
+  kalshi::RestClient rest{kalshi::Auth{"key", kPemPrivateKey},
+                          std::move(transport), kBaseUrl};
+  kalshi::OrderManager order_mgr{rest};
+  kalshi::RiskManager risk_mgr{kalshi::RiskLimits{}};
+  auto log = kalshi::get_logger();
+  const auto backfill = []() { return -1; };
+
+  EXPECT_FALSE(kalshi::reconcile_against_exchange(
+      rest, order_mgr, {kTicker}, &risk_mgr, log, {}, backfill));
+  EXPECT_TRUE(risk_mgr.is_set(kalshi::Constraint::kModelDiverge));
+  EXPECT_EQ(transport_raw->recorded_requests().size(), 1U);
+}
+
+TEST_F(AppModesTest, BackfillFillsReplaysNewTrackedFillsOnly) {
+  auto transport = std::make_unique<FakeTransport>();
+  FakeTransport *const transport_raw = transport.get();
+  transport_raw->enqueue(
+      {kHttpOk,
+       R"({"fills":[)" +
+           rest_fill_json("dup-trade", kTicker, kDupFillEpochSeconds, "7.00") +
+           "," +
+           rest_fill_json("new-trade", kTicker, kNewFillEpochSeconds, "2.00") +
+           "," +
+           rest_fill_json("other-trade", "KXOTHER", kNewFillEpochSeconds,
+                          "3.00") +
+           R"(],"cursor":""})"});
+  kalshi::RestClient rest{kalshi::Auth{"key", kPemPrivateKey},
+                          std::move(transport), kBaseUrl};
+  kalshi::OrderManager order_mgr{rest};
+  kalshi::RiskManager risk_mgr{kalshi::RiskLimits{}};
+  FakeStrategy strategy;
+  kalshi::TradingSession session{{kTicker}, order_mgr, risk_mgr, strategy};
+  auto log = kalshi::get_logger();
+  ASSERT_TRUE(order_mgr.record_fill(
+      make_backfill_fill("dup-trade", kDupFillEpochSeconds)));
+  auto advance = std::chrono::system_clock::time_point{};
+
+  const int replayed =
+      kalshi::backfill_fills(rest, session, kBackfillMinTs, &advance, log);
+
+  EXPECT_EQ(replayed, 1);
+  constexpr int kExpectedContracts = kDriftContracts + 2;
+  EXPECT_EQ(order_mgr.net_position(kTicker),
+            kalshi::Quantity::from_contracts(kExpectedContracts));
+  EXPECT_TRUE(order_mgr.net_position("KXOTHER").is_zero());
+  EXPECT_EQ(advance, std::chrono::system_clock::time_point{
+                         std::chrono::seconds{kNewFillEpochSeconds}});
+  ASSERT_EQ(transport_raw->recorded_requests().size(), 1U);
+  EXPECT_NE(
+      transport_raw->recorded_requests().at(0).url.find("min_ts=1783125000"),
+      std::string::npos);
 }
 
 TEST_F(AppModesTest, FlattenAllPositionsNoOpWhenFlat) {
