@@ -90,8 +90,14 @@
     regression → per-fill required-edge floor; learned micro-price; logistic
     fill-probability (unblocks 42b and Kelly sizing). Every soak session's
     JSONL is the training set.
-11. [ ] **77 — tape microstructure report (Krause Ch.5; script only, runs
-    on existing logs).** Per market: trade-price autocorrelation
+11. [~] **77 — tape microstructure report (Krause Ch.5; script only, runs
+    on existing logs).** *Shipped as `scripts/microstructure_report.py`
+    (#136), synthetic-regime validated. First run (4,190 prints): flip
+    probability γ = 0.02–0.23 on every market — taker flow arrives in long
+    same-side runs; realized spread at next print 0.4–1.3c of 1.5–5.5c
+    traded; run 21's pick-off market flags `informed` (autocorr +0.15,
+    230:6 one-sided). Remaining: wire the regime label into the scanner.*
+    Per market: trade-price autocorrelation
     discriminator (negative = inventory bounce, safe to tighten; ≈zero =
     informed, respect the floor), Stoll γ/δ three-way spread decomposition
     (adverse-selection / inventory / order-processing shares; realized
@@ -103,29 +109,41 @@
     (an illiquid long-dated contract below model-fair is compensation, not
     edge — don't quote it away). Kalshi's exact tape side makes every
     estimator direct; pool markets under ~100 prints.
-12. [ ] **78 — book-imbalance-conditioned markouts (Parlour separator).**
-    Extend `analyze_fills.py`: bucket markouts by book imbalance at fill
-    time to separate mechanical same-side runs (each buy thins the ask and
-    recruits the next buy — zero information) from informed flow, before
-    the one-sided-flow logic widens or halts; add opposite-side depth as a
-    fill-hazard / early-warning feature. Directly attacks the #1 leak
-    channel.
-13. [ ] **79 — empirical fill-intensity curve λ(δ)** — fills/hour vs
-    quoted distance from fv, fitted from accumulated fill logs (logged
-    since day one, never fitted). Unlocks Ho-Stoll optimal half-spreads,
+12. [~] **78 — book-imbalance-conditioned markouts (Parlour separator).**
+    *Shipped in `analyze_fills.py` (#137). Finding inverts naive Parlour:
+    76% of maker fills arrive with the book already leaning against our
+    side and those are the GOOD fills (+0.75c edge, positive 30s/5min
+    markout — visible pressure is priced and mean-reverts); the toxic
+    fills cross AGAINST the book lean (−1.69c edge, negative through
+    5min). "Taker fighting the book" is the danger flag — feed into 60b
+    toxicity and 82 informativeness weighting with that sign.*
+13. [~] **79 — empirical fill-intensity curve λ(δ)** — fills/hour vs
+    quoted distance from fv. *Shipped as `scripts/fill_intensity.py`
+    (#138): first fit λ = 59.5·e^(−0.60·δ) fills/hr, implied sole-quoter
+    half-spread 2.5c; resting 1c from fair fills near-instantly (~424/hr).
+    k≈0.6/cent is the decay constant items 24/42b/60b parameterize on;
+    refit as fills accumulate.* Unlocks Ho-Stoll optimal half-spreads,
     the monopoly term α/(2β) where we are effectively sole quoter, FKK
     layer rungs for 24, the exact 42b inequality, and principled rest-timer
     scales for L4.
-14. [ ] **80 — live Kyle λ̂ spread floor.** Rolling regression of mid
-    changes on signed net taker flow; scale the floor with λ̂ — widen when
-    event uncertainty rises or noise volume dries up, before any imbalance
-    appears. Post-jump λ̂ trajectory classifies the regime: stable =
-    monopolist insider, stay wide all session; collapsed after one burst =
-    information spent, safe to re-tighten.
-15. [ ] **81 — PIN per series**: Poisson-mixture P(informed trade) from
+14. [~] **80 — live Kyle λ̂ spread floor.** *Offline estimator shipped as
+    `scripts/kyle_lambda.py` (#139), synthetic-validated (recovers a
+    10→1 collapse exactly). Real demo books: λ̂ ≤ 0.015c per 100 contracts,
+    mostly insignificant — impact arrives as discrete event jumps
+    (6–12c single bars), not flow pressure, so the λ̂-scaled live floor is
+    deprioritized in favor of item 51 panic tier + pre-event widening;
+    keep λ̂ as a screen for flow-driven markets.* Post-jump λ̂ trajectory
+    classifies the regime: stable = monopolist insider, stay wide all
+    session; collapsed after one burst = information spent, safe to
+    re-tighten.
+15. [~] **81 — PIN per series**: Poisson-mixture P(informed trade) from
     per-window signed buy/sell counts (exact tape signs remove the classic
-    estimation bias). Market screen + spread-floor scaler; validation:
-    high-PIN series must show worse maker markouts.
+    estimation bias). *Shipped as `scripts/pin_estimate.py` (#140) with a
+    χ²(3) likelihood-ratio gate against the boundary degeneracy. First
+    run: KXPGATOP20 PIN = 0.57 (LR 2134) — over half the PGA tape is
+    informed, and the uninformed base is heavily buy-side (ε_b=48 vs
+    ε_s=7, the FLB retail bias). Remaining: the markout cross-check as
+    more series accumulate windows.*
 16. [ ] **82 — fill-informativeness fv updates**: weight each fill's fv
     bump by its execution distance from fair — fills on the conceded wide
     side are near-surely informed (Admati-Pfleiderer; the missing half of
@@ -276,10 +294,12 @@ Earlier waves (L0/L2, items 32/49/52/53/56/57/61/62, runs 12–16) are in the
 - **Ledgers are per-machine** (`pnl_state.json` is local): Mac −$5.22
   through run 19 (07-05); WSL −$0.99 (runs 21/22). PnL needs completed round
   trips; two-sided books remain the binding constraint on demo.
-- **Open PRs**: this branch (items 77–82) ·
-  `feat/microstructure-report` (item 77 script). Everything through #134 is
-  merged: #124–#126 run-22 fixes, #128–#132 item-76 modularization,
-  #133 market-structure doc, #134 Krause notes.
+- **Open PRs** (all independent, no shared files): #135 this branch
+  (items 77–82) · #136 microstructure report (77) · #137 book-pressure
+  markouts (78) · #138 fill intensity (79) · #139 Kyle λ̂ (80) ·
+  #140 PIN (81). Everything through #134 is merged: #124–#126 run-22
+  fixes, #128–#132 item-76 modularization, #133 market-structure doc,
+  #134 Krause notes.
 - Demo quirks: order entry can 503 exchange-wide while `/exchange/status`
   says active; fills can be fractional; laptop sleep mid-session is safe but
   wastes the session.
