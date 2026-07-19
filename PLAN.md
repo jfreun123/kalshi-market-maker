@@ -37,38 +37,33 @@
 
 1. [ ] **19 — Jacob ratifies Gate-1 thresholds** (PRE_LIVE_CHECKLIST §2);
    the 14-session/30h measurement window can't start until frozen.
-2. [ ] **74 — shutdown flatten retries the unfilled remainder (run 21,
-   2026-07-18).** The final taker IOC filled 3.00 of net 5.00 and never
-   retried — 2 contracts rode to settlement unmanaged. Retry the remainder
-   at a re-fetched top-of-book price (small bounded loop), and log a loud
-   `CARRIED` line with the residual when still short at exit.
-3. [ ] **Phase 32 minimum — unattended supervision on the CURRENT machine**
+2. [ ] **Phase 32 minimum — unattended supervision on the CURRENT machine**
    (systemd + logrotate, Telegram alert on halt/error) — required for the
    30h soak; nothing here needs the cloud (see Hosting gate).
-4. [~] **31a/31c — measurement backbone.** *31a done 2026-07-18 —
+3. [~] **31a/31c — measurement backbone.** *31a done 2026-07-18 —
    `scripts/settlement_join.py`: every fill revalued at the settled outcome
    (ground-truth PnL vs the marked figure), time-weighted Brier of fv / mid /
    micro against the outcome (the Hosting-gate discriminator: fv beating mid
    = latency/queue problem, fv losing = pricing problem), calibration buckets
    accumulating across sessions, outcomes cached.* Remaining 31c residual:
    fees term once maker-fee markets are traded.
-5. [ ] **L1 — EC2 in Kalshi's region** (t4g.small ~$12/mo). **Blocked by the
+4. [ ] **L1 — EC2 in Kalshi's region** (t4g.small ~$12/mo). **Blocked by the
    Hosting gate.** Region answered by Kalshi Institutional (2026-07-11):
    us-east-2 (Ohio). When unblocked: rerun the L0 latency session from Ohio
    (Mac baseline to beat: order-path ~294ms, orderbook ~76ms); fold the host
    into Phase 32 supervision. Rate-limit ladder above Advanced: Premier
    1k/1k · Paragon 2k/2k · Prime 4k/4k per sec, unlocked by volume share —
    the write-budget ladder for items 54/L3.
-6. [ ] **L3 — async order dispatch** (sanctioned Phase-21 pull-forward):
+5. [ ] **L3 — async order dispatch** (sanctioned Phase-21 pull-forward):
    order REST calls block the WS thread today; the bot is deaf while one is
    in flight.
-7. [ ] **L4 — timer teardown.** After echo-free amends AND item-1 validation
+6. [ ] **L4 — timer teardown.** After echo-free amends AND item-1 validation
    hold: shrink `min_rest_ms`/`fade_rest_ms` toward zero (config-only).
    Governors that remain: reprice threshold, write budget, RTT.
-8. [ ] **51 — panic pull tier (Jacob to confirm)**: on a catastrophic jump
+7. [ ] **51 — panic pull tier (Jacob to confirm)**: on a catastrophic jump
    (≥ `panic_jump_cents`, e.g. 8), cancel the toxic side instantly — no
    confirmation, no rest floor, no re-quote until the book settles.
-9. [ ] **60 — regression calibration.** (a) **Drift estimator — build
+8. [ ] **60 — regression calibration.** (a) **Drift estimator — build
     first, no fill history needed**: significance-gated rolling regression
     (slope + t-stat) of the smoothed mid on the quote stream; scale the flow
     lean (`clamp(k·slope·horizon, ±max)`) and penalize |slope| in the
@@ -81,7 +76,7 @@
     regression → per-fill required-edge floor; learned micro-price; logistic
     fill-probability (unblocks 42b and Kelly sizing). Every soak session's
     JSONL is the training set.
-10. [~] **77 — tape microstructure report (Krause Ch.5; script only, runs
+9. [~] **77 — tape microstructure report (Krause Ch.5; script only, runs
     on existing logs).** *Shipped as `scripts/microstructure_report.py`
     (#136), synthetic-regime validated. First run (4,190 prints): flip
     probability γ = 0.02–0.23 on every market — taker flow arrives in long
@@ -100,7 +95,7 @@
     (an illiquid long-dated contract below model-fair is compensation, not
     edge — don't quote it away). Kalshi's exact tape side makes every
     estimator direct; pool markets under ~100 prints.
-11. [~] **78 — book-imbalance-conditioned markouts (Parlour separator).**
+10. [~] **78 — book-imbalance-conditioned markouts (Parlour separator).**
     *Shipped in `analyze_fills.py` (#137). Finding inverts naive Parlour:
     76% of maker fills arrive with the book already leaning against our
     side and those are the GOOD fills (+0.75c edge, positive 30s/5min
@@ -108,7 +103,7 @@
     fills cross AGAINST the book lean (−1.69c edge, negative through
     5min). "Taker fighting the book" is the danger flag — feed into 60b
     toxicity and 82 informativeness weighting with that sign.*
-12. [~] **79 — empirical fill-intensity curve λ(δ)** — fills/hour vs
+11. [~] **79 — empirical fill-intensity curve λ(δ)** — fills/hour vs
     quoted distance from fv. *Shipped as `scripts/fill_intensity.py`
     (#138): first fit λ = 59.5·e^(−0.60·δ) fills/hr, implied sole-quoter
     half-spread 2.5c; resting 1c from fair fills near-instantly (~424/hr).
@@ -117,7 +112,7 @@
     the monopoly term α/(2β) where we are effectively sole quoter, FKK
     layer rungs for 24, the exact 42b inequality, and principled rest-timer
     scales for L4.
-13. [~] **80 — live Kyle λ̂ spread floor.** *Offline estimator shipped as
+12. [~] **80 — live Kyle λ̂ spread floor.** *Offline estimator shipped as
     `scripts/kyle_lambda.py` (#139), synthetic-validated (recovers a
     10→1 collapse exactly). Real demo books: λ̂ ≤ 0.015c per 100 contracts,
     mostly insignificant — impact arrives as discrete event jumps
@@ -127,7 +122,7 @@
     classifies the regime: stable = monopolist insider, stay wide all
     session; collapsed after one burst = information spent, safe to
     re-tighten.
-14. [~] **81 — PIN per series**: Poisson-mixture P(informed trade) from
+13. [~] **81 — PIN per series**: Poisson-mixture P(informed trade) from
     per-window signed buy/sell counts (exact tape signs remove the classic
     estimation bias). *Shipped as `scripts/pin_estimate.py` (#140) with a
     χ²(3) likelihood-ratio gate against the boundary degeneracy. First
@@ -135,64 +130,64 @@
     informed, and the uninformed base is heavily buy-side (ε_b=48 vs
     ε_s=7, the FLB retail bias). Remaining: the markout cross-check as
     more series accumulate windows.*
-15. [ ] **82 — fill-informativeness fv updates**: weight each fill's fv
+14. [ ] **82 — fill-informativeness fv updates**: weight each fill's fv
     bump by its execution distance from fair — fills on the conceded wide
     side are near-surely informed (Admati-Pfleiderer; the missing half of
     item 64) — and size the regret-free bump by measured γI/PIN
     (Glosten-Milgrom made quantitative). Gated on 77/81 estimates.
-16. [~] **66 — clearing-price fair value.** Phases 0–4 shipped (WS trade
+15. [~] **66 — clearing-price fair value.** Phases 0–4 shipped (WS trade
     channel + `TradeTape`; `clearing_price_cents` full-ladder uncross;
     `ClearingPriceModel` = (1−w)·EMA-micro + w·tape-VWAP, OFF by default;
     `--fv-replay` 39-candidate offline harness). **Blocked on data: needs a
     `--capture` recording of a live slate** to pin `clearing_tape_weight`;
     then a run-20-style matched A/B decides the live flip. Full plan and
     backtest results: [docs/BETTER_PRICING.md](docs/BETTER_PRICING.md).
-17. [ ] **24 — layered quoting (queue priming)**: 2–3 size layers 1–3c
+16. [ ] **24 — layered quoting (queue priming)**: 2–3 size layers 1–3c
     behind the inside; queue position is earned by resting before the move.
     Layers belong at FKK ladder rungs — spacing geometric in θ/(1−θ), θ ≈
     patient fraction = 1 − taker share of the tape; deep layers only pay
     in impatient-heavy books. Kalshi's fat 1c tick puts us in the queueing
     regime: time priority is a real asset, amend-first is right exactly
     when it preserves it (79 calibrates).
-18. [ ] **42b — queue-value reprice rule**: only reprice when
+17. [ ] **42b — queue-value reprice rule**: only reprice when
     `|fv − quoted| · fill_prob` beats the queue value abandoned (needs 31
     fill-prob data). Exact FKK form: move rung i→j iff (ticks gained)·d >
     c·Δ(expected wait), waits growing geometrically in queue depth — 79
     fits the curve.
-19. [ ] **45 — decision-oriented quote logging** (the "why" per placement:
+18. [ ] **45 — decision-oriented quote logging** (the "why" per placement:
     spread components, reprice reason; latency counters fold into L0; plus
     the avg-entry/mark/edge per-fill status fields from item 59's residual).
-20. [~] **59 — short-horizon markout.** *Script half done 2026-07-18 —
+19. [~] **59 — short-horizon markout.** *Script half done 2026-07-18 —
     `analyze_fills.py` reports markout@500ms/1s/5s alongside 30s/5min, a
     signed per-fill edge, and edge+markout by pre-fill inventory bucket.*
     Remaining: the per-fill status-log fields (folds into item 45).
-21. [ ] **58 — scanner startup efficiency.** Startup scans ~70k markets for
+20. [ ] **58 — scanner startup efficiency.** Startup scans ~70k markets for
     ~30s before quoting. Query `status=open` server-side is already used;
     cap pagination and/or cache market metadata between runs with
     incremental refresh. Becomes real waste on every rotation re-scan.
-22. [ ] **75 — committed `config.json` should ship `target_tickers: []`**
+21. [ ] **75 — committed `config.json` should ship `target_tickers: []`**
     (self-selection is the documented default; the four pinned CPI tickers
     are stale) and the run scripts should agree on one canonical local
     config name (`config-demo.json` today, absent on fresh clones).
-23. [ ] **23 — ceil-per-order maker-fee model** (inert while demo maker
+22. [ ] **23 — ceil-per-order maker-fee model** (inert while demo maker
     fills are free) · **3 — passive clamp vs fresher BBO** (D1 residual).
-24. [ ] **54 — batch CreateOrders.** V2 batch create/cancel; batch seeds and
+23. [ ] **54 — batch CreateOrders.** V2 batch create/cancel; batch seeds and
     layered quotes into one request. Sequence after L3 so batching composes
     with the non-blocking order path.
-25. [ ] **55 — demo conformance suite in CI** (nightly + manual dispatch,
+24. [ ] **55 — demo conformance suite in CI** (nightly + manual dispatch,
     not per-PR; needs demo creds as Actions secrets; non-required job — red
     means schema drift or demo outage, both alert-worthy). Skips are
     failures (Jacob): tests self-find a market; only missing creds may skip.
-26. [ ] **69 — per-market precision audit.** Subpenny pricing is per-market
+25. [ ] **69 — per-market precision audit.** Subpenny pricing is per-market
     (`price_level_structure`, ignored today); quantities are fixed-point 2dp.
     Audit price-tick and quantity-step per market, carry a `MarketPrecision`
     through types, pin live demo behavior in conformance tests before any
     live switch on a subpenny market.
-27. [ ] **70 — max-hold forced exit** (`max_hold_seconds`, 0 = off): passive
+26. [ ] **70 — max-hold forced exit** (`max_hold_seconds`, 0 = off): passive
     exit first, forced taker exit at the deadline — bounded fee in place of
     unbounded z² drift (ND-HFTT pattern; docs/papers §6). Tune against
     attribution: right when drift saved exceeds taker fee + spread paid.
-28. [ ] **71 — crypto 15m series (KXBTC15M family).** Measured on demo
+27. [ ] **71 — crypto 15m series (KXBTC15M family).** Measured on demo
     2026-07-11: ~130 trades/hr, two-sided, 24/7 — the most quotable flow
     demo has, excluded only by `min_days_to_close`. Build: per-window ticker
     resolution + 15-min session lifecycle (stop quoting ~60s before close;
@@ -200,7 +195,7 @@
     (tapered_deci_cent tails); external reference feed (Coinbase leads
     ~1–2s) for the momentum cancel. Risk: terminal z is structural — quote
     early/mid window, flee the end.
-29. [ ] **72 — validate the backtest fill model against captured tape.**
+28. [ ] **72 — validate the backtest fill model against captured tape.**
     Match trade prints to negative top-of-book deltas (±50ms, ND-HFTT
     method) on our capture corpus to measure print-through under-fill;
     adopt proportional delta-consumption if the gap is material — guards
@@ -241,6 +236,10 @@ refactors (R1–R4, R7) never block the gates.
 
 ## Done since the 2026-07-05 refresh (validation notes in the archive)
 
+74 shutdown flatten retries the unfilled remainder — bounded 3-attempt
+loop re-issuing the taker IOC for the residual (500ms apart, close side
+preserved for short positions); still-short exits log a critical
+`CARRIED` line; `closed` now counts only fully-flat positions (07-19) ·
 73 reconcile fill backfill — on drift, replay missed WS fills from
 `GET /portfolio/fills` (floor = session start; pre-session fills would
 fabricate drift against the baseline) and re-compare before halting;
@@ -291,10 +290,10 @@ Earlier waves (L0/L2, items 32/49/52/53/56/57/61/62, runs 12–16) are in the
 - **Ledgers are per-machine** (`pnl_state.json` is local): Mac −$5.22
   through run 19 (07-05); WSL −$0.99 (runs 21/22). PnL needs completed round
   trips; two-sided books remain the binding constraint on demo.
-- **Open PRs**: this branch (item 73 reconcile fill backfill).
-  Everything through #140 is merged: #124–#126 run-22 fixes, #128–#132
-  item-76 modularization, #133/#134 docs, #135–#140 Krause plan items +
-  the five analytics scripts.
+- **Open PRs**: this branch (item 74 flatten retry). Everything through
+  #141 is merged: #124–#126 run-22 fixes, #128–#132 item-76
+  modularization, #133/#134 docs, #135–#140 Krause plan items + the five
+  analytics scripts, #141 item-73 reconcile fill backfill.
 - Demo quirks: order entry can 503 exchange-wide while `/exchange/status`
   says active; fills can be fractional; laptop sleep mid-session is safe but
   wastes the session.
