@@ -194,6 +194,8 @@ AppConfig load_config(const std::filesystem::path &path) {
         "max_quote_price_cents", RiskLimits::kDefaultMaxQuotePrice);
     config.risk.max_drawdown_dollars = risk_json.value(
         "max_drawdown_dollars", RiskLimits::kDefaultMaxDrawdown);
+    config.risk.max_hold_seconds =
+        risk_json.value("max_hold_seconds", RiskLimits::kDefaultMaxHoldSeconds);
   }
 
   if (json_data.contains("scanner")) {
