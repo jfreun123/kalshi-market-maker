@@ -4,6 +4,7 @@
 #include "core/ensure.hpp"
 #include "core/logger.hpp"
 #include "engine/analytics.hpp"
+#include "engine/event_pump.hpp"
 #include "engine/fair_value.hpp"
 #include "engine/flow_imbalance.hpp"
 #include "engine/portfolio.hpp"
@@ -39,7 +40,9 @@
 #include <span>
 #include <string>
 #include <thread>
+#include <type_traits>
 #include <unordered_map>
+#include <variant>
 #include <vector>
 
 // ---- Shutdown flag ----
@@ -414,18 +417,22 @@ int main(int argc, char *argv[]) {
     // is well-defined.
     std::mutex engine_mtx;
 
+    // L3: WS callbacks only enqueue — the socket thread never takes the
+    // engine lock, so it is never blocked behind an order REST call. A single
+    // consumer thread below drains the pump in arrival order and applies
+    // events to the session under the engine lock.
+    kalshi::EventPump event_pump;
+
     ws_client.on_orderbook_snapshot(
-        [&session, &engine_mtx](const kalshi::Orderbook &snap) {
-          const std::lock_guard<std::mutex> lock{engine_mtx};
-          session.on_snapshot(snap);
+        [&event_pump](const kalshi::Orderbook &snap) {
+          event_pump.push(snap);
         });
 
-    ws_client.on_orderbook_delta(
-        [&session, &engine_mtx](const std::string &ticker, kalshi::Side side,
-                                int price, kalshi::Quantity qty) {
-          const std::lock_guard<std::mutex> lock{engine_mtx};
-          session.on_delta(ticker, side, price, qty);
-        });
+    ws_client.on_orderbook_delta([&event_pump](const std::string &ticker,
+                                               kalshi::Side side, int price,
+                                               kalshi::Quantity qty) {
+      event_pump.push(kalshi::BookDeltaEvent{ticker, side, price, qty});
+    });
 
     // Timestamp floor for the reconnect fill backfill: fills can only be
     // missed after the session started, and after the last fill the WS
@@ -435,22 +442,14 @@ int main(int argc, char *argv[]) {
             std::chrono::system_clock::now());
 
     ws_client.on_fill(
-        [&session, &engine_mtx, last_fill_time](const kalshi::Fill &fill) {
-          const std::lock_guard<std::mutex> lock{engine_mtx};
-          *last_fill_time = std::max(*last_fill_time, fill.timestamp);
-          session.on_fill(fill);
-        });
+        [&event_pump](const kalshi::Fill &fill) { event_pump.push(fill); });
 
-    ws_client.on_trade(
-        [&session, &engine_mtx](const kalshi::PublicTrade &trade) {
-          const std::lock_guard<std::mutex> lock{engine_mtx};
-          session.on_trade(trade);
-        });
-
-    ws_client.on_disconnect([&session, &engine_mtx]() {
-      const std::lock_guard<std::mutex> lock{engine_mtx};
-      session.on_disconnect();
+    ws_client.on_trade([&event_pump](const kalshi::PublicTrade &trade) {
+      event_pump.push(trade);
     });
+
+    ws_client.on_disconnect(
+        [&event_pump]() { event_pump.push(kalshi::DisconnectEvent{}); });
 
     // Fills that land while the WS is down are never re-pushed; without a
     // backfill the local model silently diverges until reconcile halts on
@@ -467,6 +466,44 @@ int main(int argc, char *argv[]) {
               (*last_fill_time - kBackfillOverlap).time_since_epoch())
               .count());
       kalshi::backfill_fills(rest, session, min_ts, last_fill_time.get(), log);
+    });
+
+    std::thread pump_thread([&event_pump, &session, &engine_mtx, last_fill_time,
+                             &log]() {
+      constexpr auto kPumpDrainTimeout = std::chrono::milliseconds{200};
+      std::vector<kalshi::SessionEvent> events;
+      while (event_pump.wait_drain(events, kPumpDrainTimeout)) {
+        if (events.empty()) {
+          continue;
+        }
+        const std::lock_guard<std::mutex> lock{engine_mtx};
+        for (auto &event : events) {
+          std::visit(
+              [&session, last_fill_time](auto &&payload) {
+                using Payload = std::decay_t<decltype(payload)>;
+                if constexpr (std::is_same_v<Payload, kalshi::Orderbook>) {
+                  session.on_snapshot(payload);
+                } else if constexpr (std::is_same_v<Payload,
+                                                    kalshi::BookDeltaEvent>) {
+                  session.on_delta(payload.ticker, payload.side,
+                                   payload.price_cents, payload.quantity);
+                } else if constexpr (std::is_same_v<Payload,
+                                                    kalshi::PublicTrade>) {
+                  session.on_trade(payload);
+                } else if constexpr (std::is_same_v<Payload, kalshi::Fill>) {
+                  *last_fill_time =
+                      std::max(*last_fill_time, payload.timestamp);
+                  session.on_fill(payload);
+                } else {
+                  session.on_disconnect();
+                }
+              },
+              event);
+        }
+        events.clear();
+      }
+      log->info("event pump consumer exited (queue high-water {})",
+                event_pump.high_water());
     });
 
     std::signal(SIGINT, handle_signal);
@@ -486,12 +523,17 @@ int main(int argc, char *argv[]) {
     // cancel every resting quote. cancel_all_quotes is best-effort and never
     // throws, so it is safe to run from a destructor; it runs after join()
     // (single-threaded by then) so no lock is needed.
-    ScopeGuard shutdown_guard{[&ws_client, &ws_thread, &session, &rest, &cli,
-                               &log, &app_config, &analytics_logger]() {
+    ScopeGuard shutdown_guard{[&ws_client, &ws_thread, &event_pump,
+                               &pump_thread, &session, &rest, &cli, &log,
+                               &app_config, &analytics_logger]() {
       log->info("shutting down — stopping feed, cancelling all quotes");
       ws_client.stop();
       if (ws_thread.joinable()) {
         ws_thread.join();
+      }
+      event_pump.stop();
+      if (pump_thread.joinable()) {
+        pump_thread.join();
       }
       session.cancel_all_quotes();
       if (!cli.paper_mode) {
