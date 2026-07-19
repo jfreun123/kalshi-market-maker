@@ -9,7 +9,9 @@
 > [docs/architecture.md](docs/architecture.md) · guards catalog:
 > [docs/GUARDS.md](docs/GUARDS.md) · API ground truth:
 > [docs/KALSHI_API_REFERENCE.md](docs/KALSHI_API_REFERENCE.md) · pricing
-> research: [docs/BETTER_PRICING.md](docs/BETTER_PRICING.md).
+> research: [docs/BETTER_PRICING.md](docs/BETTER_PRICING.md) · market
+> structure & strategy taxonomy:
+> [docs/MARKET_STRUCTURE.md](docs/MARKET_STRUCTURE.md).
 
 ## Gates (Jacob's calls — do not relitigate)
 
