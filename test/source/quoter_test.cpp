@@ -861,3 +861,30 @@ TEST_F(QuoterTest, DriftLeanOffByDefaultLeavesQuotesUnchanged) {
   const std::string &bid_body = transport.recorded_requests().at(0).body;
   EXPECT_NE(bid_body.find(std::string(kBidPriceMid52)), std::string::npos);
 }
+
+TEST_F(QuoterTest, MakerFeeCeilsPerOrderSoSmallFeesStillWiden) {
+  auto transport_ptr = std::make_unique<FakeTransport>();
+  FakeTransport &transport = *transport_ptr;
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId1, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId2, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  kalshi::RestClient rest{kalshi::Auth{kApiKey, kPemPrivateKey},
+                          std::move(transport_ptr), kBaseUrl};
+  kalshi::OrderManager order_mgr{rest};
+  kalshi::RiskManager risk_mgr{kalshi::RiskLimits{}};
+  kalshi::QuoterConfig fee_config;
+  constexpr double kSmallMakerFeeRate = 0.0175;
+  fee_config.maker_fee_rate = kSmallMakerFeeRate;
+  kalshi::Quoter quoter{fee_config, order_mgr, risk_mgr};
+
+  quoter.update(kTicker, make_ob(kYesBid52, kNoBid52));
+
+  const std::string &bid_body = transport.recorded_requests().at(0).body;
+  EXPECT_NE(bid_body.find(R"("price":"0.4900")"), std::string::npos)
+      << "per-order fee ceil must widen by 1c even when the per-contract "
+         "fee rounds to zero: "
+      << bid_body;
+}

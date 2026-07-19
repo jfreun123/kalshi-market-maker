@@ -162,8 +162,11 @@
     fill-prob data). Exact FKK form: move rung i→j iff (ticks gained)·d >
     c·Δ(expected wait), waits growing geometrically in queue depth — 79
     fits the curve.
-17. [ ] **23 — ceil-per-order maker-fee model** (inert while demo maker
-    fills are free) · **3 — passive clamp vs fresher BBO** (D1 residual).
+17. [ ] **3 — passive clamp vs fresher BBO** (D1 residual — needs the
+    archived D1 detail before building; 23 shipped 07-19: fee widening now
+    ceils per ORDER then per contract, so small orders still widen by 1c
+    where the per-contract formula rounded to zero; equivalence at normal
+    sizes pinned by the existing 0.07-rate test).
 18. [ ] **54 — batch CreateOrders.** V2 batch create/cancel; batch seeds and
     layered quotes into one request. Sequence after L3 so batching composes
     with the non-blocking order path.

@@ -368,13 +368,19 @@ void Quoter::update(std::string_view ticker, const LocalOrderbook &book) {
   // floor's half-spread rounds up so an odd floor still holds.
   const int base_half_spread = std::max(
       {kHalfSpreadMin, target_spread / 2, (config_.min_spread_cents + 1) / 2});
-  // Maker fee: widen so the net-of-fee edge is preserved. Kalshi's per-contract
-  // fee is γ·P·(1−P); estimate P from the fair value.
+  // Maker fee (item 23): Kalshi charges ceil-to-the-cent PER ORDER —
+  // γ·C·P·(1−P) rounded up — so small orders pay proportionally more than
+  // the per-contract formula suggests. Widen by the ceil of the per-contract
+  // share of that ceiled order fee, so net-of-fee edge is preserved even
+  // when the naive per-contract fee rounds to zero.
   int fee_cents = 0;
   if (config_.maker_fee_rate > 0.0) {
     const double prob = fair_val / kContractMaxCents;
-    fee_cents = static_cast<int>(std::round(config_.maker_fee_rate * prob *
-                                            (1.0 - prob) * kContractMaxCents));
+    const double order_fee_cents =
+        std::ceil(config_.maker_fee_rate * config_.quote_size * prob *
+                  (1.0 - prob) * kContractMaxCents);
+    fee_cents =
+        static_cast<int>(std::ceil(order_fee_cents / config_.quote_size));
   }
   const int half_spread = base_half_spread + fee_cents;
   const double inventory = order_mgr_.net_position(ticker_str).contracts();
