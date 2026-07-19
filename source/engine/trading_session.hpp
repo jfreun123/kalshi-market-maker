@@ -122,6 +122,12 @@ public:
   // Portfolio kill-switch: build the read-model snapshot and feed it to the
   // RiskManager (over-exposure + total-loss). Halts all quoting on breach.
   void run_portfolio_risk();
+  // Max-hold forced exit (item 70): tickers whose session position has been
+  // continuously nonzero for longer than max_hold_seconds. The host flattens
+  // them at taker prices — bounded fee instead of unbounded drift. Age is
+  // stamped when net departs zero and cleared when it returns; 0 disables.
+  [[nodiscard]] std::vector<std::string>
+  positions_over_max_hold(int max_hold_seconds) const;
   // Log the per-ticker status and the whole-book portfolio aggregate.
   void log_status() const;
 
@@ -157,6 +163,7 @@ public:
 private:
   [[nodiscard]] MarkMap build_marks() const;
   [[nodiscard]] bool feed_confirmed(const std::string &ticker) const;
+  void track_position_age(const std::string &ticker);
 
   std::vector<std::string> tickers_;
   IOrderManager &order_mgr_;
@@ -173,6 +180,8 @@ private:
       last_book_update_;
   std::unordered_map<std::string, std::chrono::steady_clock::time_point>
       seeded_at_;
+  std::unordered_map<std::string, std::chrono::steady_clock::time_point>
+      position_opened_at_;
   std::unordered_set<std::string> feed_dead_;
   OrderbookMap ob_map_;
   PnlMap prior_pnl_;

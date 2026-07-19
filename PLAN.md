@@ -191,10 +191,16 @@
     Audit price-tick and quantity-step per market, carry a `MarketPrecision`
     through types, pin live demo behavior in conformance tests before any
     live switch on a subpenny market.
-25. [ ] **70 — max-hold forced exit** (`max_hold_seconds`, 0 = off): passive
+25. [~] **70 — max-hold forced exit** (`max_hold_seconds`, 0 = off): passive
     exit first, forced taker exit at the deadline — bounded fee in place of
     unbounded z² drift (ND-HFTT pattern; docs/papers §6). Tune against
     attribution: right when drift saved exceeds taker fee + spread paid.
+    *Shipped 07-19 config-gated (`risk.max_hold_seconds`, default 0 =
+    OFF): session stamps position age from its fill path (backfilled and
+    flatten fills included); a
+    10s main-loop sweep force-flattens aged tickers via the item-74
+    retrying flatten with CARRIED residual logging. Flip once
+    attribution says drift saved > taker fee + spread paid.*
 26. [ ] **71 — crypto 15m series (KXBTC15M family).** Measured on demo
     2026-07-11: ~130 trades/hr, two-sided, 24/7 — the most quotable flow
     demo has, excluded only by `min_days_to_close`. Build: per-window ticker

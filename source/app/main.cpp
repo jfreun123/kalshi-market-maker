@@ -593,6 +593,7 @@ int main(int argc, char *argv[]) {
     constexpr int kReconcileInterval = 1200;     // 1200 × 100ms = 120s
     constexpr int kPositionLogInterval = 600;    // 600 × 100ms = 60s
     constexpr int kPortfolioRiskInterval = 10;   // 10 × 100ms = 1s
+    constexpr int kMaxHoldCheckInterval = 100;   // 100 × 100ms = 10s
 
     constexpr int kTicksPerMinute = 600;
     const int rotation_ticks =
@@ -627,6 +628,23 @@ int main(int argc, char *argv[]) {
       session.enforce_quote_safety();
       if (poll_count % kPositionLogInterval == 0) {
         session.log_status();
+      }
+      // Max-hold forced exit (item 70): positions older than the limit are
+      // flattened at taker prices via the retrying flatten path — bounded fee
+      // instead of unbounded drift. The passive unwind pricing has been
+      // working the exit the whole time; this is the deadline behind it.
+      if (paper_ptr == nullptr && app_config.risk.max_hold_seconds > 0 &&
+          poll_count % kMaxHoldCheckInterval == 0) {
+        const auto aged =
+            session.positions_over_max_hold(app_config.risk.max_hold_seconds);
+        if (!aged.empty()) {
+          for (const auto &ticker : aged) {
+            log->warn("max-hold exceeded ticker={} (limit {}s) — forcing "
+                      "taker exit",
+                      ticker, app_config.risk.max_hold_seconds);
+          }
+          flatten_all_positions(rest, log, &session, &aged);
+        }
       }
       // Reconcile against the exchange's authoritative positions. Skipped in
       // paper mode (no real exchange positions to compare against). On drift,

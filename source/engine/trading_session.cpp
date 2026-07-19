@@ -96,6 +96,7 @@ bool TradingSession::on_fill(const Fill &fill) {
   if (!order_mgr_.open_orders().contains(fill.order_id)) {
     strategy_.forget_order(fill.market_ticker, fill.order_id);
   }
+  track_position_age(fill.market_ticker);
   risk_mgr_.update(order_mgr_, tickers_);
   if (flow_guard_ != nullptr) {
     flow_guard_->record_fill(fill.market_ticker, fill.side, fill.quantity,
@@ -160,6 +161,7 @@ void TradingSession::record_flatten(const Order &order) {
   fill.timestamp = order.created_at;
   fill.is_taker = true;
   order_mgr_.record_fill(fill);
+  track_position_age(fill.market_ticker);
   if (analytics_ != nullptr) {
     const auto book = ob_map_.find(order.market_ticker);
     const double mid_cents =
@@ -385,6 +387,30 @@ MarkMap TradingSession::build_marks() const {
 PortfolioSnapshot TradingSession::portfolio_snapshot() const {
   const Portfolio portfolio{order_mgr_};
   return portfolio.snapshot(tickers_, build_marks());
+}
+
+void TradingSession::track_position_age(const std::string &ticker) {
+  if (order_mgr_.net_position(ticker).is_zero()) {
+    position_opened_at_.erase(ticker);
+  } else if (!position_opened_at_.contains(ticker)) {
+    position_opened_at_[ticker] = clock_();
+  }
+}
+
+std::vector<std::string>
+TradingSession::positions_over_max_hold(int max_hold_seconds) const {
+  std::vector<std::string> aged;
+  if (max_hold_seconds <= 0) {
+    return aged;
+  }
+  const auto now = clock_();
+  for (const auto &[ticker, opened_at] : position_opened_at_) {
+    if (now - opened_at >= std::chrono::seconds{max_hold_seconds} &&
+        !order_mgr_.net_position(ticker).is_zero()) {
+      aged.push_back(ticker);
+    }
+  }
+  return aged;
 }
 
 void TradingSession::run_portfolio_risk() {

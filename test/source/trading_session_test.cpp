@@ -365,6 +365,42 @@ TEST_F(TradingSessionTest, OnFillReportsRecordedVsDuplicateVsUntracked) {
   EXPECT_TRUE(order_mgr_.net_position("KXNOTOURS").is_zero());
 }
 
+TEST_F(TradingSessionTest, MaxHoldFlagsAgedPositionsAndResetsWhenFlat) {
+  auto clock_now = std::make_shared<std::chrono::steady_clock::time_point>(
+      std::chrono::steady_clock::now());
+  kalshi::TradingSession session{std::vector<std::string>{kTicker},
+                                 order_mgr_,
+                                 risk_mgr_,
+                                 quoter_,
+                                 nullptr,
+                                 [clock_now] { return *clock_now; }};
+  constexpr int kMaxHoldSeconds = 60;
+
+  auto opening_fill = make_fill(kFillOrderId, kTicker, kalshi::Side::Yes,
+                                kHighYesPrice, kOneLot);
+  opening_fill.trade_id = "hold-open";
+  ASSERT_TRUE(session.on_fill(opening_fill));
+  EXPECT_TRUE(session.positions_over_max_hold(kMaxHoldSeconds).empty());
+
+  *clock_now += std::chrono::seconds{kMaxHoldSeconds + 1};
+  const auto aged = session.positions_over_max_hold(kMaxHoldSeconds);
+  ASSERT_EQ(aged.size(), 1U);
+  EXPECT_EQ(aged.front(), kTicker);
+  EXPECT_TRUE(session.positions_over_max_hold(0).empty());
+
+  auto closing_fill = make_fill(kFillOrderId, kTicker, kalshi::Side::No,
+                                kHighYesPrice, kOneLot);
+  closing_fill.trade_id = "hold-close";
+  ASSERT_TRUE(session.on_fill(closing_fill));
+  EXPECT_TRUE(session.positions_over_max_hold(kMaxHoldSeconds).empty());
+
+  auto reopening_fill = make_fill(kFillOrderId, kTicker, kalshi::Side::Yes,
+                                  kHighYesPrice, kOneLot);
+  reopening_fill.trade_id = "hold-reopen";
+  ASSERT_TRUE(session.on_fill(reopening_fill));
+  EXPECT_TRUE(session.positions_over_max_hold(kMaxHoldSeconds).empty());
+}
+
 TEST_F(TradingSessionTest, OrderbooksAccessorReflectsSnapshot) {
   session_.on_snapshot(make_orderbook(kTicker, kYesBid, kNoBid, kObQty));
 
