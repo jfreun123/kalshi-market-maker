@@ -1,5 +1,13 @@
 # Research Papers & Notes
 
+> Full-book study: [krause-microstructure.md](krause-microstructure.md) —
+> Krause, *An Introduction to Market Microstructure Theory* (chapters 2–7
+> distilled: Kyle λ, Stoll/Ho-Stoll inventory spreads, Glosten-Milgrom
+> regret-free quotes, Parlour mechanical flow runs, FKK queue value and
+> spread ladders, the γ/δ + PIN + transitory-variance estimator kit our
+> signed tape makes directly computable, and the Grossman-Miller viability
+> condition behind our admission gates).
+
 Reference papers on prediction-market microstructure, market-making, and pricing,
 with study notes and their relevance to this project. The PDFs live alongside
 this file (gitignored — binaries/copyrighted; keep locally). Cite these from
