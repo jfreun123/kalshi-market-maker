@@ -98,6 +98,14 @@ struct QuoterConfig {
   double drift_lean_max_cents = kDefaultDriftLeanMaxCents;
   double drift_t_stat_threshold = kDefaultDriftTStatThreshold;
   int drift_confirm_prints = kDefaultDriftConfirmPrints;
+  // Panic pull tier (item 51): a catastrophic adverse jump of at least this
+  // many cents cancels the toxic side instantly — no fade confirmation, no
+  // rest floor — and that side stays unquoted for panic_settle_ms while the
+  // book settles. 0 disables (default until Jacob confirms the tier).
+  static constexpr int kDefaultPanicJumpCents = 0;
+  static constexpr int kDefaultPanicSettleMs = 2'000;
+  int panic_jump_cents = kDefaultPanicJumpCents;
+  int panic_settle_ms = kDefaultPanicSettleMs;
 };
 
 } // namespace kalshi

@@ -153,6 +153,10 @@ AppConfig load_config(const std::filesystem::path &path) {
         "drift_t_stat_threshold", QuoterConfig::kDefaultDriftTStatThreshold);
     config.quoter.drift_confirm_prints = quoter_json.value(
         "drift_confirm_prints", QuoterConfig::kDefaultDriftConfirmPrints);
+    config.quoter.panic_jump_cents = quoter_json.value(
+        "panic_jump_cents", QuoterConfig::kDefaultPanicJumpCents);
+    config.quoter.panic_settle_ms = quoter_json.value(
+        "panic_settle_ms", QuoterConfig::kDefaultPanicSettleMs);
   }
 
   // The imbalance guard should engage once roughly one full quote of one-sided

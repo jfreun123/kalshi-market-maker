@@ -57,9 +57,14 @@
 5. [ ] **L4 — timer teardown.** After echo-free amends AND item-1 validation
    hold: shrink `min_rest_ms`/`fade_rest_ms` toward zero (config-only).
    Governors that remain: reprice threshold, write budget, RTT.
-6. [ ] **51 — panic pull tier (Jacob to confirm)**: on a catastrophic jump
+6. [~] **51 — panic pull tier (Jacob to confirm)**: on a catastrophic jump
    (≥ `panic_jump_cents`, e.g. 8), cancel the toxic side instantly — no
    confirmation, no rest floor, no re-quote until the book settles.
+   *Shipped 07-19 config-gated: `panic_jump_cents` (default 0 = OFF) +
+   `panic_settle_ms` (2000); panic logs at critical so the Phase-32
+   watcher pings the phone. Jacob confirms the flip and the threshold —
+   the Kyle-λ̂ study (#139) measured 6–12c single-bar jumps on demo, so 8
+   is in range.*
 7. [~] **60 — regression calibration.** *60a shipped 07-19:
     `DriftEstimator` (rolling OLS slope + t-stat per market) feeds a
     significance-gated, tape-confirmation-weighted fair-value lean in the

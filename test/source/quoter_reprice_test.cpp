@@ -521,3 +521,82 @@ TEST_F(QuoterTest, ReduceOnlyCancelsTheAccumulatingSide) {
       << "the resting bid (which would add to the long) must be cancelled";
   EXPECT_EQ(transport.recorded_requests().back().method, "DELETE");
 }
+
+TEST_F(QuoterTest, PanicJumpCancelsToxicSideAndQuietsUntilSettle) {
+  auto transport_ptr = std::make_unique<FakeTransport>();
+  FakeTransport &transport = *transport_ptr;
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId1, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId2, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  kalshi::RestClient rest{kalshi::Auth{kApiKey, kPemPrivateKey},
+                          std::move(transport_ptr), kBaseUrl};
+  kalshi::OrderManager order_mgr{rest};
+  kalshi::RiskManager risk_mgr{kalshi::RiskLimits{}};
+  auto clock_now = std::make_shared<std::chrono::steady_clock::time_point>(
+      std::chrono::steady_clock::now());
+  kalshi::QuoterConfig panic_config;
+  panic_config.fv_ema_alpha = 1.0;
+  constexpr int kPanicJumpCents = 8;
+  panic_config.panic_jump_cents = kPanicJumpCents;
+  kalshi::Quoter quoter{panic_config, order_mgr, risk_mgr, nullptr,
+                        [clock_now] { return *clock_now; }};
+  constexpr int kYesBid42 = 41;
+  constexpr int kNoBid42 = 57;
+
+  quoter.update(kTicker, make_ob(kYesBid52, kNoBid52));
+  transport.enqueue({kHttpOk, "{}"});
+  quoter.update(kTicker, make_ob(kYesBid42, kNoBid42));
+
+  EXPECT_EQ(count_method(transport, "DELETE"), 1)
+      << "panic jump must cancel the toxic bid instantly, no rest floor";
+  EXPECT_EQ(count_side_posts(transport, "bid"), 1)
+      << "no immediate re-quote after the panic pull";
+
+  constexpr auto kInsideSettle = std::chrono::milliseconds{1600};
+  *clock_now += kInsideSettle;
+  transport.enqueue({kHttpOk, amend_json(kOrderId3)});
+  quoter.update(kTicker, make_ob(kYesBid42, kNoBid42));
+  EXPECT_EQ(count_side_posts(transport, "bid"), 1)
+      << "panic side stays quiet inside the settle window";
+
+  constexpr auto kPastSettle = std::chrono::milliseconds{1000};
+  *clock_now += kPastSettle;
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId4, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  quoter.update(kTicker, make_ob(kYesBid42, kNoBid42));
+  EXPECT_EQ(count_side_posts(transport, "bid"), 2)
+      << "book settled — the panicked side re-quotes";
+}
+
+TEST_F(QuoterTest, PanicDisabledByDefaultUsesFadeConfirmation) {
+  auto transport_ptr = std::make_unique<FakeTransport>();
+  FakeTransport &transport = *transport_ptr;
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId1, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  transport.enqueue(
+      {kHttpOk,
+       order_json(kOrderId2, kalshi::QuoterConfig::kDefaultQuoteSize)});
+  kalshi::RestClient rest{kalshi::Auth{kApiKey, kPemPrivateKey},
+                          std::move(transport_ptr), kBaseUrl};
+  kalshi::OrderManager order_mgr{rest};
+  kalshi::RiskManager risk_mgr{kalshi::RiskLimits{}};
+  auto clock_now = std::make_shared<std::chrono::steady_clock::time_point>(
+      std::chrono::steady_clock::now());
+  kalshi::QuoterConfig unsmoothed;
+  unsmoothed.fv_ema_alpha = 1.0;
+  kalshi::Quoter quoter{unsmoothed, order_mgr, risk_mgr, nullptr,
+                        [clock_now] { return *clock_now; }};
+  constexpr int kYesBid42 = 41;
+  constexpr int kNoBid42 = 57;
+
+  quoter.update(kTicker, make_ob(kYesBid52, kNoBid52));
+  quoter.update(kTicker, make_ob(kYesBid42, kNoBid42));
+
+  EXPECT_EQ(count_method(transport, "DELETE"), 0)
+      << "without the panic tier the fade confirmation path applies";
+}
