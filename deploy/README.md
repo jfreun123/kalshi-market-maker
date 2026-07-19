@@ -2,11 +2,16 @@
 
 This directory provisions a rented Linux box that (a) runs the market maker
 24/7 and (b) lets you drive it from your phone via Claude Code Remote Control.
+The Phase 32 supervision pieces (alerting + log rotation) also install on the
+CURRENT machine for unattended demo soaks — no cloud needed (Hosting gate).
 
 | File | Purpose |
 |------|---------|
 | `setup.sh` | Install toolchain, build, test, install git hook (mirrors CI) |
 | `kalshi-mm.service` | systemd unit for the trading bot (paper by default) |
+| `kalshi-alert.service` | Telegram alert watcher (halts, DRIFT, CARRIED, errors) |
+| `kalshi-notify-failure.service` | oneshot Telegram ping when the bot unit fails |
+| `logrotate-kalshi` | rotation for the units' append-mode service logs |
 | `claude-rc.service` | systemd unit for Claude Code Remote Control |
 
 ## Where to host
@@ -83,6 +88,65 @@ journalctl -u claude-rc -f
 `claude-rc.service` requires a **one-time interactive `claude` /login** as your
 user first (Pro/Max plan, claude.ai OAuth — API keys are rejected). See the
 header of `claude-rc.service` for the full prerequisite steps.
+
+## Phase 32 — unattended supervision on the current machine (WSL)
+
+Everything below runs on the existing WSL box; it is what the 30h demo soak
+requires. WSL2 needs systemd enabled once: put `[boot]\nsystemd=true` in
+`/etc/wsl.conf`, then `wsl --shutdown` from Windows and reopen.
+
+**1. Create the Telegram bot (one time).** Message `@BotFather` → `/newbot`
+→ copy the token. Message your new bot once (any text), then find your chat
+id: `curl -s https://api.telegram.org/bot<TOKEN>/getUpdates | python3 -m
+json.tool` → `message.chat.id`. Add both to the gitignored `secrets.json`:
+
+```json
+  "telegram_bot_token": "123456:ABC...",
+  "telegram_chat_id": "1234567890"
+```
+
+**2. Smoke-test the pipeline** (a real message should arrive on your phone):
+
+```bash
+python3 scripts/alert_watch.py --send "alert pipeline test"
+```
+
+**3. Install the units + rotation:**
+
+```bash
+for unit in kalshi-mm kalshi-alert kalshi-notify-failure; do
+  sudo sed "s/REPLACE_USER/$USER/g" "deploy/$unit.service" \
+    | sudo tee "/etc/systemd/system/$unit.service" >/dev/null
+done
+sudo sed "s/REPLACE_USER/$USER/g" deploy/logrotate-kalshi \
+  | sudo tee /etc/logrotate.d/kalshi >/dev/null
+sudo systemctl daemon-reload
+sudo systemctl enable --now kalshi-alert          # watcher first
+sudo systemctl enable --now kalshi-mm             # then the bot
+```
+
+You get: a "watcher armed" message at alert-service start, an immediate
+message for every distinct `[critical]` (halt, reconcile DRIFT, ws-stale,
+flatten CARRIED — repeats collapse per 5-minute class cooldown), an
+`[error]` digest at most every 15 minutes, and a "bot is down" ping if the
+unit crash-loops past its restart limit. Silence = no news, because the
+armed message proves the pipeline.
+
+**4. Soak configuration.** The committed unit ships `--paper config.json`
+for safety. For the demo soak, override the ExecStart without editing the
+committed file:
+
+```bash
+sudo systemctl edit kalshi-mm
+# in the editor:
+#   [Service]
+#   ExecStart=
+#   ExecStart=/home/<you>/kalshi-market-maker/build/source/kalshi_mm config-demo.json
+```
+
+Watch: `journalctl -u kalshi-mm -f` and `journalctl -u kalshi-alert -f`;
+laptop sleep pauses both cleanly (known demo quirk: the session is wasted,
+not corrupted).
 
 ## Networking / firewall
 

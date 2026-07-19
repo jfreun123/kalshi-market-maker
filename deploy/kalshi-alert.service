@@ -1,0 +1,41 @@
+# systemd unit for the Telegram alert watcher (Phase 32 minimum).
+#
+# Follows the bot's logs and pushes [critical] lines (halts, reconcile DRIFT,
+# ws-stale, flatten CARRIED) plus an [error] digest to Telegram. Runs
+# independently of kalshi-mm.service on purpose: the bot HALTS without
+# exiting, so only a log watcher can see the states that matter most.
+#
+# Prerequisites: telegram_bot_token + telegram_chat_id in secrets.json
+# (see deploy/README.md "Phase 32" for the BotFather walkthrough).
+#
+# Install:
+#   sudo sed "s/REPLACE_USER/$USER/g" deploy/kalshi-alert.service \
+#     | sudo tee /etc/systemd/system/kalshi-alert.service >/dev/null
+#   sudo systemctl daemon-reload && sudo systemctl enable --now kalshi-alert
+
+[Unit]
+Description=Kalshi Market Maker Telegram alert watcher
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=REPLACE_USER
+WorkingDirectory=/home/REPLACE_USER/kalshi-market-maker
+ExecStart=/usr/bin/python3 scripts/alert_watch.py
+
+Restart=always
+RestartSec=10
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/home/REPLACE_USER/kalshi-market-maker
+ProtectKernelTunables=true
+ProtectControlGroups=true
+PrivateTmp=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target

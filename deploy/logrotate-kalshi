@@ -1,0 +1,20 @@
+# logrotate policy for the systemd-appended service logs (Phase 32 minimum).
+# The bot's own dated app_/analytics_ files are archived per session by the
+# run scripts; the units' append-mode streams below are the unbounded ones.
+#
+# Install:
+#   sudo sed "s/REPLACE_USER/$USER/g" deploy/logrotate-kalshi \
+#     | sudo tee /etc/logrotate.d/kalshi >/dev/null
+#   sudo logrotate --debug /etc/logrotate.d/kalshi   # dry-run check
+
+/home/REPLACE_USER/kalshi-market-maker/logs/kalshi-mm.log
+/home/REPLACE_USER/kalshi-market-maker/logs/kalshi-mm.err.log {
+    su REPLACE_USER REPLACE_USER
+    size 50M
+    rotate 8
+    compress
+    delaycompress
+    copytruncate
+    missingok
+    notifempty
+}
