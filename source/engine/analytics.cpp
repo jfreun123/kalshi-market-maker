@@ -36,6 +36,12 @@ void AnalyticsLogger::quote_decision(const QuoteDecision &decision) {
       {"ask", decision.ask_cents},
       {"inventory", decision.inventory_contracts},
       {"imbalanced", decision.flow_imbalanced},
+      {"resv", decision.reservation_cents},
+      {"half_base", decision.base_half_spread_cents},
+      {"half_fee", decision.fee_half_cents},
+      {"widen", decision.imbalance_widen_cents},
+      {"lean_flow", decision.flow_lean_cents},
+      {"lean_drift", decision.drift_lean_cents},
   };
   sink_(event.dump());
 }

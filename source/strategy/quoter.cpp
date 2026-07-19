@@ -379,13 +379,16 @@ void Quoter::update(std::string_view ticker, const LocalOrderbook &book) {
   const int half_spread = base_half_spread + fee_cents;
   const double inventory = order_mgr_.net_position(ticker_str).contracts();
   double leaned_val = fair_val;
+  double flow_lean_applied = 0.0;
   if (imbalanced && flow_guard_ != nullptr) {
     const auto taker_side = flow_guard_->dominant_taker_side(ticker_str);
     if (taker_side.has_value()) {
-      leaned_val += (*taker_side == Side::Yes) ? config_.flow_lean_cents
-                                               : -config_.flow_lean_cents;
+      flow_lean_applied = (*taker_side == Side::Yes) ? config_.flow_lean_cents
+                                                     : -config_.flow_lean_cents;
+      leaned_val += flow_lean_applied;
     }
   }
+  double drift_lean_applied = 0.0;
   if (config_.drift_lean_gain > 0.0 && drift_estimator_ != nullptr) {
     const auto drift = drift_estimator_->signal(ticker_str, wall_now);
     if (drift.has_value() &&
@@ -397,16 +400,16 @@ void Quoter::update(std::string_view ticker, const LocalOrderbook &book) {
                               trade_tape_->print_count(ticker_str, wall_now)) /
                               config_.drift_confirm_prints);
       }
-      const double drift_lean = std::clamp(
+      drift_lean_applied = std::clamp(
           config_.drift_lean_gain * drift->slope_cents_per_minute *
               confirmation,
           -config_.drift_lean_max_cents, config_.drift_lean_max_cents);
-      leaned_val += drift_lean;
+      leaned_val += drift_lean_applied;
       get_logger()->debug(
           "drift lean ticker={} slope={:.2f}c/min t={:.1f} confirm={:.2f} "
           "lean={:+.2f}c",
           ticker, drift->slope_cents_per_minute, drift->t_stat, confirmation,
-          drift_lean);
+          drift_lean_applied);
     }
   }
   const double reservation_val =
@@ -441,9 +444,12 @@ void Quoter::update(std::string_view ticker, const LocalOrderbook &book) {
       desired_bid.value_or(-1), desired_ask.value_or(-1));
 
   if (analytics_ != nullptr) {
-    analytics_->quote_decision(
-        {ticker, mid, micro, fair_val, desired_bid.value_or(-1),
-         desired_ask.value_or(-1), inventory, imbalanced});
+    analytics_->quote_decision({ticker, mid, micro, fair_val,
+                                desired_bid.value_or(-1),
+                                desired_ask.value_or(-1), inventory, imbalanced,
+                                reservation_val, base_half_spread, fee_cents,
+                                imbalanced ? config_.imbalance_spread_cents : 0,
+                                flow_lean_applied, drift_lean_applied});
   }
 
   const std::chrono::steady_clock::time_point now = clock_();

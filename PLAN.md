@@ -162,32 +162,25 @@
     fill-prob data). Exact FKK form: move rung i→j iff (ticks gained)·d >
     c·Δ(expected wait), waits growing geometrically in queue depth — 79
     fits the curve.
-17. [ ] **45 — decision-oriented quote logging** (the "why" per placement:
-    spread components, reprice reason; latency counters fold into L0; plus
-    the avg-entry/mark/edge per-fill status fields from item 59's residual).
-18. [~] **59 — short-horizon markout.** *Script half done 2026-07-18 —
-    `analyze_fills.py` reports markout@500ms/1s/5s alongside 30s/5min, a
-    signed per-fill edge, and edge+markout by pre-fill inventory bucket.*
-    Remaining: the per-fill status-log fields (folds into item 45).
-19. [ ] **58 — scanner startup efficiency.** Startup scans ~70k markets for
+17. [ ] **58 — scanner startup efficiency.** Startup scans ~70k markets for
     ~30s before quoting. Query `status=open` server-side is already used;
     cap pagination and/or cache market metadata between runs with
     incremental refresh. Becomes real waste on every rotation re-scan.
-20. [ ] **23 — ceil-per-order maker-fee model** (inert while demo maker
+18. [ ] **23 — ceil-per-order maker-fee model** (inert while demo maker
     fills are free) · **3 — passive clamp vs fresher BBO** (D1 residual).
-21. [ ] **54 — batch CreateOrders.** V2 batch create/cancel; batch seeds and
+19. [ ] **54 — batch CreateOrders.** V2 batch create/cancel; batch seeds and
     layered quotes into one request. Sequence after L3 so batching composes
     with the non-blocking order path.
-22. [ ] **55 — demo conformance suite in CI** (nightly + manual dispatch,
+20. [ ] **55 — demo conformance suite in CI** (nightly + manual dispatch,
     not per-PR; needs demo creds as Actions secrets; non-required job — red
     means schema drift or demo outage, both alert-worthy). Skips are
     failures (Jacob): tests self-find a market; only missing creds may skip.
-23. [ ] **69 — per-market precision audit.** Subpenny pricing is per-market
+21. [ ] **69 — per-market precision audit.** Subpenny pricing is per-market
     (`price_level_structure`, ignored today); quantities are fixed-point 2dp.
     Audit price-tick and quantity-step per market, carry a `MarketPrecision`
     through types, pin live demo behavior in conformance tests before any
     live switch on a subpenny market.
-24. [~] **70 — max-hold forced exit** (`max_hold_seconds`, 0 = off): passive
+22. [~] **70 — max-hold forced exit** (`max_hold_seconds`, 0 = off): passive
     exit first, forced taker exit at the deadline — bounded fee in place of
     unbounded z² drift (ND-HFTT pattern; docs/papers §6). Tune against
     attribution: right when drift saved exceeds taker fee + spread paid.
@@ -197,7 +190,7 @@
     10s main-loop sweep force-flattens aged tickers via the item-74
     retrying flatten with CARRIED residual logging. Flip once
     attribution says drift saved > taker fee + spread paid.*
-25. [ ] **71 — crypto 15m series (KXBTC15M family).** Measured on demo
+23. [ ] **71 — crypto 15m series (KXBTC15M family).** Measured on demo
     2026-07-11: ~130 trades/hr, two-sided, 24/7 — the most quotable flow
     demo has, excluded only by `min_days_to_close`. Build: per-window ticker
     resolution + 15-min session lifecycle (stop quoting ~60s before close;
@@ -205,7 +198,7 @@
     (tapered_deci_cent tails); external reference feed (Coinbase leads
     ~1–2s) for the momentum cancel. Risk: terminal z is structural — quote
     early/mid window, flee the end.
-26. [~] **72 — validate the backtest fill model against captured tape.**
+24. [~] **72 — validate the backtest fill model against captured tape.**
     Match trade prints to negative top-of-book deltas (±50ms, ND-HFTT
     method) on our capture corpus to measure print-through under-fill;
     adopt proportional delta-consumption if the gap is material — guards
@@ -252,6 +245,12 @@ refactors (R1–R4, R7) never block the gates.
 
 ## Done since the 2026-07-05 refresh (validation notes in the archive)
 
+45+59 decision-oriented logging — quote analytics events now carry the
+"why" per placement (reservation value, base/fee half-spread, imbalance
+widen, flow lean, drift lean); per-side reprice reasons stay in the
+reprice/fade/panic log lines; the status line gains
+avg_entry/mark/edge_cents for open positions (the 59 residual). Latency
+counters were already folded into L0 (07-19) ·
 75 config hygiene — committed `config.json` ships `target_tickers: []`
 (self-selection default; the four pinned CPI tickers were stale) and
 `run_demo.sh` bootstraps a missing `config-demo.json` with a copy hint

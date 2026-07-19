@@ -7,7 +7,9 @@
 #include "engine/trade_tape.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <exception>
+#include <format>
 #include <utility>
 
 namespace kalshi {
@@ -15,6 +17,7 @@ namespace kalshi {
 namespace {
 
 constexpr double kCentsPerDollar = 100.0;
+constexpr double kPriceBasisCents = 100.0;
 constexpr std::size_t kMaxEventsLogged = 5U;
 
 const char *side_name(Side side) { return side == Side::Yes ? "yes" : "no"; }
@@ -435,13 +438,26 @@ void TradingSession::log_status() const {
     const double fees = order_mgr_.fees_paid(ticker);
     const double prior = prior_pnl_for(prior_pnl_, ticker);
     const auto age = book_age(ticker);
+    std::string entry_fields;
+    if (!pos.is_zero()) {
+      const double avg_entry =
+          order_mgr_.position_cost(ticker) / std::abs(pos.contracts());
+      const auto book = ob_map_.find(ticker);
+      const double mid =
+          (book != ob_map_.end()) ? book->second.mid_price_cents() : 0.0;
+      const double mark = pos.is_positive() ? mid : (kPriceBasisCents - mid);
+      entry_fields = std::format(" avg_entry={:.1f} mark={:.1f} "
+                                 "edge_cents={:+.1f}",
+                                 avg_entry, mark, mark - avg_entry);
+    }
     log->info("status ticker={} net_pos={} session_pnl_dollars={:.2f} "
               "fees_dollars={:.2f} total_pnl_dollars={:.2f} halted={} "
-              "constraints={} book_age_s={}",
+              "constraints={} book_age_s={}{}",
               ticker, pos.to_fp_string(), session_pnl / kCentsPerDollar,
               fees / kCentsPerDollar, (prior + session_pnl) / kCentsPerDollar,
               risk_mgr_.is_halted(), risk_mgr_.active_constraints(),
-              age.has_value() ? std::to_string(age->count()) : "none");
+              age.has_value() ? std::to_string(age->count()) : "none",
+              entry_fields);
 
     // E_win decomposition: locked spread capture vs. the directional bet.
     const auto exposure = order_mgr_.exposure_decomposition(ticker);
