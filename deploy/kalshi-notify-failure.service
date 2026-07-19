@@ -1,0 +1,19 @@
+# Oneshot Telegram notification fired by kalshi-mm.service's OnFailure=.
+#
+# With Restart=always on the bot unit, this fires only when the restart
+# limit is exhausted (5 crashes in 5 minutes) and the unit lands in the
+# failed state — i.e. the bot is DOWN and staying down.
+#
+# Install:
+#   sudo sed "s/REPLACE_USER/$USER/g" deploy/kalshi-notify-failure.service \
+#     | sudo tee /etc/systemd/system/kalshi-notify-failure.service >/dev/null
+#   sudo systemctl daemon-reload
+
+[Unit]
+Description=Kalshi Market Maker failure notification
+
+[Service]
+Type=oneshot
+User=REPLACE_USER
+WorkingDirectory=/home/REPLACE_USER/kalshi-market-maker
+ExecStart=/usr/bin/python3 scripts/alert_watch.py --send "kalshi-mm.service FAILED (crash-looped past the restart limit) — bot is down"

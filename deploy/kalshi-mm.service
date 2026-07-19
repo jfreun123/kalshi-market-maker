@@ -17,6 +17,8 @@ Wants=network-online.target
 # Don't thrash-restart on an instant config error: max 5 starts per 5 min.
 StartLimitIntervalSec=300
 StartLimitBurst=5
+# Telegram ping when the restart limit is exhausted and the bot stays down.
+OnFailure=kalshi-notify-failure.service
 
 [Service]
 Type=simple
