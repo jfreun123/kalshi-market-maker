@@ -227,6 +227,92 @@ TEST_F(AppModesTest, BackfillFillsReplaysNewTrackedFillsOnly) {
       std::string::npos);
 }
 
+namespace {
+
+std::string positions_body(const std::string &ticker,
+                           const std::string &position_fp) {
+  return R"({"market_positions":[{"ticker":")" + ticker +
+         R"(","position_fp":")" + position_fp +
+         R"(","realized_pnl_dollars":"0","market_exposure_dollars":"0",)"
+         R"("resting_orders_count":0}],"cursor":""})";
+}
+
+std::string flatten_order_body(const std::string &order_id,
+                               const std::string &fill_count,
+                               const std::string &remaining_count) {
+  return R"({"order_id":")" + order_id + R"(","fill_count":")" + fill_count +
+         R"(","remaining_count":")" + remaining_count +
+         R"(","ts_ms":1718000000000})";
+}
+
+int count_posts(const FakeTransport &transport) {
+  int posts = 0;
+  for (const auto &request : transport.recorded_requests()) {
+    if (request.method == "POST") {
+      ++posts;
+    }
+  }
+  return posts;
+}
+
+} // namespace
+
+TEST_F(AppModesTest, FlattenRetriesUnfilledRemainder) {
+  auto transport = std::make_unique<FakeTransport>();
+  FakeTransport *const transport_raw = transport.get();
+  transport_raw->enqueue({kHttpOk, positions_body(kTicker, "5.00")});
+  transport_raw->enqueue(
+      {kHttpOk, flatten_order_body("flat-1", "3.00", "2.00")});
+  transport_raw->enqueue(
+      {kHttpOk, flatten_order_body("flat-2", "2.00", "0.00")});
+  kalshi::RestClient rest{kalshi::Auth{"key", kPemPrivateKey},
+                          std::move(transport), kBaseUrl};
+  auto log = kalshi::get_logger();
+
+  EXPECT_EQ(kalshi::flatten_all_positions(rest, log, nullptr), 1);
+  EXPECT_EQ(count_posts(*transport_raw), 2);
+  const auto &retry_request = transport_raw->last_request();
+  EXPECT_NE(retry_request.body.find(R"("count":"2.00")"), std::string::npos);
+  EXPECT_NE(retry_request.body.find(R"("side":"ask")"), std::string::npos);
+}
+
+TEST_F(AppModesTest, FlattenCarriesResidualWhenRetriesExhaust) {
+  auto transport = std::make_unique<FakeTransport>();
+  FakeTransport *const transport_raw = transport.get();
+  transport_raw->enqueue({kHttpOk, positions_body(kTicker, "5.00")});
+  transport_raw->enqueue(
+      {kHttpOk, flatten_order_body("flat-1", "3.00", "2.00")});
+  transport_raw->enqueue(
+      {kHttpOk, flatten_order_body("flat-2", "0.00", "2.00")});
+  transport_raw->enqueue(
+      {kHttpOk, flatten_order_body("flat-3", "0.00", "2.00")});
+  kalshi::RestClient rest{kalshi::Auth{"key", kPemPrivateKey},
+                          std::move(transport), kBaseUrl};
+  auto log = kalshi::get_logger();
+
+  EXPECT_EQ(kalshi::flatten_all_positions(rest, log, nullptr), 0);
+  EXPECT_EQ(count_posts(*transport_raw), 3);
+}
+
+TEST_F(AppModesTest, FlattenRetryKeepsCloseSideForShortPositions) {
+  auto transport = std::make_unique<FakeTransport>();
+  FakeTransport *const transport_raw = transport.get();
+  transport_raw->enqueue({kHttpOk, positions_body(kTicker, "-4.00")});
+  transport_raw->enqueue(
+      {kHttpOk, flatten_order_body("flat-1", "1.00", "3.00")});
+  transport_raw->enqueue(
+      {kHttpOk, flatten_order_body("flat-2", "3.00", "0.00")});
+  kalshi::RestClient rest{kalshi::Auth{"key", kPemPrivateKey},
+                          std::move(transport), kBaseUrl};
+  auto log = kalshi::get_logger();
+
+  EXPECT_EQ(kalshi::flatten_all_positions(rest, log, nullptr), 1);
+  EXPECT_EQ(count_posts(*transport_raw), 2);
+  const auto &retry_request = transport_raw->last_request();
+  EXPECT_NE(retry_request.body.find(R"("count":"3.00")"), std::string::npos);
+  EXPECT_NE(retry_request.body.find(R"("side":"bid")"), std::string::npos);
+}
+
 TEST_F(AppModesTest, FlattenAllPositionsNoOpWhenFlat) {
   auto transport = std::make_unique<FakeTransport>();
   FakeTransport *const transport_raw = transport.get();
