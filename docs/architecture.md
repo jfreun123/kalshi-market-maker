@@ -31,10 +31,24 @@ and feeding the session's snapshot/delta/fill reactions.
 
 ## Data Flow
 
-`main.cpp` wires the WebSocket callbacks to a `TradingSession`, which owns the
-domain reactions. The session is the single seam shared by production, unit
-tests, and session replay — `main.cpp` itself does only process/IO setup
-(mode runners live in `app_modes.cpp`).
+`main.cpp` wires the WebSocket callbacks to an `EventPump` (PLAN L3): the
+socket thread only enqueues, and a single consumer thread drains events in
+arrival order and applies them to the `TradingSession` under the engine
+lock — so the socket thread is never blocked behind an order REST call. The
+session remains the single seam shared by production, unit tests, and
+session replay — `main.cpp` itself does only process/IO setup (mode runners
+live in `app_modes.cpp`).
+
+```mermaid
+graph TD
+    WST[WebSocket thread] -->|"push(event) — queue mutex only"| PUMP[EventPump]
+    PUMP -->|"wait_drain → arrival order"| CONS[Pump consumer thread]
+    CONS -->|"engine_mtx"| SESS2[TradingSession]
+    MAIN[Main poll loop<br/>reconcile · portfolio risk · rotation] -->|"engine_mtx"| SESS2
+    SESS2 --> OM2[OrderManager → RestClient<br/>blocking REST, ~22ms]
+    style SESS2 fill:#555
+    style OM2 fill:#555
+```
 
 ```mermaid
 sequenceDiagram
